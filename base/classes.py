@@ -1,19 +1,46 @@
 
 # IMPORTS
 
-from typing import overload
+import os
 import numpy as np
 import pandas as pd
-import os
-from . import functions as fn
 from scipy.spatial.transform import Rotation
+from . import functions as fn
+
 
 
 # CLASSES
 
-class Vector(pd.DataFrame):
+class Point(pd.DataFrame):
     """
-    class representing an n-dimensional vector sampled over time.
+    Create n-dimensional point sampled over time.
+
+    Input:
+
+        data (ndarray, list, pandas.Series, pandas.DataFrame, dict)
+
+            the data which creates the Point.
+
+        index (list)
+
+            the index representing each time sample. It must provide 1 value
+            for each sample in data.
+
+        columns (list)
+
+            the names of the dimensions of the points.
+
+        dim_unit (str)
+
+            the unit of measurement of each dimension
+
+        time_unit (str)
+
+            the unit of measurement of the samples
+
+        type (str)
+
+            a string describing the nature of the Point object.
     """
 
 
@@ -27,67 +54,41 @@ class Vector(pd.DataFrame):
 
 
 
-    @property
-    def module(self):
-        """
-        Get the module of the vector.
-        """
-        return Vector(
-            data      = (self ** 2).sum(1).values.flatten() ** 0.5,
-            index     = self.index,
-            columns   = ["|" + " + ".join(self.columns) + "|"],
-            time_unit = self.time_unit,
-            dim_unit  = self.dim_unit,
-            type      = self.type
-            )
-
-
-
-    @property
-    def fs(self):
-        """
-        get the mean sampling frequency of the Vector in Hz.
-        """
-
-        return 1. / np.mean(np.diff(self.index.to_numpy()))
-
-
-
     # STATIC METHODS
 
     @staticmethod
-    def angle_by_3_vectors(A, B, C):
+    def angle_by_3_points(A, B, C):
         """
         return the angle ABC using the Cosine theorem.
 
         Input:
-            A:  (Vector)
-                The coordinates of one vector.
+            A:  (Point)
+                The coordinates of one point.
 
-            B:  (Vector)
-                The coordinates of the vector over which the angle has
+            B:  (Point)
+                The coordinates of the point over which the angle has
                 to be calculated.
 
-            C:  (Vector)
-                The coordinates of the third vector.
+            C:  (Point)
+                The coordinates of the third point.
 
         Output:
-            K:  (Vector)
-                A 1D vector containing the result of:
+            K:  (Point)
+                A 1D point containing the result of:
                                      2          2            2
                            /  (A - B)  +  (C - B)  -  (A - C)  \
                     arcos | ----------------------------------- |
                            \      2 * (A - B) * (C - B)        /
         """
 
-        # ensure all entered parameters are vectors
-        txt = "'A', 'B' and 'C' must be Vectors with equal index and columns."
-        assert Vector.match(A, B, C), txt
+        # ensure all entered parameters are points
+        txt = "'A', 'B' and 'C' must be Points with equal index and columns."
+        assert Point.match(A, B, C), txt
 
         # get a, b and c
-        a = (A - B).module
-        b = (C - B).module
-        c = (A - C).module
+        a = (A - B).norm()
+        b = (C - B).norm()
+        c = (A - C).norm()
 
         # return the angle
         k = (a ** 2 + b ** 2 - c ** 2) / (2 * a * b).values
@@ -102,25 +103,25 @@ class Vector(pd.DataFrame):
     @staticmethod
     def gram_schmidt(normalized=False, *args, **kwargs):
         """
-        return the orthogonal basis defined by a set of vectors using the
+        return the orthogonal basis defined by a set of points using the
         Gram-Schmidt algorithm.
 
         Input:
 
             normalized (bool)
 
-                should the projected vectors returned in normalized units?
+                should the projected points returned in normalized units?
 
-            args / kwargs (Vector)
+            args / kwargs (Point)
 
-                one or more vectors from which the orthogonal projections have
+                one or more points from which the orthogonal projections have
                 to be calculated.
 
         Output:
 
-            W (VectorDict)
+            W (Container)
 
-                a VectorDict object containing the orthogonal vectors.
+                a Container object containing the orthogonal points.
         """
 
         # check the input
@@ -129,8 +130,8 @@ class Vector(pd.DataFrame):
         keys = np.array([i for i in kwargs.keys()])
         D.update(**{"V{}".format(i) + ("" if i not in keys else "_1"): args[i]
                     for i in np.arange(len(args))})
-        txt = "All input data must be Vectors with equal index and columns."
-        assert Vector.match(**D), txt
+        txt = "All input data must be Points with equal index and columns."
+        assert Point.match(**D), txt
 
         # internal function to simplify projection calculation
         def proj(a, b):
@@ -138,7 +139,7 @@ class Vector(pd.DataFrame):
             bb = b.values
             return np.inner(aa, bb) / np.inner(bb, bb) * bb
 
-        # calculate the projection vectors
+        # calculate the projection points
         keys = np.array([i for i in D])
         W = {keys[0]: D[keys[0]]}
         for i in np.arange(1, len(D)):
@@ -149,7 +150,7 @@ class Vector(pd.DataFrame):
         # normalize if required
         if normalized:
             for key in W:
-                W[key] /= W[key].module.values
+                W[key] /= W[key].norm.values
 
         # return the output
         return W
@@ -159,23 +160,23 @@ class Vector(pd.DataFrame):
     @staticmethod
     def match(*args, **kwargs):
         """
-        check if the entered objects are instance of Vector or
+        check if the entered objects are instance of Point or
         pandas.DataFrame. If more than one parameter is provided, check
         also that all the entered objects have the same columns and indices.
 
         Output:
             C (bool)
 
-                True if all inputs are Vectors or a pandas.DataFrame with the
+                True if all inputs are Points or a pandas.DataFrame with the
                 same columns and index of self. False, otherwise.
         """
 
         # get the elements entered
         objs = [i for i in args] + [kwargs[i] for i in kwargs]
 
-        # check if all elements are instance of Vector or DataFrame
+        # check if all elements are instance of Point or DataFrame
         for obj in objs:
-            if not isinstance(obj, (Vector, pd.DataFrame)):
+            if not isinstance(obj, (Point, pd.DataFrame)):
                 return False
 
         # check the columns and index of all objs
@@ -197,12 +198,12 @@ class Vector(pd.DataFrame):
     @staticmethod
     def read_csv(*args, **kwargs):
         """
-        return the Vector from a "csv". The file is formatted having a column
+        return the Point from a "csv". The file is formatted having a column
         named "Index_ZZZ" and the others as:
 
         "XXX|YYY_ZZZ" where:
-            'XXX' the type of the vector
-            'YYY' the dimension of the vector
+            'XXX' the type of the point
+            'YYY' the dimension of the point
             'ZZZ' the dim_unit
 
         Input:
@@ -212,22 +213,22 @@ class Vector(pd.DataFrame):
 
         Output:
 
-            V (Vector)
+            V (Point)
 
-                the imported vector.
+                the imported point.
         """
-        return Vector.from_csv(*args, **kwargs)
+        return Point.from_csv(*args, **kwargs)
 
 
 
     @staticmethod
     def from_df(df):
         """
-        return the Vector from a pandas DataFrame. The df is formatted having
+        return the Point from a pandas DataFrame. The df is formatted having
         a column named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
 
-            'XXX' the type of the vector
-            'YYY' the dimension of the vector
+            'XXX' the type of the point
+            'YYY' the dimension of the point
             'ZZZ' the dim_unit
 
         Input:
@@ -238,9 +239,9 @@ class Vector(pd.DataFrame):
 
         Output:
 
-            v (Vector)
+            v (Point)
 
-                the imported vector.
+                the imported point.
         """
 
         # get the index
@@ -253,10 +254,10 @@ class Vector(pd.DataFrame):
         # remove the index column
         df = df[[i for i in df.columns if i != idx_col]]
 
-        # get the vector type
+        # get the point type
         typ = np.unique(["|".join(i.split("|")[:-1]) for i in df.columns])
-        txt = "No vector type has been found" if len(typ) == 0 else str(
-            len(typ)) + " vector types have been found."
+        txt = "No point type has been found" if len(typ) == 0 else str(
+            len(typ)) + " point types have been found."
         assert len(typ) == 1, txt
         typ = typ[0]
 
@@ -271,8 +272,8 @@ class Vector(pd.DataFrame):
         df.columns = ["_".join(i.split("|")[-1].split("_")[:-1])
                       for i in df.columns]
 
-        # get the vector
-        return Vector(
+        # get the point
+        return Point(
             data      = df.to_dict("list"),
             index     = idx_val,
             time_unit = time_unit,
@@ -285,12 +286,12 @@ class Vector(pd.DataFrame):
     @staticmethod
     def from_csv(*args, **kwargs):
         """
-        return the Vector from a "csv". The file is formatted having a column
+        return the Point from a "csv". The file is formatted having a column
         named "Index_ZZZ" and the others as:
 
         "XXX|YYY_ZZZ" where:
-            'XXX' the type of the vector
-            'YYY' the dimension of the vector
+            'XXX' the type of the point
+            'YYY' the dimension of the point
             'ZZZ' the dim_unit
 
         Input:
@@ -300,22 +301,22 @@ class Vector(pd.DataFrame):
 
         Output:
 
-            V (Vector)
+            V (Point)
 
-                the imported vector.
+                the imported point.
         """
-        return Vector.from_df(pd.read_csv(*args, **kwargs))
+        return Point.from_df(pd.read_csv(*args, **kwargs))
 
 
 
     @staticmethod
     def from_excel(file, sheet, *args, **kwargs):
         """
-        return the Vector from an excel file. The file is formatted having
+        return the Point from an excel file. The file is formatted having
         a column named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
 
-            'XXX' the type of the vector
-            'YYY' the dimension of the vector
+            'XXX' the type of the point
+            'YYY' the dimension of the point
             'ZZZ' the dim_unit
 
         Input:
@@ -334,15 +335,17 @@ class Vector(pd.DataFrame):
 
         Output:
 
-            v (Vector)
+            v (Point)
 
-                the imported vector.
+                the imported point.
         """
-        return Vector.from_df(
+        return Point.from_df(
             fn.from_excel(file, sheet, *args, **kwargs)[sheet]
             )
 
 
+
+    # CONVERTERS
 
     def to_dict(self):
         """
@@ -354,15 +357,15 @@ class Vector(pd.DataFrame):
 
     def to_df(self):
         """
-        Store the Vector into a "pandas DataFrame" formatted having a column
+        Store the Point into a "pandas DataFrame" formatted having a column
         named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
 
-            'XXX' the type of the vector
-            'YYY' the dimension of the vector
+            'XXX' the type of the point
+            'YYY' the dimension of the point
             'ZZZ' the dim_unit
         """
 
-        # create the Vector df
+        # create the Point df
         v_df = pd.DataFrame(
             data    = self.values,
             columns = [self.type + "|" + i + "_" + self.dim_unit
@@ -379,11 +382,11 @@ class Vector(pd.DataFrame):
 
     def to_csv(self, file, **kwargs):
         """
-        Store the Vector into a "csv". The file is formatted having a column
+        Store the Point into a "csv". The file is formatted having a column
         named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
 
-            'XXX' the type of the vector
-            'YYY' the dimension of the vector
+            'XXX' the type of the point
+            'YYY' the dimension of the point
             'ZZZ' the dim_unit
 
         Input:
@@ -411,11 +414,11 @@ class Vector(pd.DataFrame):
 
     def to_excel(self, file, sheet="Sheet1", new_file=False):
         """
-        Store the Vector into an excel file sheet. The file is formatted
+        Store the Point into an excel file sheet. The file is formatted
         having a column named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
 
-            'XXX' the type of the vector
-            'YYY' the dimension of the vector
+            'XXX' the type of the point
+            'YYY' the dimension of the point
             'ZZZ' the dim_unit
 
         Input:
@@ -431,16 +434,43 @@ class Vector(pd.DataFrame):
             new_file (bool)
 
                 should a new file be created rather than adding the current
-                vector to an existing one?
+                point to an existing one?
         """
 
         fn.to_excel(file, self.to_df(), sheet, new_file)
 
 
 
+    # CLASS SPECIFIC METHODS
+
+
+    def norm(self):
+        """
+        Get the norm of the point.
+        """
+        return Point(
+            data      = (self ** 2).sum(1).values.flatten() ** 0.5,
+            index     = self.index,
+            columns   = ["|" + " + ".join(self.columns) + "|"],
+            time_unit = self.time_unit,
+            dim_unit  = self.dim_unit,
+            type      = self.type
+            )
+
+
+
+    def fs(self):
+        """
+        get the mean sampling frequency of the Point in Hz.
+        """
+
+        return 1. / np.mean(np.diff(self.index.to_numpy()))
+
+
+
     def apply_col(self, fun, *args, **kwargs):
         """
-        apply a given function to all columns of the Vector.
+        apply a given function to all columns of the Point.
 
         Input:
 
@@ -455,12 +485,12 @@ class Vector(pd.DataFrame):
 
         Output:
 
-            V (Vector)
+            V (Point)
 
-                The vector with the function applied to each row.
+                The point with the function applied to each row.
         """
 
-        return Vector(
+        return Point(
             data      = {d: fun(self[d].values.flatten(), *args, **kwargs)
                          for d in self.columns},
             index     = self.index,
@@ -473,7 +503,7 @@ class Vector(pd.DataFrame):
 
     def apply_row(self, fun, *args, **kwargs):
         """
-        apply a given function to all samples of the Vector.
+        apply a given function to all samples of the Point.
 
         Input:
 
@@ -488,9 +518,9 @@ class Vector(pd.DataFrame):
 
         Output:
 
-            V (Vector)
+            V (Point)
 
-                The vector with the function applied to each column.
+                The point with the function applied to each column.
         """
         V = self.copy()
         for i in V.index:
@@ -501,7 +531,7 @@ class Vector(pd.DataFrame):
 
     def apply_mat(self, fun, *args, **kwargs):
         """
-        apply a given function to all values of the vector as one.
+        apply a given function to all values of the point as one.
 
         Input:
 
@@ -516,9 +546,9 @@ class Vector(pd.DataFrame):
 
         Output:
 
-            V (Vector)
+            V (Point)
 
-                The vector with the function applied to all values.
+                The point with the function applied to all values.
         """
         V = self.copy()
         V.loc[V.index, V.columns] = fun(self.values, *args, **kwargs)
@@ -548,9 +578,9 @@ class Vector(pd.DataFrame):
 
         # generate the pandas object
         if len(ser_props) > 0:
-            super(Vector, self).__init__(pd.Series(*args, **ser_props))
+            super(Point, self).__init__(pd.Series(*args, **ser_props))
         else:
-            super(Vector, self).__init__(*args, **kwargs)
+            super(Point, self).__init__(*args, **kwargs)
 
         # add the extra features
         for prop in props:
@@ -584,19 +614,19 @@ class Vector(pd.DataFrame):
 
     @property
     def _constructor(self):
-        return Vector
+        return Point
 
 
 
     @property
     def _constructor_sliced(self):
-        return Vector
+        return Point
 
 
 
     @property
     def _constructor_expanddim(self):
-        return Vector
+        return Point
 
 
 
@@ -616,27 +646,31 @@ class Vector(pd.DataFrame):
 
     def __getattr__(self, *args, **kwargs):
         try:
-            out = super(Vector, self).__getattr__(*args, **kwargs)
+            out = super(Point, self).__getattr__(*args, **kwargs)
             return out.__finalize__(self)
         except Exception:
             AttributeError()
 
 
 
-class VectorDict(dict):
+class Container(dict):
     """
-    Create a dict of "Vector" object(s). It is a simple wrapper of the "dict" class object with additional methods.
+    Create a dict of or" object(s). It is a simple wrapper of the
+    "dict" class with additional methods.
 
     Input:
-        args: (objects)
-            objects of class vectors.
+
+        args (objects)
+
+            objects of class "Point", "Point", or any subclass.
     """
+
+
 
     def to_csv(self, path, **kwargs):
         """
-        store pandas.DataFrames containing the vectors formatted as: "XXX|YYY_ZZZ".
-
-        where:
+        store pandas.DataFrames containing the points formatted as:
+        "XXX|YYY_ZZZ". where:
             'XXX' is the type of the vector
             'YYY' is the dimension of the vector
             'ZZZ'  if the dim_unit.
@@ -892,7 +926,7 @@ class ReferenceFrame():
                           ), "all versors must have keys: " + str(dims)
             vec = Vector(versor, index=[
                          0], type="versor", dim_unit="", time_unit="")
-            V += [vec / vec.module.values]
+            V += [vec / vec.norm.values]
 
         # store the data
         self.origin = origin
