@@ -1,6 +1,7 @@
 
 # IMPORTS
 
+from base import *
 import os
 import numpy as np
 import pandas as pd
@@ -11,9 +12,9 @@ from . import functions as fn
 
 # CLASSES
 
-class Point(pd.DataFrame):
+class Marker(Point):
     """
-    Create n-dimensional point sampled over time.
+    Create 3D point in space collected over time.
 
     Input:
 
@@ -47,122 +48,19 @@ class Point(pd.DataFrame):
 
     # CLASS PROPERTIES
 
-    time_unit = ""
-    dim_unit = ""
-    type = ""
-    _metadata = ["time_unit", "dim_unit", "type"]
+    time_unit = "s"
+    dim_unit = "m"
+    type = "Point 3D"
 
 
 
     # STATIC METHODS
 
     @staticmethod
-    def angle_by_3_points(A, B, C):
-        """
-        return the angle ABC using the Cosine theorem.
-
-        Input:
-            A:  (Point)
-                The coordinates of one point.
-
-            B:  (Point)
-                The coordinates of the point over which the angle has
-                to be calculated.
-
-            C:  (Point)
-                The coordinates of the third point.
-
-        Output:
-            K:  (Point)
-                A 1D point containing the result of:
-                                     2          2            2
-                           /  (A - B)  +  (C - B)  -  (A - C)  \
-                    arcos | ----------------------------------- |
-                           \      2 * (A - B) * (C - B)        /
-        """
-
-        # ensure all entered parameters are points
-        txt = "'A', 'B' and 'C' must be Points with equal index and columns."
-        assert Point.match(A, B, C), txt
-
-        # get a, b and c
-        a = (A - B).norm()
-        b = (C - B).norm()
-        c = (A - C).norm()
-
-        # return the angle
-        k = (a ** 2 + b ** 2 - c ** 2) / (2 * a * b).values
-        k.loc[k.index] = np.arccos(k.values)
-        k.time_unit = A.time_unit
-        k.dim_unit = "rad"
-        k.type = "Angle"
-        return k
-
-
-
-    @staticmethod
-    def gram_schmidt(normalized=False, *args, **kwargs):
-        """
-        return the orthogonal basis defined by a set of points using the
-        Gram-Schmidt algorithm.
-
-        Input:
-
-            normalized (bool)
-
-                should the projected points returned in normalized units?
-
-            args / kwargs (Point)
-
-                one or more points from which the orthogonal projections have
-                to be calculated.
-
-        Output:
-
-            W (Container)
-
-                a Container object containing the orthogonal points.
-        """
-
-        # check the input
-        fn._validate_obj(normalized, bool)
-        D = {**kwargs}
-        keys = np.array([i for i in kwargs.keys()])
-        n_args = np.arange(len(args))
-        names = ["V" + str(i + 1) + ("_1" if i in keys else "") for i in n_args]
-        D.update(**{i: j for i, j in zip(names, args)})
-        txt = "All input data must be Points with equal index and columns."
-        assert Point.match(**D), txt
-
-        # internal function to simplify projection calculation
-        def proj(a, b):
-            aa = a.values
-            bb = b.values
-            return np.inner(aa, bb) / np.inner(bb, bb) * bb
-
-        # calculate the projection points
-        keys = np.array([i for i in D])
-        W = {keys[0]: D[keys[0]]}
-        for i in np.arange(1, len(D)):
-            W[keys[i]] = D[keys[i]]
-            for j in np.arange(i):
-                W[keys[i]] -= proj(D[keys[i]], D[keys[j]])
-
-        # normalize if required
-        if normalized:
-            for key in W:
-                W[key] /= W[key].norm.values
-
-        # return the output
-        return W
-
-
-
-    @staticmethod
     def match(*args, **kwargs):
         """
-        check if the entered objects are instance of Point or
-        pandas.DataFrame. If more than one parameter is provided, check
+        check if the entered objects are Marker(s).
+        If more than one parameter is provided, check
         also that all the entered objects have the same columns and indices.
 
         Output:
@@ -171,13 +69,12 @@ class Point(pd.DataFrame):
                 True if all inputs are Points or a pandas.DataFrame with the
                 same columns and index of self. False, otherwise.
         """
-
         # get the elements entered
         objs = [i for i in args] + [kwargs[i] for i in kwargs]
 
         # check if all elements are instance of Point or DataFrame
         for obj in objs:
-            if not isinstance(obj, (Point, pd.DataFrame)):
+            if not isinstance(obj, (Marker)):
                 return False
 
         # check the columns and index of all objs
@@ -190,42 +87,17 @@ class Point(pd.DataFrame):
             col_check = np.all([i in OC for i in CL])
             idx_check = np.all([i in OI for i in IX])
             shp_check = np.all([i == j for i, j in zip(obj.shape, SH)])
-            if not np.all([col_check, idx_check, shp_check]):
+            dim_check = SH[1] == 3
+            if not np.all([col_check, idx_check, shp_check, dim_check]):
                 return False
         return True
 
 
 
     @staticmethod
-    def read_csv(*args, **kwargs):
-        """
-        return the Point from a "csv". The file is formatted having a column
-        named "Index_ZZZ" and the others as:
-
-        "XXX|YYY_ZZZ" where:
-            'XXX' the type of the point
-            'YYY' the dimension of the point
-            'ZZZ' the dim_unit
-
-        Input:
-
-            arguments to be passed to the pandas "read_csv" function:
-            https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_csv.html
-
-        Output:
-
-            V (Point)
-
-                the imported point.
-        """
-        return Point.from_csv(*args, **kwargs)
-
-
-
-    @staticmethod
     def from_df(df):
         """
-        return the Point from a pandas DataFrame. The df is formatted having
+        return the Marker from a pandas DataFrame. The df is formatted having
         a column named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
 
             'XXX' the type of the point
@@ -244,43 +116,7 @@ class Point(pd.DataFrame):
 
                 the imported point.
         """
-
-        # get the index
-        idx_col = [i for i in df.columns if "_".join(i.split("_")[:-1])][0]
-        idx_val = df[idx_col].values.flatten()
-
-        # get the time_unit
-        time_unit = idx_col.split("_")[-1]
-
-        # remove the index column
-        df = df[[i for i in df.columns if i != idx_col]]
-
-        # get the point type
-        typ = np.unique(["|".join(i.split("|")[:-1]) for i in df.columns])
-        txt = "No point type has been found" if len(typ) == 0 else str(
-            len(typ)) + " point types have been found."
-        assert len(typ) == 1, txt
-        typ = typ[0]
-
-        # get the dim_unit
-        uni = np.unique([i.split("_")[-1] for i in df.columns])
-        txt = "No unit type has been found" if len(uni) == 0 else str(
-            len(uni)) + " dimension units have been found."
-        assert len(uni) == 1, txt
-        uni = uni[0]
-
-        # update the columns
-        df.columns = ["_".join(i.split("|")[-1].split("_")[:-1])
-                      for i in df.columns]
-
-        # get the point
-        return Point(
-            data      = df.to_dict("list"),
-            index     = idx_val,
-            time_unit = time_unit,
-            dim_unit  = uni,
-            type      = typ
-            )
+        return Point.from_df(df).__finalize__()
 
 
 
@@ -666,6 +502,7 @@ class Container(dict):
     """
 
 
+    # STORING METHODS
 
     def to_csv(self, path, **kwargs):
         """
@@ -711,6 +548,8 @@ class Container(dict):
 
 
 
+    # GETTERS
+
     @staticmethod
     def from_csv(path, **kwargs):
         """
@@ -734,19 +573,22 @@ class Container(dict):
             pass
 
         # get the output dict
-        vd = VectorDict()
+        vd = Container()
 
-        # check if the path is a file or a folder and populate the VectorDict accordingly
+        # check if the path is a file or a folder and populate the
+        # Container accordingly
         if os.path.isfile(path):
             vd[".".join(path.split(os.path.sep)[-1].split(".")[:-1])
-               ] = Vector.from_csv(path, **kwargs)
+               ] = Point.from_csv(path, **kwargs)
         else:
-            for i in get_files(path, ".csv", False):
-                vd[".".join(i.split(os.path.sep)[-1].split(".")[:-1])
-                   ] = Vector.from_csv(i, **kwargs)
+            for i in fn.get_files(path, ".csv", False):
+                key = ".".join(i.split(os.path.sep)[-1].split(".")[:-1])
+                vd[key] = Point.from_csv(i, **kwargs)
 
         # return the dict
         return vd
+
+
 
     @staticmethod
     def from_excel(path, sheets=None, exclude_errors=True):
@@ -755,7 +597,8 @@ class Container(dict):
 
         Input:
             path:           (str)
-                            an existing excel file. The sheets must contain 1 column named "Index_ZZZ" and the
+                            an existing excel file. The sheets must contain 1
+                            column named "Index_ZZZ" and the
                             others as "WWW:XXX|YYY_ZZZ" where:
                                 'WWW' is the type of the vector
                                 'XXX' is the name of the vector
@@ -763,33 +606,37 @@ class Container(dict):
                                 'ZZZ'  if the dim_unit.
 
             sheets:         (str, list or None)
-                            the sheets to be imported. In None, all sheets are imported.
+                            the sheets to be imported. In None, all sheets are
+                            imported.
 
             exclude_errors: (bool)
-                            If a sheet generates an error during the import would you like to skip it and import the
+                            If a sheet generates an error during the import
+                            would you like to skip it and import the
                             others?
 
         Output:
             a new VectorDict with the imported vectors.
         """
 
-        vd = VectorDict()
+        vd = Container()
 
         # get the sheets
-        dfs = from_excel(path, sheets)
+        dfs = fn.from_excel(path, sheets)
 
         # import the sheets
         for i in dfs:
             if exclude_errors:
                 try:
-                    vd[i] = Vector.from_df(dfs[i])
+                    vd[i] = Point.from_df(dfs[i])
                 except Exception:
                     pass
             else:
-                vd[i] = Vector.from_df(dfs[i])
+                vd[i] = Point.from_df(dfs[i])
 
         # return the dict
         return vd
+
+
 
     @staticmethod
     def from_emt(file):

@@ -1,18 +1,1316 @@
-
 # IMPORTS
 
+import itertools as it
 import os
 import re
-import traceback
 import time
+import traceback
 import numpy as np
-import pandas as pd
-import itertools as it
-import scipy.signal as ss
-import scipy.interpolate as si
 import openpyxl as xl
+import pandas as pd
+import scipy.interpolate as si
+import scipy.signal as ss
+import scipy.linalg as sl
 from sklearn.model_selection import GridSearchCV
 from sklearn.svm import SVR
+
+
+
+# CLASSES
+
+
+class LinearRegression():
+
+
+
+    def __init__(self, y, x, order=1, fit_intercept=True):
+        """
+        Obtain the regression coefficients according to the Ordinary Least
+        Squares approach.
+
+        Input:
+            y:              (2D column numpy array)
+                            the array containing the dependent variable.
+
+            x:              (2D array)
+                            the array containing the indipendent variables.
+                            The number of rows must equal the rows of y, while
+                            each column will be a regressor (i.e. an indipendent
+                            variable).
+
+            order:          (int)
+                            the order of the polynomial.
+
+            fit_intercept:  (bool)
+                            Should the intercept be included in the model?
+                            Otherwise it will be set to zero.
+        """
+
+        # add the input parameters
+        self.fit_intercept = fit_intercept
+
+        # add the order of the fit
+        self.order = order
+
+        # correct the shape of y and x
+        YY = self.__simplify__(y, 'Y', None)
+        XX = self.__simplify__(x, 'X', self.order)
+        txt = "'X' and 'Y' number of rows must be identical."
+        assert XX.shape[0] == YY.shape[0], txt
+
+        # add the ones for the intercept
+        if self.fit_intercept:
+            XX = np.hstack([np.ones((XX.shape[0], 1)), XX])
+
+        # get the coefficients and intercept
+        self._coefs = pd.DataFrame(
+            data    = sl.pinv(XX.T.dot(XX)).dot(XX.T).dot(self.Y),
+            index   = self.__IV_labels__,
+            columns = self.__DV_labels__
+            )
+
+
+
+    @property
+    def coefs(self):
+        """
+        vector of the regression coefficients.
+        """
+        return self._coefs
+
+
+
+    def SSPE(self):
+        """
+        return the Sum of Square Product Error matrix
+        """
+        R = self.residuals()
+        return R.T.dot(R)
+
+
+
+    def cov_unscaled(self):
+        """
+        return the unscaled covariance (i.e. without multiplication for the
+        variance term) of the coefficients.
+        """
+        if self.fit_intercept:
+            I = pd.DataFrame(
+                data  = {'Intercept': np.tile(1, self.X.shape[0])},
+                index = self.X.index
+                )
+            X = pd.concat([I, self.X], axis=1)
+        else:
+            X = self.X
+        return pd.DataFrame(
+            data    = sl.inv(X.T.dot(X)),
+            index   = X.columns,
+            columns = X.columns
+            )
+
+
+
+    def residuals(self):
+        """
+        obtain the residuals of the current regression model.
+        """
+        return self.Y - self.predict(self.X)
+
+
+
+    @property
+    def __IV_labels__(self):
+        """
+        return the labels for the regressors.
+        """
+        out = []
+        if self.fit_intercept:
+            out += ['Intercept']
+        if isinstance(self.X, pd.DataFrame):
+            X = self.X.columns.tolist()
+        else:
+            N = np.arange(self.X.shape[1])
+            X = ['X{}'.format(i) for i in N]
+        out += X
+        for i in np.arange(2, self.order + 1):
+            for c in X:
+                out += [c + "^{}".format(i)]
+        return out
+
+
+
+    @property
+    def __DV_labels__(self):
+        """
+        return the labels for the dependent variables.
+        """
+        if isinstance(self.Y, pd.DataFrame):
+            return self.Y.columns.to_numpy().tolist()
+        return ['Y{}'.format(i) for i in np.arange(self.Y.shape[1])]
+
+
+
+    def __simplify__(self, v, name, order):
+        """
+        internal method to check entries in the constructor.
+        """
+        txt = "'{}' must be a pandas.DataFrame, a numpy.ndarray or None."
+        txt = txt.format(name)
+        if isinstance(v, pd.DataFrame):
+            XX = v
+        else:
+            if isinstance(v, np.ndarray):
+                XX = pd.DataFrame(np.squeeze(v))
+            elif v is None:
+
+                # try to get the shape from the other parameter
+                try:
+                    N = self.Y.shape[0]
+                except Exception:
+                    try:
+                        N = self.X.shape[0]
+                    except Exception:
+                        raise ValueError(txt)
+                XX = np.atleast_2d([[] for i in np.arange(N)])
+
+                # try to convert to the most similar pandas.DataFrame
+                # to the other parameter.
+                try:
+                    IX = self.Y.index
+                except Exception:
+                    try:
+                        IX = self.X.index
+                    except Exception:
+                        IX = pd.Index(np.arange(N))
+                N = np.arange(XX.shape[1]) + 1
+                CX = pd.Index(name + "{}".format(i) for i in N)
+                XX = pd.DataFrame(XX, index=IX, columns=CX)
+            else:
+                raise NotImplementedError(txt)
+        setattr(self, name, XX)
+        ZZ = XX.values
+        if order is not None:
+            for i in np.arange(2, self.order + 1):
+                for c in np.arange(XX.shape[1]):
+                    K = np.atleast_2d(ZZ[:, c] ** i)
+                    ZZ = np.hstack([ZZ, K.T])
+        return ZZ
+
+
+
+    def copy(self):
+        """
+        copy the current instance
+        """
+        return LinearRegression(self.Y, self.X, self.fit_intercept)
+
+
+
+    def predict(self, x):
+        """
+        predict the fitted Y value according to the provided x.
+        """
+        X = self.__simplify__(x, 'x', self.order)
+        n = self.coefs.shape[0] - 1
+        assert X.shape[1] == n, "'X' must have {} columns.".format(n)
+        Z = X.dot(self.coefs.values[1:]) + self.coefs.values[0]
+        if isinstance(x, pd.DataFrame):
+            idx = x.index
+        else:
+            idx = np.arange(X.shape[0])
+        return pd.DataFrame(Z, index=idx, columns=self.__DV_labels__)
+
+
+
+    def DF(self):
+        """
+        return the degrees of freedom of the model.
+        """
+        return self.Y.shape[0] - self.coefs.shape[0]
+
+
+
+    def SS(self):
+        """
+        calculate the sum of squares of the fitted model.
+        """
+        P = self.predict(self.X).values.flatten()
+        return np.sum((P - np.mean(P, 0)) ** 2, 0)
+
+
+
+    def R2(self):
+        """
+        calculate the R-squared of the fitted model.
+        """
+        N = np.var(self.residuals().values.flatten())
+        D = np.var(self.Y.values.flatten())
+        return 1 - N / D
+
+
+
+    def R2_adjusted(self):
+        """
+        calculate the Adjusted R-squared of the fitted model.
+        """
+        den = (len(self.Y) - self.DF() - 1)
+        return 1 - (1 - self.R2) * (self.Y.shape[0] - 1) / den
+
+
+    def RMSE(self):
+        """
+        Get the Root Mean Squared Error
+        """
+        return np.sqrt(np.mean(self.residuals().values.flatten() ** 2))
+
+
+
+    def toString(self, digits=3):
+        """
+        Create a textual representation of the fitted model.
+
+        Input:
+            digits: (int)
+                    the number of digits to be used to represent the
+                    coefficients.
+
+        Output:
+            txt:    (str)
+                    a single string representing the fitted model.
+        """
+        txt = ""
+        ivs = self.coefs.columns.to_numpy()
+        dvs = self.coefs.index.to_numpy()
+        frm = "{:+." + str(digits) + "f}"
+        for iv in ivs:
+            line = "{} = ".format(iv)
+            for dv in dvs:
+                v = self.coefs.loc[dv, iv]
+                if dv == "Intercept":
+                    line += frm.format(v)
+                else:
+                    s = " " + frm + " {}"
+                    line += s.format(v, dv)
+            txt += line + "\n"
+        return txt
+
+
+
+class PowerRegression(LinearRegression):
+
+
+
+    def __init__(self, y, x):
+        """
+        Obtain the regression coefficients according to the Ordinary Least
+        Squares approach.
+
+        Input:
+            y:              (2D column numpy array)
+                            the array containing the dependent variable.
+
+            x:              (2D array)
+                            the array containing the indipendent variables.
+                            The number of rows must equal the rows of y, while
+                            each column will be a regressor (i.e. an indipendent
+                            variable).
+        """
+
+        # correct the shape of y and x
+        YY = np.log(self.__simplify__(y, 'Y', None))
+        XX = np.log(self.__simplify__(x, 'X', None))
+        txt = "'X' and 'Y' number of rows must be identical."
+        assert XX.shape[0] == YY.shape[0], txt
+        assert XX.shape[1] == 1, "'X' must have just 1 column."
+
+        # add the ones for the intercept
+        XX = np.hstack([np.ones((XX.shape[0], 1)), XX])
+
+        # get the coefficients
+        coefs = sl.pinv(XX.T.dot(XX)).dot(XX.T).dot(YY)
+        coefs[0] = np.e ** coefs[0]
+
+        # get the coefficients and intercept
+        self._coefs = pd.DataFrame(
+            data    = coefs,
+            index   = self.__IV_labels__,
+            columns = self.__DV_labels__
+            )
+
+
+
+    def copy(self):
+        """
+        copy the current instance
+        """
+        return PowerRegression(self.Y, self.X)
+
+
+
+    def predict(self, x):
+        """
+        predict the fitted Y value according to the provided x.
+        """
+        X = self.__simplify__(x, 'x', None)
+        assert X.shape[1] == 1, "'X' must have 1 column."
+        Z = self.coefs.loc['a'].values * X ** self.coefs.loc['b'].values
+        if isinstance(x, pd.DataFrame):
+            idx = x.index
+        else:
+            idx = np.arange(X.shape[0])
+        return pd.DataFrame(Z, index=idx, columns=self.__DV_labels__)
+
+
+
+    @property
+    def __IV_labels__(self):
+        """
+        return the labels for the regressors.
+        """
+        return ['a', 'b']
+
+
+
+    def toString(self, digits=3):
+        """
+        Create a textual representation of the fitted model.
+
+        Input:
+            digits: (int)
+                    the number of digits to be used to represent the
+                    coefficients.
+
+        Output:
+            txt:    (str)
+                    a single string representing the fitted model.
+        """
+        frm = "{:+." + str(digits) + "f}"
+        txt = "{} = " + frm + " {} ^ " + frm
+        return txt.format(
+            self.coefs.columns.to_numpy()[0],
+            self.coefs.loc['a'].values.flatten()[0],
+            self.X.columns.to_numpy()[0],
+            self.coefs.loc['b'].values.flatten()[0]
+            )
+
+
+
+class Point(pd.DataFrame):
+    """
+    Create n-dimensional point sampled over time.
+
+    Input:
+
+        data (ndarray, list, pandas.Series, pandas.DataFrame, dict)
+
+            the data which creates the Point.
+
+        index (list)
+
+            the index representing each time sample. It must provide 1 value
+            for each sample in data.
+
+        columns (list)
+
+            the names of the dimensions of the points.
+
+        dim_unit (str)
+
+            the unit of measurement of each dimension
+
+        time_unit (str)
+
+            the unit of measurement of the samples
+
+        type (str)
+
+            a string describing the nature of the Point object.
+    """
+
+
+
+    # CLASS PROPERTIES
+
+    time_unit = ""
+    dim_unit = ""
+    type = ""
+    _metadata = ["time_unit", "dim_unit", "type"]
+
+
+
+    # STATIC METHODS
+
+    @staticmethod
+    def angle_by_3_points(A, B, C):
+        """
+        return the angle ABC using the Cosine theorem.
+
+        Input:
+            A:  (Point)
+                The coordinates of one point.
+
+            B:  (Point)
+                The coordinates of the point over which the angle has
+                to be calculated.
+
+            C:  (Point)
+                The coordinates of the third point.
+
+        Output:
+            K:  (Point)
+                A 1D point containing the result of:
+                                     2          2            2
+                           /  (A - B)  +  (C - B)  -  (A - C)  \
+                    arcos | ----------------------------------- |
+                           \      2 * (A - B) * (C - B)        /
+        """
+
+        # ensure all entered parameters are points
+        txt = "'A', 'B' and 'C' must be Points with equal index and columns."
+        assert Point.match(A, B, C), txt
+
+        # get a, b and c
+        a = (A - B).norm()
+        b = (C - B).norm()
+        c = (A - C).norm()
+
+        # return the angle
+        k = (a ** 2 + b ** 2 - c ** 2) / (2 * a * b).values
+        k.loc[k.index] = np.arccos(k.values)
+        k.time_unit = A.time_unit
+        k.dim_unit = "rad"
+        k.type = "Angle"
+        return k
+
+
+
+    @staticmethod
+    def gram_schmidt(normalized=False, *args, **kwargs):
+        """
+        return the orthogonal basis defined by a set of points using the
+        Gram-Schmidt algorithm.
+
+        Input:
+
+            normalized (bool)
+
+                should the projected points returned in normalized units?
+
+            args / kwargs (Point)
+
+                one or more points from which the orthogonal projections have
+                to be calculated.
+
+        Output:
+
+            W (Container)
+
+                a Container object containing the orthogonal points.
+        """
+
+        # check the input
+        _validate_obj(normalized, bool)
+        D = {**kwargs}
+        keys = np.array([i for i in kwargs.keys()])
+        n_args = np.arange(len(args))
+        names = ["V" + str(i + 1) + ("_1" if i in keys else "") for i in n_args]
+        D.update(**{i: j for i, j in zip(names, args)})
+        txt = "All input data must be Points with equal index and columns."
+        assert Point.match(**D), txt
+
+        # internal function to simplify projection calculation
+        def proj(a, b):
+            aa = a.values
+            bb = b.values
+            return np.inner(aa, bb) / np.inner(bb, bb) * bb
+
+        # calculate the projection points
+        keys = np.array([i for i in D])
+        W = {keys[0]: D[keys[0]]}
+        for i in np.arange(1, len(D)):
+            W[keys[i]] = D[keys[i]]
+            for j in np.arange(i):
+                W[keys[i]] -= proj(D[keys[i]], D[keys[j]])
+
+        # normalize if required
+        if normalized:
+            for key in W:
+                W[key] /= W[key].norm.values
+
+        # return the output
+        return W
+
+
+
+    @staticmethod
+    def match(*args, **kwargs):
+        """
+        check if the entered objects are instance of Point or
+        pandas.DataFrame. If more than one parameter is provided, check
+        also that all the entered objects have the same columns and indices.
+
+        Output:
+            C (bool)
+
+                True if all inputs are Points or a pandas.DataFrame with the
+                same columns and index of self. False, otherwise.
+        """
+
+        # get the elements entered
+        objs = [i for i in args] + [kwargs[i] for i in kwargs]
+
+        # check if all elements are instance of Point or DataFrame
+        for obj in objs:
+            if not isinstance(obj, (Point, pd.DataFrame)):
+                return False
+
+        # check the columns and index of all objs
+        IX = objs[0].index.to_numpy()
+        CL = objs[0].columns.to_numpy()
+        SH = objs[0].shape
+        for obj in objs:
+            OI = obj.index.to_numpy()
+            OC = obj.columns.to_numpy()
+            col_check = np.all([i in OC for i in CL])
+            idx_check = np.all([i in OI for i in IX])
+            shp_check = np.all([i == j for i, j in zip(obj.shape, SH)])
+            if not np.all([col_check, idx_check, shp_check]):
+                return False
+        return True
+
+
+
+    @staticmethod
+    def read_csv(*args, **kwargs):
+        """
+        return the Point from a "csv". The file is formatted having a column
+        named "Index_ZZZ" and the others as:
+
+        "XXX|YYY_ZZZ" where:
+            'XXX' the type of the point
+            'YYY' the dimension of the point
+            'ZZZ' the dim_unit
+
+        Input:
+
+            arguments to be passed to the pandas "read_csv" function:
+            https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_csv.html
+
+        Output:
+
+            V (Point)
+
+                the imported point.
+        """
+        return Point.from_csv(*args, **kwargs)
+
+
+
+    @staticmethod
+    def from_df(df):
+        """
+        return the Point from a pandas DataFrame. The df is formatted having
+        a column named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
+
+            'XXX' the type of the point
+            'YYY' the dimension of the point
+            'ZZZ' the dim_unit
+
+        Input:
+
+            df (pandas.DataFrame)
+
+                the input pandas.DataFrame object
+
+        Output:
+
+            v (Point)
+
+                the imported point.
+        """
+
+        # get the index
+        idx_col = [i for i in df.columns if "_".join(i.split("_")[:-1])][0]
+        idx_val = df[idx_col].values.flatten()
+
+        # get the time_unit
+        time_unit = idx_col.split("_")[-1]
+
+        # remove the index column
+        df = df[[i for i in df.columns if i != idx_col]]
+
+        # get the point type
+        typ = np.unique(["|".join(i.split("|")[:-1]) for i in df.columns])
+        txt = "No point type has been found" if len(typ) == 0 else str(
+            len(typ)) + " point types have been found."
+        assert len(typ) == 1, txt
+        typ = typ[0]
+
+        # get the dim_unit
+        uni = np.unique([i.split("_")[-1] for i in df.columns])
+        txt = "No unit type has been found" if len(uni) == 0 else str(
+            len(uni)) + " dimension units have been found."
+        assert len(uni) == 1, txt
+        uni = uni[0]
+
+        # update the columns
+        df.columns = ["_".join(i.split("|")[-1].split("_")[:-1])
+                      for i in df.columns]
+
+        # get the point
+        return Point(
+            data      = df.to_dict("list"),
+            index     = idx_val,
+            time_unit = time_unit,
+            dim_unit  = uni,
+            type      = typ
+            )
+
+
+
+    @staticmethod
+    def from_csv(*args, **kwargs):
+        """
+        return the Point from a "csv". The file is formatted having a column
+        named "Index_ZZZ" and the others as:
+
+        "XXX|YYY_ZZZ" where:
+            'XXX' the type of the point
+            'YYY' the dimension of the point
+            'ZZZ' the dim_unit
+
+        Input:
+
+            arguments to be passed to the pandas "read_csv" function:
+            https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.read_csv.html
+
+        Output:
+
+            V (Point)
+
+                the imported point.
+        """
+        return Point.from_df(pd.read_csv(*args, **kwargs))
+
+
+
+    @staticmethod
+    def from_excel(file, sheet, *args, **kwargs):
+        """
+        return the Point from an excel file. The file is formatted having
+        a column named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
+
+            'XXX' the type of the point
+            'YYY' the dimension of the point
+            'ZZZ' the dim_unit
+
+        Input:
+
+            file (str)
+
+                the path to the file
+
+            sheet (str)
+
+                the sheet to be imported
+
+            args, kwargs:
+
+                additional parameters passed to pandas.read_excel
+
+        Output:
+
+            v (Point)
+
+                the imported point.
+        """
+        return Point.from_df(
+            from_excel(file, sheet, *args, **kwargs)[sheet]
+            )
+
+
+
+    # CONVERTERS
+
+    def to_dict(self):
+        """
+        return the data as dict.
+        """
+        return {d: self[d].values.flatten() for d in self.columns}
+
+
+
+    def to_df(self):
+        """
+        Store the Point into a "pandas DataFrame" formatted having a column
+        named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
+
+            'XXX' the type of the point
+            'YYY' the dimension of the point
+            'ZZZ' the dim_unit
+        """
+
+        # create the Point df
+        v_df = pd.DataFrame(
+            data    = self.values,
+            columns = [self.type + "|" + i + "_" + self.dim_unit
+                       for i in self.columns]
+            )
+
+        # add the index column
+        v_df.insert(0, 'Index_' + self.time_unit, self.index.to_numpy())
+
+        # return the df
+        return v_df
+
+
+
+    def to_csv(self, file, **kwargs):
+        """
+        Store the Point into a "csv". The file is formatted having a column
+        named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
+
+            'XXX' the type of the point
+            'YYY' the dimension of the point
+            'ZZZ' the dim_unit
+
+        Input:
+
+            file (str)
+
+                the file path.
+        """
+
+        # ensure the file can be stored
+        os.makedirs(lvlup(file), exist_ok=True)
+
+        # store the output data
+        try:
+            kwargs.pop('index')
+        except Exception:
+            pass
+        try:
+            kwargs.pop('path')
+        except Exception:
+            pass
+        self.to_df().to_csv(file, index=False, **kwargs)
+
+
+
+    def to_excel(self, file, sheet="Sheet1", new_file=False):
+        """
+        Store the Point into an excel file sheet. The file is formatted
+        having a column named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
+
+            'XXX' the type of the point
+            'YYY' the dimension of the point
+            'ZZZ' the dim_unit
+
+        Input:
+
+            file (str)
+
+                the file path.
+
+            sheet (str or None)
+
+                the sheet name.
+
+            new_file (bool)
+
+                should a new file be created rather than adding the current
+                point to an existing one?
+        """
+
+        return to_excel(file, self.to_df(), sheet, new_file)
+
+
+
+    # CLASS SPECIFIC METHODS
+
+    def norm(self):
+        """
+        Get the norm of the point.
+        """
+        return Point(
+            data      = (self ** 2).sum(1).values.flatten() ** 0.5,
+            index     = self.index,
+            columns   = ["|" + " + ".join(self.columns) + "|"],
+            time_unit = self.time_unit,
+            dim_unit  = self.dim_unit,
+            type      = self.type
+            )
+
+
+
+    def fs(self):
+        """
+        get the mean sampling frequency of the Point in Hz.
+        """
+
+        return 1. / np.mean(np.diff(self.index.to_numpy()))
+
+
+
+    def applyc(self, fun, *args, **kwargs):
+        """
+        apply a given function to all columns of the Point.
+
+        Input:
+
+            fun (function)
+
+                the function to be applied.
+                Please note that each column is passed as first argument to fun.
+
+            args/kwargs
+
+                function arguments that are directly passed to fun.
+
+        Output:
+
+            V (Point)
+
+                The point with the function applied to each row.
+        """
+
+        return Point(
+            data      = {d: fun(self[d].values.flatten(), *args, **kwargs)
+                         for d in self.columns},
+            index     = self.index,
+            dim_unit  = self.dim_unit,
+            time_unit = self.time_unit,
+            type      = self.type
+            )
+
+
+
+    def applyr(self, fun, *args, **kwargs):
+        """
+        apply a given function to all samples of the Point.
+
+        Input:
+
+            fun (function)
+
+                the function to be applied.
+                Please note that each row is passed as first argument to fun.
+
+            args/kwargs
+
+                function arguments that are directly passed to fun.
+
+        Output:
+
+            V (Point)
+
+                The point with the function applied to each column.
+        """
+        V = self.copy()
+        for i in V.index:
+            V.loc[i, V.columns] = fun(self.loc[i].values, *args, **kwargs)
+        return V
+
+
+
+    def applya(self, fun, *args, **kwargs):
+        """
+        apply a given function to all values of the point as one.
+
+        Input:
+
+            fun (function)
+
+                the function to be applied.
+                Please note that each row is passed as first argument to fun.
+
+            args/kwargs
+
+                function arguments that are directly passed to fun.
+
+        Output:
+
+            V (Point)
+
+                The point with the function applied to all values.
+        """
+        V = self.copy()
+        V.loc[V.index, V.columns] = fun(self.values, *args, **kwargs)
+        return V
+
+
+
+    # PRIVATE METHODS
+
+    def __init__(self, *args, **kwargs):
+
+        # remove special class objects
+        props = {}
+        for prop in self._metadata:
+            try:
+                props[prop] = kwargs.pop(prop)
+            except Exception:
+                pass
+
+        # handle Series props
+        ser_props = {}
+        for prop in ["name", "fastpath"]:
+            try:
+                ser_props[prop] = kwargs.pop(prop)
+            except Exception:
+                pass
+
+        # generate the pandas object
+        if len(ser_props) > 0:
+            super(Point, self).__init__(pd.Series(*args, **ser_props))
+        else:
+            super(Point, self).__init__(*args, **kwargs)
+
+        # add the extra features
+        for prop in props:
+            setattr(self, prop, props[prop])
+
+
+
+    def __finalize__(self, other, method=None):
+        """propagate metadata from other to self """
+
+        # merge operation: using metadata of the left object
+        if method == "merge":
+            for name in self._metadata:
+                object.__setattr__(self, name, getattr(
+                    other.left, name, getattr(self, name)))
+
+        # concat operation: using metadata of the first object
+        elif method == "concat":
+            for name in self._metadata:
+                object.__setattr__(self, name, getattr(
+                    other.objs[0], name, getattr(self, name)))
+
+        # any other condition
+        else:
+            for name in self._metadata:
+                object.__setattr__(self, name, getattr(
+                    other, name, getattr(self, name)))
+        return self
+
+
+
+    @property
+    def _constructor(self):
+        return Point
+
+
+
+    @property
+    def _constructor_sliced(self):
+        return Point
+
+
+
+    @property
+    def _constructor_expanddim(self):
+        return Point
+
+
+
+    def __str__(self):
+        out = pd.DataFrame(self).__str__()
+        out += "\n".join(["\nAttributes:", "\ttype:\t\t" + self.type,
+                          "\ttime_unit:\t" + self.time_unit,
+                          "\tdim_unit:\t" + self.dim_unit])
+        return out
+
+
+
+    def __repr__(self):
+        return self.__str__()
+
+
+
+    def __getattr__(self, *args, **kwargs):
+        try:
+            out = super(Point, self).__getattr__(*args, **kwargs)
+            return out.__finalize__(self)
+        except Exception:
+            AttributeError()
+
+
+
+class Container(dict):
+    """
+    Create a dict of or" object(s). It is a simple wrapper of the
+    "dict" class with additional methods.
+
+    Input:
+
+        args (objects)
+
+            objects of class "Point", "Point", or any subclass.
+    """
+
+
+    # STORING METHODS
+
+    def to_csv(self, path, **kwargs):
+        """
+        store pandas.DataFrames containing the points formatted as:
+        "XXX|YYY_ZZZ". where:
+            'XXX' is the type of the vector
+            'YYY' is the dimension of the vector
+            'ZZZ'  if the dim_unit.
+
+        In addition, the first column will be the index of the vectors.
+        """
+
+        # remove the filename from kwargs
+        try:
+            kwargs['path'] = None
+        except Exception:
+            pass
+
+        # store all Vectors
+        for v in self.keys():
+            self[v].to_csv(os.path.sep.join([path, v + ".csv"]), **kwargs)
+
+
+
+    def to_excel(self, path, new_file=False):
+        """
+        store an excel file containing the vectors formatted as: "XXX|YYY_ZZZ".
+
+        where:
+            'XXX' is the type of the vector
+            'YYY' is the dimension of the vector
+            'ZZZ'  if the dim_unit.
+
+        In addition, the first column will be the index of the vectors.
+        """
+
+        # check if a new file must be created
+        if new_file:
+            os.remove(path)
+
+        # store all Vectors
+        [self[v].to_excel(path, v) for v in self]
+
+
+
+    # GETTERS
+
+    @staticmethod
+    def from_csv(path, **kwargs):
+        """
+        Create a "VectorDict" object from a "csv" or "txt" file.
+
+        Input:
+            path: (str)
+                an existing ".csv" or "txt" file or a folder containing csv
+                files. The files must contain 1 column named "Index_ZZZ" and the
+                others as "WWW:XXX|YYY_ZZZ" where:
+                    'WWW' is the type of the vector
+                    'XXX' is the name of the vector
+                    'YYY' is the dimension of the vector
+                    'ZZZ'  if the dim_unit.
+        """
+
+        # control the kwargs
+        try:
+            kwargs['index_col'] = False
+        except Exception:
+            pass
+
+        # get the output dict
+        vd = Container()
+
+        # check if the path is a file or a folder and populate the
+        # Container accordingly
+        if os.path.isfile(path):
+            vd[".".join(path.split(os.path.sep)[-1].split(".")[:-1])
+               ] = Point.from_csv(path, **kwargs)
+        else:
+            for i in get_files(path, ".csv", False):
+                key = ".".join(i.split(os.path.sep)[-1].split(".")[:-1])
+                vd[key] = Point.from_csv(i, **kwargs)
+
+        # return the dict
+        return vd
+
+
+
+    @staticmethod
+    def from_excel(path, sheets=None, exclude_errors=True):
+        """
+        Create a "VectorDict" object from an excel file.
+
+        Input:
+            path:           (str)
+                            an existing excel file. The sheets must contain 1
+                            column named "Index_ZZZ" and the
+                            others as "WWW:XXX|YYY_ZZZ" where:
+                                'WWW' is the type of the vector
+                                'XXX' is the name of the vector
+                                'YYY' is the dimension of the vector
+                                'ZZZ'  if the dim_unit.
+
+            sheets:         (str, list or None)
+                            the sheets to be imported. In None, all sheets are
+                            imported.
+
+            exclude_errors: (bool)
+                            If a sheet generates an error during the import
+                            would you like to skip it and import the
+                            others?
+
+        Output:
+            a new VectorDict with the imported vectors.
+        """
+
+        vd = Container()
+
+        # get the sheets
+        dfs = from_excel(path, sheets)
+
+        # import the sheets
+        for i in dfs:
+            if exclude_errors:
+                try:
+                    vd[i] = Point.from_df(dfs[i])
+                except Exception:
+                    pass
+            else:
+                vd[i] = Point.from_df(dfs[i])
+
+        # return the dict
+        return vd
+
+
+
+    @staticmethod
+    def from_emt(file):
+        """
+        Create a "VectorDict" object from a ".emt" file.
+
+        Input:
+            file: (str)
+                an existing ".emt" file.
+        """
+
+        # check the validity of the entered file
+        assert os.path.exists(file), file + ' does not exist.'
+        assert file[-4:] == '.emt', file + ' must be an ".emt" file.'
+
+        # read the file
+        try:
+            file = open(file)
+
+            # get the lines of the file
+            lines = [[j.strip() for j in i]
+                     for i in [i.split('\t') for i in file]]
+
+        # something went wrong so close file
+        except Exception:
+            lines = []
+
+        # close the file
+        finally:
+            file.close()
+
+        # get the output VectorDict
+        vd = Point()
+
+        # get the units
+        dim_unit = lines[3][1]
+        time_unit = 's'
+
+        # get the type
+        type = lines[2][1]
+
+        # get an array with all the variables
+        V = np.array([i for i in lines[10] if i != ""]).flatten()
+
+        # get the data names
+        names = np.unique([i.split('.')[0] for i in V[2:] if len(i) > 0])
+
+        # get the data values (now should work)
+        values = np.vstack([np.atleast_2d(i[:len(V)])
+                            for i in lines[11:-2]]).astype(float)
+
+        # get the columns of interest
+        cols = np.arange(np.argwhere(V == "Time").flatten()[0] + 1, len(V))
+
+        # get the rows in the data to be extracted
+        rows = np.argwhere(np.any(~np.isnan(values[:, cols]), 1)).flatten()
+        rows = np.arange(np.min(rows), np.max(rows) + 1)
+
+        # get time
+        time = values[rows, 1].flatten()
+
+        # generate a dataframe for each variable
+        for v in names:
+
+            # get the dimensions
+            D = [i.split(".")[-1] for i in V if i.split(".")[0] == v]
+            D = [""] if len(D) == 1 else D
+
+            # get the data for each dimension
+            K = {}
+            for i in D:
+                key = i if i != "" else v
+                cols = np.argwhere(V == v + (("." + i) if i != "" else ""))
+                K[key] = values[rows, cols.flatten()]
+
+            # setup the output variable
+            vd[v] = Point(
+                data      = K,
+                index     = time,
+                time_unit = time_unit,
+                dim_unit  = dim_unit,
+                type      = type
+                )
+
+        # return vd
+        return vd
+
+
+
+    # SUBCLASSED METHODS
+
+    def __init__(self, *args, **kwargs):
+        super(Container, self).__init__(*args, **kwargs)
+        self.__finalize__()
+
+
+
+    def __finalize__(self):
+        for i in self.keys():
+            assert isinstance(self[i], (Point)), "{} is not a Point".format(i)
+        return self
+
+
+
+    def __str__(self):
+        lst = []
+        for i in self.keys():
+            lst += [" ".join(["\n\nVector:\t ", i, "\n\n", self[i].__str__()])]
+        return "\n".join(lst)
+
+
+
+    def __repr__(self):
+        return self.__str__()
+
+
+
+    def __setitem__(self, *args, **kwargs):
+        super(Container, self).__setitem__(*args, **kwargs)
+        self.__finalize__()
+
+
+
+    def __setattr__(self, *args, **kwargs):
+        super(Container, self).__setattr__(*args, **kwargs)
+        self.__finalize__()
 
 
 
