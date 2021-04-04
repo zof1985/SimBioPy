@@ -128,8 +128,9 @@ class Point(pd.DataFrame):
         fn._validate_obj(normalized, bool)
         D = {**kwargs}
         keys = np.array([i for i in kwargs.keys()])
-        D.update(**{"V{}".format(i) + ("" if i not in keys else "_1"): args[i]
-                    for i in np.arange(len(args))})
+        n_args = np.arange(len(args))
+        names = ["V" + str(i + 1) + ("_1" if i in keys else "") for i in n_args]
+        D.update(**{i: j for i, j in zip(names, args)})
         txt = "All input data must be Points with equal index and columns."
         assert Point.match(**D), txt
 
@@ -443,7 +444,6 @@ class Point(pd.DataFrame):
 
     # CLASS SPECIFIC METHODS
 
-
     def norm(self):
         """
         Get the norm of the point.
@@ -468,7 +468,7 @@ class Point(pd.DataFrame):
 
 
 
-    def apply_col(self, fun, *args, **kwargs):
+    def applyc(self, fun, *args, **kwargs):
         """
         apply a given function to all columns of the Point.
 
@@ -501,7 +501,7 @@ class Point(pd.DataFrame):
 
 
 
-    def apply_row(self, fun, *args, **kwargs):
+    def applyr(self, fun, *args, **kwargs):
         """
         apply a given function to all samples of the Point.
 
@@ -529,7 +529,7 @@ class Point(pd.DataFrame):
 
 
 
-    def apply_mat(self, fun, *args, **kwargs):
+    def applya(self, fun, *args, **kwargs):
         """
         apply a given function to all values of the point as one.
 
@@ -688,6 +688,8 @@ class Container(dict):
         for v in self.keys():
             self[v].to_csv(os.path.sep.join([path, v + ".csv"]), **kwargs)
 
+
+
     def to_excel(self, path, new_file=False):
         """
         store an excel file containing the vectors formatted as: "XXX|YYY_ZZZ".
@@ -707,6 +709,8 @@ class Container(dict):
         # store all Vectors
         [self[v].to_excel(path, v) for v in self]
 
+
+
     @staticmethod
     def from_csv(path, **kwargs):
         """
@@ -714,8 +718,9 @@ class Container(dict):
 
         Input:
             path: (str)
-                an existing ".csv" or "txt" file or a folder containing csv files. The files must contain 1 column
-                named "Index_ZZZ" and the others as "WWW:XXX|YYY_ZZZ" where:
+                an existing ".csv" or "txt" file or a folder containing csv
+                files. The files must contain 1 column named "Index_ZZZ" and the
+                others as "WWW:XXX|YYY_ZZZ" where:
                     'WWW' is the type of the vector
                     'XXX' is the name of the vector
                     'YYY' is the dimension of the vector
