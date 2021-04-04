@@ -80,36 +80,7 @@ class LinearRegression():
 
 
 
-    def SSPE(self):
-        """
-        return the Sum of Square Product Error matrix
-        """
-        R = self.residuals()
-        return R.T.dot(R)
-
-
-
-    def cov_unscaled(self):
-        """
-        return the unscaled covariance (i.e. without multiplication for the
-        variance term) of the coefficients.
-        """
-        if self.fit_intercept:
-            I = pd.DataFrame(
-                data  = {'Intercept': np.tile(1, self.X.shape[0])},
-                index = self.X.index
-                )
-            X = pd.concat([I, self.X], axis=1)
-        else:
-            X = self.X
-        return pd.DataFrame(
-            data    = sl.inv(X.T.dot(X)),
-            index   = X.columns,
-            columns = X.columns
-            )
-
-
-
+    @ property
     def residuals(self):
         """
         obtain the residuals of the current regression model.
@@ -222,14 +193,6 @@ class LinearRegression():
 
 
 
-    def DF(self):
-        """
-        return the degrees of freedom of the model.
-        """
-        return self.Y.shape[0] - self.coefs.shape[0]
-
-
-
     def SS(self):
         """
         calculate the sum of squares of the fitted model.
@@ -261,7 +224,7 @@ class LinearRegression():
         """
         Get the Root Mean Squared Error
         """
-        return np.sqrt(np.mean(self.residuals().values.flatten() ** 2))
+        return np.sqrt(np.mean(self.residuals.values.flatten() ** 2))
 
 
 
