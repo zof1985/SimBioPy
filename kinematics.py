@@ -12,7 +12,7 @@ from . import functions as fn
 
 # CLASSES
 
-class Marker(Point):
+class Marker(_Point):
     """
     Create 3D point in space collected over time.
 
@@ -116,7 +116,7 @@ class Marker(Point):
 
                 the imported point.
         """
-        return Point.from_df(df).__finalize__()
+        return _Point.from_df(df).__finalize__()
 
 
 
@@ -142,7 +142,7 @@ class Marker(Point):
 
                 the imported point.
         """
-        return Point.from_df(pd.read_csv(*args, **kwargs))
+        return _Point.from_df(pd.read_csv(*args, **kwargs))
 
 
 
@@ -176,7 +176,7 @@ class Marker(Point):
 
                 the imported point.
         """
-        return Point.from_df(
+        return _Point.from_df(
             fn.from_excel(file, sheet, *args, **kwargs)[sheet]
             )
 
@@ -284,7 +284,7 @@ class Marker(Point):
         """
         Get the norm of the point.
         """
-        return Point(
+        return _Point(
             data      = (self ** 2).sum(1).values.flatten() ** 0.5,
             index     = self.index,
             columns   = ["|" + " + ".join(self.columns) + "|"],
@@ -326,7 +326,7 @@ class Marker(Point):
                 The point with the function applied to each row.
         """
 
-        return Point(
+        return _Point(
             data      = {d: fun(self[d].values.flatten(), *args, **kwargs)
                          for d in self.columns},
             index     = self.index,
@@ -414,9 +414,9 @@ class Marker(Point):
 
         # generate the pandas object
         if len(ser_props) > 0:
-            super(Point, self).__init__(pd.Series(*args, **ser_props))
+            super(_Point, self).__init__(pd.Series(*args, **ser_props))
         else:
-            super(Point, self).__init__(*args, **kwargs)
+            super(_Point, self).__init__(*args, **kwargs)
 
         # add the extra features
         for prop in props:
@@ -450,19 +450,19 @@ class Marker(Point):
 
     @property
     def _constructor(self):
-        return Point
+        return _Point
 
 
 
     @property
     def _constructor_sliced(self):
-        return Point
+        return _Point
 
 
 
     @property
     def _constructor_expanddim(self):
-        return Point
+        return _Point
 
 
 
@@ -482,7 +482,7 @@ class Marker(Point):
 
     def __getattr__(self, *args, **kwargs):
         try:
-            out = super(Point, self).__getattr__(*args, **kwargs)
+            out = super(_Point, self).__getattr__(*args, **kwargs)
             return out.__finalize__(self)
         except Exception:
             AttributeError()

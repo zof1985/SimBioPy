@@ -11,6 +11,7 @@ import pandas as pd
 import scipy.interpolate as si
 import scipy.signal as ss
 import scipy.linalg as sl
+import sympy as sy
 from sklearn.model_selection import GridSearchCV
 from sklearn.svm import SVR
 
@@ -23,7 +24,7 @@ class LinearRegression():
 
 
 
-    def __init__(self, y, x, order=1, fit_intercept=True):
+    def __init__(self, y, x, order=1, fit_intercept=True, digits = 5):
         """
         Obtain the regression coefficients according to the Ordinary Least
         Squares approach.
@@ -44,12 +45,20 @@ class LinearRegression():
             fit_intercept:  (bool)
                             Should the intercept be included in the model?
                             Otherwise it will be set to zero.
+
+            digits (int)
+
+                the number of digits used to print the coefficients
         """
 
         # add the input parameters
+        txt = "{} must be a {} object."
+        assert isinstance(digits, (int)), txt.format("digits", "int")
+        self.digits = digits
+        assert isinstance(fit_intercept, (bool)), txt.format("fit_intercept",
+                                                             "bool")
         self.fit_intercept = fit_intercept
-
-        # add the order of the fit
+        assert isinstance(order, (int)), txt.format("order", "int")
         self.order = order
 
         # correct the shape of y and x
@@ -69,6 +78,16 @@ class LinearRegression():
             columns = self.__DV_labels__
             )
 
+        # obtain the symbolic representation of the equation
+        self.symbolic = []
+        for c, var in enumerate(self.coefs):
+            vars = self.X.columns.to_numpy()
+            bs = self.coefs[var].values[1:]
+            line = sy.Float(self.coefs[var].values[0], self.digits)
+            for v, b in zip(vars, bs):
+                line = line + sy.symbols(v) ** sy.Float(b, self.digits)
+            self.symbolic += [sy.Eq(sy.symbols(var), line)]
+
 
 
     @property
@@ -80,7 +99,7 @@ class LinearRegression():
 
 
 
-    @ property
+    @property
     def residuals(self):
         """
         obtain the residuals of the current regression model.
@@ -128,10 +147,10 @@ class LinearRegression():
         txt = "'{}' must be a pandas.DataFrame, a numpy.ndarray or None."
         txt = txt.format(name)
         if isinstance(v, pd.DataFrame):
-            XX = v
+            XX = v.astype(float)
         else:
             if isinstance(v, np.ndarray):
-                XX = pd.DataFrame(np.squeeze(v))
+                XX = pd.DataFrame(np.atleast_1d(v).astype(float))
             elif v is None:
 
                 # try to get the shape from the other parameter
@@ -155,7 +174,7 @@ class LinearRegression():
                         IX = pd.Index(np.arange(N))
                 N = np.arange(XX.shape[1]) + 1
                 CX = pd.Index(name + "{}".format(i) for i in N)
-                XX = pd.DataFrame(XX, index=IX, columns=CX)
+                XX = pd.DataFrame(XX, index=IX, columns=CX).astype(float)
             else:
                 raise NotImplementedError(txt)
         setattr(self, name, XX)
@@ -182,9 +201,14 @@ class LinearRegression():
         predict the fitted Y value according to the provided x.
         """
         X = self.__simplify__(x, 'x', self.order)
-        n = self.coefs.shape[0] - 1
-        assert X.shape[1] == n, "'X' must have {} columns.".format(n)
-        Z = X.dot(self.coefs.values[1:]) + self.coefs.values[0]
+        if self.fit_intercept:
+            n = self.coefs.shape[0] - 1
+            assert X.shape[1] == n, "'X' must have {} columns.".format(n)
+            Z = X.dot(self.coefs.values[1:]) + self.coefs.values[0]
+        else:
+            n = self.coefs.shape[0]
+            assert X.shape[1] == n, "'X' must have {} columns.".format(n)
+            Z = X.dot(self.coefs.values)
         if isinstance(x, pd.DataFrame):
             idx = x.index
         else:
@@ -193,69 +217,64 @@ class LinearRegression():
 
 
 
-    def SS(self):
+    def to_latex(self, digits = None):
+        if digits is None:
+            digits = self.digits
+        out = [sy.latex(i, min = digits, max = digits) for i in self.symbolic]
+        out = "\\begin{array}{rcl}" + "\\".join(out) + "\end{array}"
+        return out
+
+
+
+    def __repr__(self):
+        [sy.pprint(i, use_unicode = True) for i in self.symbolic]
+
+
+
+    def __str__(self):
+        return str(self.symbolic)
+
+
+
+    @property
+    def sumSq(self):
         """
         calculate the sum of squares of the fitted model.
         """
-        P = self.predict(self.X).values.flatten()
-        return np.sum((P - np.mean(P, 0)) ** 2, 0)
+        SS = pd.DataFrame(self.residuals.sum(0) ** 2).T
+        SS.columns = self.Y.columns
+        return SS
 
 
 
+    @property
     def R2(self):
         """
         calculate the R-squared of the fitted model.
         """
-        N = np.var(self.residuals().values.flatten())
-        D = np.var(self.Y.values.flatten())
-        return 1 - N / D
+        D = ((self.Y.values - self.Y.values.mean(0)) ** 2).sum(0)
+        return 1 - self.sumSq / D
 
 
 
+    @property
     def R2_adjusted(self):
         """
         calculate the Adjusted R-squared of the fitted model.
         """
-        den = (len(self.Y) - self.DF() - 1)
-        return 1 - (1 - self.R2) * (self.Y.shape[0] - 1) / den
+        n, k = self.X.shape
+        return 1 - ((1 - self.R2) * (n - 1) / (n - k - 1))
 
 
+
+    @property
     def RMSE(self):
         """
         Get the Root Mean Squared Error
         """
-        return np.sqrt(np.mean(self.residuals.values.flatten() ** 2))
-
-
-
-    def toString(self, digits=3):
-        """
-        Create a textual representation of the fitted model.
-
-        Input:
-            digits: (int)
-                    the number of digits to be used to represent the
-                    coefficients.
-
-        Output:
-            txt:    (str)
-                    a single string representing the fitted model.
-        """
-        txt = ""
-        ivs = self.coefs.columns.to_numpy()
-        dvs = self.coefs.index.to_numpy()
-        frm = "{:+." + str(digits) + "f}"
-        for iv in ivs:
-            line = "{} = ".format(iv)
-            for dv in dvs:
-                v = self.coefs.loc[dv, iv]
-                if dv == "Intercept":
-                    line += frm.format(v)
-                else:
-                    s = " " + frm + " {}"
-                    line += s.format(v, dv)
-            txt += line + "\n"
-        return txt
+        df = pd.DataFrame(np.sqrt((self.residuals.values ** 2).mean(0))).T
+        df.columns = self.Y.columns
+        return df
 
 
 
@@ -263,28 +282,37 @@ class PowerRegression(LinearRegression):
 
 
 
-    def __init__(self, y, x):
+    def __init__(self, y, x, digits = 5):
         """
-        Obtain the regression coefficients according to the Ordinary Least
-        Squares approach.
+        Obtain the regression coefficients according to the power model:
 
-        Input:
-            y:              (2D column numpy array)
-                            the array containing the dependent variable.
+                    y = b_0 * x_1 ^ b_1 * ... * x_n ^ b_n
 
-            x:              (2D array)
-                            the array containing the indipendent variables.
-                            The number of rows must equal the rows of y, while
-                            each column will be a regressor (i.e. an indipendent
-                            variable).
+        Input
+
+            y (2D column numpy array)
+
+                the array containing the dependent variable.
+
+            x (2D column numpy array)
+
+                the array containing the indipendent variable.
+                The number of rows must equal the rows of y, while
+                each column will be a regressor (i.e. an indipendent
+                variable).
+
+            digits (int)
+
+                the number of digits used to print the coefficients
         """
 
         # correct the shape of y and x
+        assert isinstance(digits, (int)), "'digits' must be and 'int'."
+        self.digits = digits
         YY = np.log(self.__simplify__(y, 'Y', None))
         XX = np.log(self.__simplify__(x, 'X', None))
         txt = "'X' and 'Y' number of rows must be identical."
         assert XX.shape[0] == YY.shape[0], txt
-        assert XX.shape[1] == 1, "'X' must have just 1 column."
 
         # add the ones for the intercept
         XX = np.hstack([np.ones((XX.shape[0], 1)), XX])
@@ -299,6 +327,17 @@ class PowerRegression(LinearRegression):
             index   = self.__IV_labels__,
             columns = self.__DV_labels__
             )
+
+        # obtain the symbolic representation of the equation
+        self.symbolic = []
+        for c, var in enumerate(self.coefs):
+            vars = self.X.columns.to_numpy()
+            a = self.coefs[var].values[0]
+            bs = self.coefs[var].values[1:]
+            line = sy.Float(a, digits)
+            for v, b in zip(vars, bs):
+                line = line * sy.symbols(v) ** sy.Float(b, digits)
+            self.symbolic += [sy.Eq(sy.symbols(var), line)]
 
 
 
@@ -315,12 +354,118 @@ class PowerRegression(LinearRegression):
         predict the fitted Y value according to the provided x.
         """
         X = self.__simplify__(x, 'x', None)
-        assert X.shape[1] == 1, "'X' must have 1 column."
-        Z = self.coefs.loc['a'].values * X ** self.coefs.loc['b'].values
+        m = self.coefs.shape[0] - 1
+        assert X.shape[1] == m, "'X' must have {} columns.".format(m)
+        Z = []
+        for dim in self.coefs:
+            coefs = self.coefs[dim].values.T
+            Z += [np.prod(X ** coefs[1:], axis = 1) * coefs[0]]
+        Z = pd.DataFrame(np.atleast_2d(Z).T)
         if isinstance(x, pd.DataFrame):
             idx = x.index
         else:
-            idx = np.arange(X.shape[0])
+            idx = pd.Index(np.arange(X.shape[0]))
+        return pd.DataFrame(Z, index=idx, columns=self.__DV_labels__)
+
+
+
+    @property
+    def __IV_labels__(self):
+        """
+        return the labels for the regressors.
+        """
+        lbls = ['b{}'.format(i + 1) for i in np.arange(len(self.X.columns))]
+        return ['b0'] + lbls
+
+
+
+class HyperbolicRegression(LinearRegression):
+
+
+
+    def __init__(self, y, x, digits = 5):
+        """
+        Obtain the regression coefficients according to the (Rectangular) Least
+        Squares Hyperbolic function:
+                                                            b * x
+                        (x + a) * (y + b) = a * b ==> y = - -----
+                                                            a + x
+        Input
+
+            y (2D column numpy array)
+
+                the array containing the dependent variable.
+
+            x (2D column numpy array)
+
+                the array containing the indipendent variable.
+                The number of rows must equal the rows of y, while
+                each column will be a regressor (i.e. an indipendent
+                variable).
+
+            digits (int)
+
+                the number of digits used to render the coefficients.
+        """
+
+        # add the input parameters
+        txt = "{} must be a {} object."
+        assert isinstance(digits, (int)), txt.format("digits", "int")
+        self.digits = digits
+
+        # correct the shape of y and x and get their reciprocal values
+        YY = self.__simplify__(y, 'Y', None) ** (-1)
+        XX = self.__simplify__(x, 'X', None) ** (-1)
+        txt = "'X' and 'Y' number of rows must be identical."
+        assert XX.shape[0] == YY.shape[0], txt
+        assert XX.shape[1] == 1, "'X' must have just 1 column."
+
+        # add the ones for the intercept
+        XX = np.hstack([np.ones((XX.shape[0], 1)), XX])
+
+        # get the linear regression coefficients
+        coefs = sl.pinv(XX.T.dot(XX)).dot(XX.T).dot(YY)
+
+        # obtain the hyberbolic coefficients
+        # a = -1 / intercept
+        # b =  slope / intercept
+        coefs = [
+            [coefs[1][0] / coefs[0][0]],
+            [- 1 / coefs[0][0]]
+            ]
+        self._coefs = pd.DataFrame(
+            data    = coefs,
+            index   = self.__IV_labels__,
+            columns = self.__DV_labels__
+            )
+
+        # obtain the symbolic representation of the equation
+        x = sy.symbols(self.X.columns.to_numpy()[0])
+        c = [sy.Float(i, self.digits) for i in self.coefs.values]
+        y = sy.symbols(self.coefs.columns.to_numpy()[0])
+        self.symbolic = [sy.Eq(y, (c[1] * x) / (c[0] + x))]
+
+
+
+    def copy(self):
+        """
+        copy the current instance
+        """
+        return HyperbolicRegression(self.Y, self.X)
+
+
+
+    def predict(self, x):
+        """
+        predict the fitted Y value according to the provided x.
+        """
+        X = self.__simplify__(x, 'x', None)
+        assert X.shape[1] == 1, "'X' must have 1 column."
+        Z = -self.coefs.loc['b'].values * X / (self.coefs.loc['a'].values + X)
+        if isinstance(x, pd.DataFrame):
+            idx = x.index
+        else:
+            idx = pd.Index(np.arange(X.shape[0]))
         return pd.DataFrame(Z, index=idx, columns=self.__DV_labels__)
 
 
@@ -334,7 +479,7 @@ class PowerRegression(LinearRegression):
 
 
 
-    def toString(self, digits=3):
+    def to_string(self, digits=3):
         """
         Create a textual representation of the fitted model.
 
@@ -348,17 +493,18 @@ class PowerRegression(LinearRegression):
                     a single string representing the fitted model.
         """
         frm = "{:+." + str(digits) + "f}"
-        txt = "{} = " + frm + " {} ^ " + frm
+        txt = "({} " + frm + ") * ({} " + frm + ") = " + frm
         return txt.format(
             self.coefs.columns.to_numpy()[0],
             self.coefs.loc['a'].values.flatten()[0],
-            self.X.columns.to_numpy()[0],
-            self.coefs.loc['b'].values.flatten()[0]
+            self.__DV_labels__()[0],
+            self.coefs.loc['b'].values.flatten()[0],
+            np.prod(self.coefs.values.flatten())
             )
 
 
 
-class Point(pd.DataFrame):
+class _Point(pd.DataFrame):
     """
     Create n-dimensional point sampled over time.
 
@@ -430,7 +576,7 @@ class Point(pd.DataFrame):
 
         # ensure all entered parameters are points
         txt = "'A', 'B' and 'C' must be Points with equal index and columns."
-        assert Point.match(A, B, C), txt
+        assert _Point.match(A, B, C), txt
 
         # get a, b and c
         a = (A - B).norm()
@@ -479,7 +625,7 @@ class Point(pd.DataFrame):
         names = ["V" + str(i + 1) + ("_1" if i in keys else "") for i in n_args]
         D.update(**{i: j for i, j in zip(names, args)})
         txt = "All input data must be Points with equal index and columns."
-        assert Point.match(**D), txt
+        assert _Point.match(**D), txt
 
         # internal function to simplify projection calculation
         def proj(a, b):
@@ -524,7 +670,7 @@ class Point(pd.DataFrame):
 
         # check if all elements are instance of Point or DataFrame
         for obj in objs:
-            if not isinstance(obj, (Point, pd.DataFrame)):
+            if not isinstance(obj, (_Point, pd.DataFrame)):
                 return False
 
         # check the columns and index of all objs
@@ -565,7 +711,7 @@ class Point(pd.DataFrame):
 
                 the imported point.
         """
-        return Point.from_csv(*args, **kwargs)
+        return _Point.from_csv(*args, **kwargs)
 
 
 
@@ -621,7 +767,7 @@ class Point(pd.DataFrame):
                       for i in df.columns]
 
         # get the point
-        return Point(
+        return _Point(
             data      = df.to_dict("list"),
             index     = idx_val,
             time_unit = time_unit,
@@ -653,7 +799,7 @@ class Point(pd.DataFrame):
 
                 the imported point.
         """
-        return Point.from_df(pd.read_csv(*args, **kwargs))
+        return _Point.from_df(pd.read_csv(*args, **kwargs))
 
 
 
@@ -687,7 +833,7 @@ class Point(pd.DataFrame):
 
                 the imported point.
         """
-        return Point.from_df(
+        return _Point.from_df(
             from_excel(file, sheet, *args, **kwargs)[sheet]
             )
 
@@ -795,7 +941,7 @@ class Point(pd.DataFrame):
         """
         Get the norm of the point.
         """
-        return Point(
+        return _Point(
             data      = (self ** 2).sum(1).values.flatten() ** 0.5,
             index     = self.index,
             columns   = ["|" + " + ".join(self.columns) + "|"],
@@ -837,7 +983,7 @@ class Point(pd.DataFrame):
                 The point with the function applied to each row.
         """
 
-        return Point(
+        return _Point(
             data      = {d: fun(self[d].values.flatten(), *args, **kwargs)
                          for d in self.columns},
             index     = self.index,
@@ -925,9 +1071,9 @@ class Point(pd.DataFrame):
 
         # generate the pandas object
         if len(ser_props) > 0:
-            super(Point, self).__init__(pd.Series(*args, **ser_props))
+            super(_Point, self).__init__(pd.Series(*args, **ser_props))
         else:
-            super(Point, self).__init__(*args, **kwargs)
+            super(_Point, self).__init__(*args, **kwargs)
 
         # add the extra features
         for prop in props:
@@ -961,19 +1107,19 @@ class Point(pd.DataFrame):
 
     @property
     def _constructor(self):
-        return Point
+        return _Point
 
 
 
     @property
     def _constructor_sliced(self):
-        return Point
+        return _Point
 
 
 
     @property
     def _constructor_expanddim(self):
-        return Point
+        return _Point
 
 
 
@@ -993,7 +1139,7 @@ class Point(pd.DataFrame):
 
     def __getattr__(self, *args, **kwargs):
         try:
-            out = super(Point, self).__getattr__(*args, **kwargs)
+            out = super(_Point, self).__getattr__(*args, **kwargs)
             return out.__finalize__(self)
         except Exception:
             AttributeError()
@@ -1090,11 +1236,11 @@ class Container(dict):
         # Container accordingly
         if os.path.isfile(path):
             vd[".".join(path.split(os.path.sep)[-1].split(".")[:-1])
-               ] = Point.from_csv(path, **kwargs)
+               ] = _Point.from_csv(path, **kwargs)
         else:
             for i in get_files(path, ".csv", False):
                 key = ".".join(i.split(os.path.sep)[-1].split(".")[:-1])
-                vd[key] = Point.from_csv(i, **kwargs)
+                vd[key] = _Point.from_csv(i, **kwargs)
 
         # return the dict
         return vd
@@ -1138,11 +1284,11 @@ class Container(dict):
         for i in dfs:
             if exclude_errors:
                 try:
-                    vd[i] = Point.from_df(dfs[i])
+                    vd[i] = _Point.from_df(dfs[i])
                 except Exception:
                     pass
             else:
-                vd[i] = Point.from_df(dfs[i])
+                vd[i] = _Point.from_df(dfs[i])
 
         # return the dict
         return vd
@@ -1180,7 +1326,7 @@ class Container(dict):
             file.close()
 
         # get the output VectorDict
-        vd = Point()
+        vd = _Point()
 
         # get the units
         dim_unit = lines[3][1]
@@ -1224,7 +1370,7 @@ class Container(dict):
                 K[key] = values[rows, cols.flatten()]
 
             # setup the output variable
-            vd[v] = Point(
+            vd[v] = _Point(
                 data      = K,
                 index     = time,
                 time_unit = time_unit,
@@ -1247,7 +1393,7 @@ class Container(dict):
 
     def __finalize__(self):
         for i in self.keys():
-            assert isinstance(self[i], (Point)), "{} is not a Point".format(i)
+            assert isinstance(self[i], _Point), "{} is not a Point".format(i)
         return self
 
 
@@ -2633,6 +2779,135 @@ def nan_replace_SVR(y, support=[], max_tr_data=1000,
         support (iterable of 1D arrays)
 
             the list of arrays whoose values can be
+            used as features to train the SVR model.
+
+        max_tr_data (int)
+
+            the maximum number of training data to be used.
+            If the effective available number is lower than max_tr_data,
+            all the training data are used. Otherwise, the specified number
+            is randomly sampled from the available pool.
+
+        SVRKwargs (dict)
+
+            default = {
+                "kernel": "rbf",
+                "gamma": "scale",
+                "tol": 1e-5,
+                "epsilon": 5e-4,  # i.e. 0.5 mm error.
+                "max_iter": 1e4
+                }
+
+            parameters passed to the SVR class. Full documentation can be
+            found here:
+            https://scikit-learn.org/stable/modules/generated/sklearn.svm.SVR.html
+
+        GridSearchKwargs (dict)
+
+            default = {
+                "estimator": SVR(**SVRKwargs),
+                "param_grid": {
+                    "C": np.unique([i * (10 ** j)
+                                    for i in np.arange(1, 11)
+                                    for j in np.linspace(-10, -1, 10)])
+                    },
+                "scoring": "neg_mean_absolute_error"
+                }
+
+            parameters passed to the scikit-learn GridSearchCV class.
+            Full documentation can be found here:
+            https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GridSearchCV.html#sklearn.model_selection.GridSearchCV
+
+    Output:
+
+        z (1D array)
+
+            a 1D array with the same shape of y without missing values.
+
+    References:
+
+        Smola A. J., Schölkopf B. (2004).
+            A tutorial on support vector regression.
+            Statistics and Computing, 14(3), 199–222.
+    '''
+
+    # control of the inputs
+    _validate_arr(y)
+    _validate_obj(support, list)
+    for s in support:
+        _validate_arr(s, shape=y.shape)
+    _validate_obj(max_tr_data, int)
+    _validate_obj(SVRKwargs, dict)
+    _validate_obj(GridSearchKwargs, dict)
+
+    # default SVR estimator options
+    opt_SVRKwargs = {
+        "kernel": "rbf",
+        "gamma": "scale",
+        "tol": 1e-5,
+        "epsilon": 5e-4,  # i.e. 0.5 mm error.
+        "max_iter": 1e4
+        }
+
+    # update the SVR options with those provided by the user
+    opt_SVRKwargs.update(**SVRKwargs)
+
+    # default GridSearchCV options
+    opt_GridSearchKwargs = {
+        "estimator": SVR(**opt_SVRKwargs),
+        "param_grid": {
+            "C": np.unique([i * (10 ** j) for i in np.arange(1, 11)
+                            for j in np.linspace(-10, -1, 10)])
+            },
+        "scoring": "neg_mean_absolute_error"
+        }
+
+    # update the GridSearchCV options with those provided by the user
+    opt_GridSearchKwargs.update(**GridSearchKwargs)
+
+    # get a copy of the current vector
+    complete = np.copy(y)
+
+    # get the missing values
+    miss_idx = np.argwhere(np.isnan(y)).flatten()
+
+    # replace missing data
+    if len(miss_idx) > 0 and len(support) > 0:
+
+        # get the training dataset
+        x = np.vstack([np.atleast_2d(v) for v in support]).T
+
+        # exclude the sets containing missing data from the training sets
+        tr_idx = np.arange(x.shape[0])
+        tr_idx = tr_idx[~miss_idx]
+        tr_idx = tr_idx[np.any(~np.isnan(x[tr_idx, :]), axis=1).flatten()]
+
+        # get max_tr_data unique samples at random
+        tr_idx = np.random.permutation(tr_idx)[:max_tr_data]
+        training_set = x[tr_idx, :]
+        if training_set.shape[0] > 0:
+
+            # grid searcher
+            grid = GridSearchCV(**opt_GridSearchKwargs)
+            est = grid.fit(training_set, y[tr_idx])
+
+            # replace the missing data
+            rep = est.best_estimator_.predict(x[miss_idx, :])
+            complete[miss_idx] = rep
+
+        return complete
+
+
+
+def replace_nan(y, x = None, model = LinearRegression, *args, **kwargs):
+    '''
+    Use a specific model (e.g. Linear Regression) to predict the missin values.
+
+    Input:
+
+        y (numpy ndarray)
+
+            the data whoose values can be
             used as features to train the SVR model.
 
         max_tr_data (int)
