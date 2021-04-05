@@ -1049,6 +1049,88 @@ class _Point(pd.DataFrame):
 
 
 
+    def replace_missing(self, replacement = None, x = None, *args, **kwargs):
+        """
+        replace missing values.
+
+        Input
+
+            replacement (dict or None, default = None)
+
+                a dict mapping the replacing value of each dimension to a key.
+
+            x (list(_Point) or None)
+
+                if replacement is None, Linear Regression is used to predict
+                the values to replace the missing data.
+                If this is the case, 'x' represents the list of _Point objects
+                to be used as Indipendent variables for the prediction.
+                These objects must be provided as list. The index of each
+                Point must mimic the index of the actual object.
+
+            *args, **kwargs (any)
+
+                the additional parameters to be passed to LinearRegression.
+
+        Output
+
+            F (_Point)
+
+                A new _Point object with the missing values being replaced.
+        """
+        # ensure missing data exist
+        missing_index = self.loc[self.isna().any(1)].index
+        if missing_index.shape[0] == 0:
+            return self.copy()
+
+        # use the provided replacement (if any)
+        F = self.copy()
+        if replacement is not None:
+
+            # validate the replacement argument
+            _validate_obj(replacement, (dict))
+            alert_dim = 'The current object does not have dimension {}'
+            alert_len = '{} must be of len = 1'
+            keys = np.array([i for i in replacement])
+            for key in keys:
+                if isinstance(replacement[key], (np.ndarray, list)):
+                    assert len(replacement[key]) == 1, alert_len.format(key)
+                    replacement[key] = replacement[key][0]
+                _validate_obj(replacement[key], (float, int))
+
+            # replace the missing values
+            replacement = [replacement[key] for key in self.columns]
+            replacement = np.atleast_2d(replacement)
+            replacement = np.vstack([replacement for i in missing_index])
+            F.loc[missing_index, F.columns] = replacement
+            return F
+
+        # get the set of valid values
+        valid_index = [i for i in self.index.values.flatten()
+                       if i not in missing_index.values.flatten()]
+        valid_index = pd.Index(valid_index)
+
+        # validate x
+        _validate_obj(x, (list))
+        X = []
+        for key in x:
+            _validate_obj(x[key], (_Point))
+        X = pd.concat(X, axis=1)
+
+        # obtain the regression coefficients
+        LM = LinearRegression(
+            y = self.loc[valid_index, self.columns],
+            x = X.loc[valid_index, X.columns],
+            *args, **kwargs
+            )
+
+        # replace the missing values
+        pred = LM.predict(X.loc[missing_index, X.columns])
+        F.loc[missing_index, F.columns] = pred
+        return F
+
+
+
     # PRIVATE METHODS
 
     def __init__(self, *args, **kwargs):
@@ -2765,317 +2847,3 @@ def lvlup(path):
 
     # return the upper level
     return os.path.sep.join(path.split(os.path.sep)[:-1])
-
-
-
-def nan_replace_SVR(y, support=[], max_tr_data=1000,
-                    GridSearchKwargs={}, SVRKwargs={}):
-    '''
-    Use Support Vector Regression (SVR) to provide the coordinates of the
-    missing samples in the current vector.
-
-    Input:
-
-        support (iterable of 1D arrays)
-
-            the list of arrays whoose values can be
-            used as features to train the SVR model.
-
-        max_tr_data (int)
-
-            the maximum number of training data to be used.
-            If the effective available number is lower than max_tr_data,
-            all the training data are used. Otherwise, the specified number
-            is randomly sampled from the available pool.
-
-        SVRKwargs (dict)
-
-            default = {
-                "kernel": "rbf",
-                "gamma": "scale",
-                "tol": 1e-5,
-                "epsilon": 5e-4,  # i.e. 0.5 mm error.
-                "max_iter": 1e4
-                }
-
-            parameters passed to the SVR class. Full documentation can be
-            found here:
-            https://scikit-learn.org/stable/modules/generated/sklearn.svm.SVR.html
-
-        GridSearchKwargs (dict)
-
-            default = {
-                "estimator": SVR(**SVRKwargs),
-                "param_grid": {
-                    "C": np.unique([i * (10 ** j)
-                                    for i in np.arange(1, 11)
-                                    for j in np.linspace(-10, -1, 10)])
-                    },
-                "scoring": "neg_mean_absolute_error"
-                }
-
-            parameters passed to the scikit-learn GridSearchCV class.
-            Full documentation can be found here:
-            https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GridSearchCV.html#sklearn.model_selection.GridSearchCV
-
-    Output:
-
-        z (1D array)
-
-            a 1D array with the same shape of y without missing values.
-
-    References:
-
-        Smola A. J., Schölkopf B. (2004).
-            A tutorial on support vector regression.
-            Statistics and Computing, 14(3), 199–222.
-    '''
-
-    # control of the inputs
-    _validate_arr(y)
-    _validate_obj(support, list)
-    for s in support:
-        _validate_arr(s, shape=y.shape)
-    _validate_obj(max_tr_data, int)
-    _validate_obj(SVRKwargs, dict)
-    _validate_obj(GridSearchKwargs, dict)
-
-    # default SVR estimator options
-    opt_SVRKwargs = {
-        "kernel": "rbf",
-        "gamma": "scale",
-        "tol": 1e-5,
-        "epsilon": 5e-4,  # i.e. 0.5 mm error.
-        "max_iter": 1e4
-        }
-
-    # update the SVR options with those provided by the user
-    opt_SVRKwargs.update(**SVRKwargs)
-
-    # default GridSearchCV options
-    opt_GridSearchKwargs = {
-        "estimator": SVR(**opt_SVRKwargs),
-        "param_grid": {
-            "C": np.unique([i * (10 ** j) for i in np.arange(1, 11)
-                            for j in np.linspace(-10, -1, 10)])
-            },
-        "scoring": "neg_mean_absolute_error"
-        }
-
-    # update the GridSearchCV options with those provided by the user
-    opt_GridSearchKwargs.update(**GridSearchKwargs)
-
-    # get a copy of the current vector
-    complete = np.copy(y)
-
-    # get the missing values
-    miss_idx = np.argwhere(np.isnan(y)).flatten()
-
-    # replace missing data
-    if len(miss_idx) > 0 and len(support) > 0:
-
-        # get the training dataset
-        x = np.vstack([np.atleast_2d(v) for v in support]).T
-
-        # exclude the sets containing missing data from the training sets
-        tr_idx = np.arange(x.shape[0])
-        tr_idx = tr_idx[~miss_idx]
-        tr_idx = tr_idx[np.any(~np.isnan(x[tr_idx, :]), axis=1).flatten()]
-
-        # get max_tr_data unique samples at random
-        tr_idx = np.random.permutation(tr_idx)[:max_tr_data]
-        training_set = x[tr_idx, :]
-        if training_set.shape[0] > 0:
-
-            # grid searcher
-            grid = GridSearchCV(**opt_GridSearchKwargs)
-            est = grid.fit(training_set, y[tr_idx])
-
-            # replace the missing data
-            rep = est.best_estimator_.predict(x[miss_idx, :])
-            complete[miss_idx] = rep
-
-        return complete
-
-
-
-def replace_nan(y, x = None, model = LinearRegression, *args, **kwargs):
-    '''
-    Use a specific model (e.g. Linear Regression) to predict the missin values.
-
-    Input:
-
-        y (numpy ndarray)
-
-            the data whoose values can be
-            used as features to train the SVR model.
-
-        max_tr_data (int)
-
-            the maximum number of training data to be used.
-            If the effective available number is lower than max_tr_data,
-            all the training data are used. Otherwise, the specified number
-            is randomly sampled from the available pool.
-
-        SVRKwargs (dict)
-
-            default = {
-                "kernel": "rbf",
-                "gamma": "scale",
-                "tol": 1e-5,
-                "epsilon": 5e-4,  # i.e. 0.5 mm error.
-                "max_iter": 1e4
-                }
-
-            parameters passed to the SVR class. Full documentation can be
-            found here:
-            https://scikit-learn.org/stable/modules/generated/sklearn.svm.SVR.html
-
-        GridSearchKwargs (dict)
-
-            default = {
-                "estimator": SVR(**SVRKwargs),
-                "param_grid": {
-                    "C": np.unique([i * (10 ** j)
-                                    for i in np.arange(1, 11)
-                                    for j in np.linspace(-10, -1, 10)])
-                    },
-                "scoring": "neg_mean_absolute_error"
-                }
-
-            parameters passed to the scikit-learn GridSearchCV class.
-            Full documentation can be found here:
-            https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GridSearchCV.html#sklearn.model_selection.GridSearchCV
-
-    Output:
-
-        z (1D array)
-
-            a 1D array with the same shape of y without missing values.
-
-    References:
-
-        Smola A. J., Schölkopf B. (2004).
-            A tutorial on support vector regression.
-            Statistics and Computing, 14(3), 199–222.
-    '''
-
-    # control of the inputs
-    _validate_arr(y)
-    _validate_obj(support, list)
-    for s in support:
-        _validate_arr(s, shape=y.shape)
-    _validate_obj(max_tr_data, int)
-    _validate_obj(SVRKwargs, dict)
-    _validate_obj(GridSearchKwargs, dict)
-
-    # default SVR estimator options
-    opt_SVRKwargs = {
-        "kernel": "rbf",
-        "gamma": "scale",
-        "tol": 1e-5,
-        "epsilon": 5e-4,  # i.e. 0.5 mm error.
-        "max_iter": 1e4
-        }
-
-    # update the SVR options with those provided by the user
-    opt_SVRKwargs.update(**SVRKwargs)
-
-    # default GridSearchCV options
-    opt_GridSearchKwargs = {
-        "estimator": SVR(**opt_SVRKwargs),
-        "param_grid": {
-            "C": np.unique([i * (10 ** j) for i in np.arange(1, 11)
-                            for j in np.linspace(-10, -1, 10)])
-            },
-        "scoring": "neg_mean_absolute_error"
-        }
-
-    # update the GridSearchCV options with those provided by the user
-    opt_GridSearchKwargs.update(**GridSearchKwargs)
-
-    # get a copy of the current vector
-    complete = np.copy(y)
-
-    # get the missing values
-    miss_idx = np.argwhere(np.isnan(y)).flatten()
-
-    # replace missing data
-    if len(miss_idx) > 0 and len(support) > 0:
-
-        # get the training dataset
-        x = np.vstack([np.atleast_2d(v) for v in support]).T
-
-        # exclude the sets containing missing data from the training sets
-        tr_idx = np.arange(x.shape[0])
-        tr_idx = tr_idx[~miss_idx]
-        tr_idx = tr_idx[np.any(~np.isnan(x[tr_idx, :]), axis=1).flatten()]
-
-        # get max_tr_data unique samples at random
-        tr_idx = np.random.permutation(tr_idx)[:max_tr_data]
-        training_set = x[tr_idx, :]
-        if training_set.shape[0] > 0:
-
-            # grid searcher
-            grid = GridSearchCV(**opt_GridSearchKwargs)
-            est = grid.fit(training_set, y[tr_idx])
-
-            # replace the missing data
-            rep = est.best_estimator_.predict(x[miss_idx, :])
-            complete[miss_idx] = rep
-
-        return complete
-
-
-
-def nan_replace(y, value=None):
-    """
-    replace missing values in y.
-
-
-        Input
-
-            y (1D array)
-
-                the data which contains missing values
-
-            value (None, float)
-
-                the value to be used to replace the data.
-                If None, cubic spline interpolation is used to cover the
-                missing values.
-                If float value is provided, all missing data are
-                replaced with it.
-
-        Output:
-
-        z (1D array)
-
-            a 1D array with the same shape of y without missing values.
-    """
-
-    # control of the inputs
-    _validate_arr(y)
-    z = np.copy(y)
-    miss_idx = np.argwhere(np.isnan(y)).flatten()
-
-    # find the proper replacing value
-    if value is not None:
-        _validate_obj(value, (float, int))
-        z[miss_idx] = value
-
-    # use cubic spline interpolation
-    else:
-
-        # valid data
-        train_idx = np.arghwere(~np.isnan(y)).flatten()
-
-        # obtain the cubic spline interpolated data
-        z = interpolate_cs(
-            y = y[train_idx],
-            x_old = train_idx,
-            x_new = np.arange(len(y))
-            )
-
-    # return the interpolated data
-    return z
