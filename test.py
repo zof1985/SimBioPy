@@ -2,10 +2,7 @@
 import kinematics as sbk
 import numpy as np
 
-a = sbk._UnitDataFrame(data = {'A': [0, 10, 15, 0.3]}, index = np.linspace(0, 10, 4), dim_unit = "N", time_unit = "s")
-b = sbk._UnitDataFrame(data = {'B': [2, 11, 1, 0.1]}, index = np.linspace(0, 10, 4), dim_unit = "N", time_unit = "s")
-c = 14.5
-d = a + b
-e = a + c
-f = c + a
-check = 1
+a = sbk.ReferenceFrame()
+b = sbk.ReferenceFrame(origin=np.array([[1, 0, 0]]), orientation=np.array([[1,0,0], [0, 0,1], [0,1,0]]))
+v = np.array([[1.5, 0.3, 0.4]])
+k = b.to_local(v)

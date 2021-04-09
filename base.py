@@ -2,7 +2,6 @@
 
 import itertools as it
 import os
-import re
 import time
 import traceback
 import numpy as np
@@ -12,7 +11,6 @@ import scipy.interpolate as si
 import scipy.signal as ss
 import scipy.linalg as sl
 import sympy as sy
-from sklearn.model_selection import GridSearchCV
 from sklearn.svm import SVR
 
 
@@ -506,84 +504,6 @@ class HyperbolicRegression(LinearRegression):
 
 # FUNCTIONS
 
-def _validate_arr(y, dim = 1, shape = None, type = (int, float)):
-    """
-    private method used to validate numpy arrays.
-
-    Input:
-
-        y (Object)
-
-            the object to be validated.
-
-        dim (None or int)
-
-            the number of dimensions that y must have.
-
-        shape (None or iterable of int)
-
-            the size that y must satisfy on each dimension.
-
-        type (None or instance)
-
-            the instance of the object.
-    """
-
-    # get the variable name
-    stack = traceback.extract_stack()
-    filename, lineno, function_name, code = stack[-2]
-    name = re.compile(r'\((.*?)\).*$').search(code).groups()[0]
-
-    # check y is an array
-    txt = "'{}' must be a numpy array.".ormat(name)
-    assert isinstance(y, (np.ndarray)), txt
-
-    if type is not None:
-        type = np.array([type]).flatten()
-        assert y.dtype in type, "'type' must be any of {}".format(type)
-
-    if shape is not None:
-        txt = "'shape' must be an iterable of int values."
-        assert np.all([isinstance(i, (int)) for i in shape]), txt
-
-        for i in range(len(shape)):
-            txt2 = "'{}.shape[{}]' must be {}.".format(name, i, shape[i])
-            assert y.shape[i] == shape[i], txt2
-
-    if dim is not None:
-        assert isinstance(dim, (int)), "'dim' must be an int."
-        txt = "'{}' must be a {} dimensional array.".format(name, dim)
-        assert y.ndim == dim, txt
-
-
-
-def _validate_obj(y, type):
-    """
-    private method used to validate numpy arrays.
-
-    Input:
-
-        y (Object)
-
-            the object to be validated.
-
-        type (iterable of obj instances)
-
-            the instance(s) allowed for the object.
-    """
-
-    # get the variable name
-    stack = traceback.extract_stack()
-    filename, lineno, function_name, code = stack[-2]
-    name = re.compile(r'\((.*?)\).*$').search(code).groups()[0]
-
-    # check its type
-    if type is not None:
-        type = np.array([type]).flatten()
-        assert y.dtype in type, "'{}' must be any of {}".format(name, type)
-
-
-
 def d1y(y, x = None, dt = 1):
     '''
     return the first derivative of y.
@@ -619,15 +539,10 @@ def d1y(y, x = None, dt = 1):
             Biomechanics and Motor Control of Human Movement. Fourth Ed.
             Hoboken, New Jersey: John Wiley & Sons Inc; 2009.
     '''
-    # validate the input data
-    _validate_arr(y, 1, type=[float, int])
 
     # get x
     if x is None:
-        _validate_obj(dt, int)
         x = np.arange(len(y)) * dt
-    else:
-        _validate_arr(x, shape=y.shape, type=y.dtype)
 
     # get the derivative
     return (y[2:] - y[:-2]) / (x[2:] - x[:-2])
@@ -669,15 +584,10 @@ def d2y(y, x = None, dt = 1):
             Biomechanics and Motor Control of Human Movement. Fourth Ed.
             Hoboken, New Jersey: John Wiley & Sons Inc; 2009.
     '''
-    # validate the input data
-    _validate_arr(y, 1, type=[float, int])
 
     # get x
     if x is None:
-        _validate_obj(dt, int)
         x = np.arange(len(y)) * dt
-    else:
-        _validate_arr(x, shape=y.shape, type=y.dtype)
 
     # get the derivative
     dy = (y[2:] - y[1:-1]) / (x[2:] - x[1:-1])
@@ -715,11 +625,6 @@ def pad(y, before=0, after=0, value=0):
 
             the padded array
     """
-    # validate the inputs
-    _validate_arr(y)
-    _validate_obj(after, int)
-    _validate_obj(before, int)
-    _validate_obj(value, float)
 
     # get the pads
     a_pad = np.tile(value, after)
@@ -756,9 +661,6 @@ def rescale_arr(y, vmin = 0, vmax = 1):
     """
 
     # validate the data
-    _validate_arr(y)
-    _validate_obj(vmin, (float, int))
-    _validate_obj(vmax, (int, float))
     assert vmin <= vmax, "'vmin' must be <= 'vmax'."
 
     # rescale
@@ -796,9 +698,6 @@ def freedman_diaconis_bins(y):
             Z. Wahrscheinlichkeitstheorie verw Gebiete 57: 453–476.
             doi: 10.1007/BF01025868
     """
-
-    # validate
-    _validate_arr(y)
 
     # y IQR
     q1 = np.quantile(y, 0.25)
@@ -855,9 +754,6 @@ def mean_filter(y, n=1, offset=0.5):
     """
 
     # control inputs
-    _validate_arr(y)
-    _validate_obj(n, (int))
-    _validate_obj(offset, (float, int))
     txt = "'offset' must be a float in the [-1, 1] range."
     assert offset >= -1, txt
     assert offset <= 1, txt
@@ -912,9 +808,6 @@ def median_filter(y, n=1, offset=0.5):
     """
 
     # control inputs
-    _validate_arr(y)
-    _validate_obj(n, (int))
-    _validate_obj(offset, (float, int))
     txt = "'offset' must be a float in the [-1, 1] range."
     assert offset >= -1, txt
     assert offset <= 1, txt
@@ -965,14 +858,9 @@ def interpolate_cs(y, n=None, x_old=None, x_new=None):
     """
 
     # control of the inputs
-    _validate_arr(y)
     if n is not None:
-        _validate_obj(n, (int))
         x_old = np.arange(len(y))
         x_new = np.linspace(np.min(x_old), np.max(x_old), n)
-    else:
-        _validate_arr(x_old, shape=y.shape)
-        _validate_arr(x_new, dim=y.ndim)
 
     # get the cubic-spline interpolated y
     cs = si.CubicSpline(x_old, y)
@@ -1070,28 +958,19 @@ def residuals_analysis(y, fs, f_num=1000, f_max=None, segments=2,
     """
 
     # control the inputs
-    _validate_arr(y)
-    _validate_obj(fs, float)
     assert fs > 0, "'fs' must be > 0."
-    _validate_obj(f_num, int)
     assert f_num > 1, "'f_num' must be > 1."
     if f_max is None:
         P, F = psd(y, fs)
         f_max = np.arghwere(np.cumsum(P) / np.sum(P) >= 0.99).flatten()
         f_max = np.min([fs / 2, F[f_max[0]]])
-    else:
-        _validate_obj(f_max, (float))
-    _validate_obj(segments, int)
-    _validate_obj(min_samples, int)
     assert min_samples >= 2, "'min_samples' must be >= 2."
     if which_segment is not None:
-        _validate_obj(which_segment, int)
         txt = "'which_segment' must be an int in the [1, {}] range."
         txt = txt.format(segments)
         assert which_segment > 1, txt
     if filt_fun is None:
         filt_fun = butt_filt
-    _validate_obj(filt_opt, dict)
     if filt_opt is None:
         filt_opt = {
             'order': 4,
@@ -1099,8 +978,6 @@ def residuals_analysis(y, fs, f_num=1000, f_max=None, segments=2,
             'type': 'lowpass',
             'phase_corrected': True
             }
-    else:
-        _validate_obj(filt_opt, dict)
 
     # get the frequency span
     freqs = np.linspace(0, f_max, f_num + 1)[1:]
@@ -1187,9 +1064,6 @@ def crossovers(y, segments=2, min_samples=5):
     """
 
     # control the inputs
-    _validate_arr(y)
-    _validate_obj(segments, int)
-    _validate_obj(min_samples, int)
     assert min_samples >= 2, "'min_samples' must be >= 2."
 
     # get the residuals calculating formula
@@ -1280,15 +1154,10 @@ def butt_filt(y, cutoff, fs, order=4, type='lowpass', phase_corrected=True):
     """
 
     # control the inputs
-    _validate_arr(y)
-    _validate_obj(cutoff, (float, list, np.ndarray))
     if isinstance(cutoff, (np.ndarray, list)):
         assert len(cutoff) == 2, "'cutoff' length must be 2."
         txt = "all cutoff values must be float or int"
         assert np.all([isinstance(i, (float, int)) for i in cutoff]), txt
-    _validate_obj(order, int)
-    _validate_obj(type, str)
-    _validate_obj(phase_corrected, bool)
 
     # get the filter coefficients
     sos = ss.butter(
@@ -1332,15 +1201,10 @@ def psd(y, fs=1, n=None):
 
             the frequencies.
     """
-    # control the inputs
-    _validate_arr(y)
-    _validate_obj(fs, (int, float))
 
     # set n
     if n is None:
         n = len(y)
-    else:
-        _validate_obj(n, int)
 
     # get the FFT and normalize by the length of y
     f = np.fft.rfft(y - np.mean(y), n) / len(y)
@@ -1381,11 +1245,8 @@ def find_peaks(y, height=None):
             the indices of the peaks (in sample units) in y.
     """
     # control the inputs
-    _validate_arr(y)
     if height is None:
         height = np.min(y)
-    else:
-        _validate_obj(height, (float))
 
     # get the first derivative of the signal
     d1 = d1y(y)
@@ -1432,9 +1293,6 @@ def crossings(y, value=0.):
             values higher than "value". Negative sign indicate the
             opposite trend.
     """
-    # control of the inputs
-    _validate_arr(y)
-    _validate_obj(value, float)
 
     # get the sign of the signal without the offset
     sn = y - value
@@ -1482,12 +1340,6 @@ def xcorr(y, biased=False, full=False, *args):
 
             the lags in sample units.
     """
-    # control the inputs
-    _validate_arr(y)
-    _validate_obj(biased, bool)
-    _validate_obj(full, bool)
-    for i in args:
-        _validate_arr(args[i])
 
     # take the autocorrelation if only y is provided
     if len(args) == 0:
@@ -1550,8 +1402,6 @@ def magnitude(y, base=10):
 
             the number required to elevate the base to get the value
     """
-    _validate_obj(y, (float, int))
-    _validate_obj(base, (float, int))
 
     # return the magnitude
     if y == 0 or base == 0:
@@ -1588,10 +1438,6 @@ def get_files(path, extension='', check_subfolders=False):
             a list containing the full_path to all the files corresponding
             to the input criteria.
     """
-    # control the inputs
-    _validate_obj(path, str)
-    _validate_obj(extension, str)
-    _validate_obj(check_subfolders, bool)
 
     # output storer
     out = []
@@ -1642,13 +1488,6 @@ def to_excel(path, df, sheet="Sheet1", keep_index=True, new_file=False):
 
         The data stored to the indicated file.
     """
-
-    # control the inputs
-    _validate_obj(path, str)
-    _validate_obj(df, pd.DataFrame)
-    _validate_obj(sheet, str)
-    _validate_obj(keep_index, bool)
-    _validate_obj(new_file, bool)
 
     # get the workbook
     if os.path.exists(path) and not new_file:
@@ -1840,9 +1679,6 @@ def lvlup(path):
 
             a string reflecting the superior directory of file.
     """
-
-    # control the inputs
-    _validate_obj(path, str)
 
     # return the upper level
     return os.path.sep.join(path.split(os.path.sep)[:-1])
