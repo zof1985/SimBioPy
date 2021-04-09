@@ -134,5 +134,5 @@ launch.json
 workspace.code-workspace
 
 # extra
-/Matlab
-/test.py
+Matlab/
+.test.py
