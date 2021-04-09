@@ -48,16 +48,32 @@ class ReferenceFrame():
         names = np.array(['X', 'Y', 'Z']),
         unit = "m"
         ):
-        # check the entered data
-        O = np.array([origin]).flatten().astype(np.float)
-        self.ndim = len(O)
-        N = np.array([names]).flatten()
 
-        # store the relevant data
+        # check the names
+        txt = "'{}' must be a numpy array or list."
+        valid = (list, np.ndarray)
+        assert isinstance(names, valid), txt.format("names")
+        N = np.array([names]).flatten()
+        self.ndim = len(N)
+
+        # handle the origin
+        assert isinstance(origin, valid), txt.format("origin")
+        O = np.array([origin]).flatten().astype(np.float)
+        assert len(O) == self.ndim, "'origin' len must be {}".format(self.ndim)
+        self.origin = pd.DataFrame(O, columns = ['Origin'], index = N).T
+
+        # handle the unit
+        assert isinstance(unit, (str)), "'unit' must be a str."
         self.unit = unit
-        self.origin = pd.DataFrame(O, index=N, columns=['Origin']).T
+
+        # handle the orientation
+        assert isinstance(orientation, valid), txt.format("orientation")
+        O = np.atleast_2d(orientation)
+        r, c = O.shape
+        txt = "'orientation' must be a {} x {} matrix.".format(self.ndim)
+        assert r == c == self.ndim, txt
         self.versors = pd.DataFrame(
-            data    = self._orthogonalize(orientation),
+            data    = self._orthogonalize(O),
             index   = ['v{}'.format(i+1) for i in np.arange(self.ndim)],
             columns = N
             )
@@ -106,6 +122,14 @@ class ReferenceFrame():
         # normalize
         return np.vstack([norm(u) for u in W])
 
+    def __str__(self):
+        O = pd.concat([self.origin, self.versors], axis = 0)
+        O.columns = pd.Index([i + " {}".format(self.unit) for i in O.columns])
+        return O
+
+    def __repr__(self):
+        return self.__str__()
+
 
 class Marker(ReferenceFrame):
     """
@@ -126,12 +150,12 @@ class Marker(ReferenceFrame):
             reference frame. 'origin' is casted to a 2D ndarray and it must
             result in 1 single row with n-dimensions.
 
-        versors (numpy 2 dimensional array)
+        orientation (numpy 2 dimensional array)
 
             a 2D numpy array containing the unit vectors defining the
             orientation of the ReferenceFrame with respect to the "global"
             Frame.
-            The versors must be a 2D numpy array where each row is a versor
+            The orientation must be a 2D numpy array where each row is a versor
             and each column a dimension.
 
         names (list, numpy 1 dimensional array)
@@ -158,10 +182,14 @@ class Marker(ReferenceFrame):
         # initialize the ReferenceFrame
         super().__init__(origin, versors, names, unit)
 
-        # add the coordinates
+        # check the coordinates
         txt = "coords must be a 2D numpy array or a pandas DataFrame with "
         txt += "{} dimensions.".format(self.ndim)
         assert isinstance(coords, (pd.DataFrame, np.ndarray)), txt
+
+        # check the coordinates labels
+        if isinstance(coords, (pd.DataFrame)):
+
 
 
 
