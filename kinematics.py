@@ -70,7 +70,8 @@ class ReferenceFrame():
         assert isinstance(orientation, valid), txt.format("orientation")
         O = np.atleast_2d(orientation)
         r, c = O.shape
-        txt = "'orientation' must be a {} x {} matrix.".format(self.ndim)
+        txt = "'orientation' must be a {} x {} matrix."
+        txt = txt.format(self.ndim, self.ndim)
         assert r == c == self.ndim, txt
         self.versors = pd.DataFrame(
             data    = self._orthogonalize(O),
@@ -124,8 +125,9 @@ class ReferenceFrame():
 
     def __str__(self):
         O = pd.concat([self.origin, self.versors], axis = 0)
-        O.columns = pd.Index([i + " {}".format(self.unit) for i in O.columns])
-        return O
+        C = O.columns.to_list()
+        O.columns = pd.Index([(i + " ({})".format(self.unit)) for i in C])
+        return O.__str__() + "\n"
 
     def __repr__(self):
         return self.__str__()
@@ -143,6 +145,9 @@ class Marker(ReferenceFrame):
             each row denotes one single sample.
             if a pandas.DataFrame is provided, the columns are used as
             names of the dimensions.
+
+        fs (float)
+            the sampling rate (in Hz) at which the coordinates are sampled.
 
         origin (numpy 1 or 2 dimensional array)
 
@@ -171,25 +176,92 @@ class Marker(ReferenceFrame):
     def __init__(
         self,
         coords,
+        fs = 1,
         origin  = np.array([0, 0, 0]),
-        versors = np.array([[1, 0, 0],
-                            [0, 1, 0],
-                            [0, 0, 1]]),
+        orientation = np.array([[1, 0, 0],
+                               [0, 1, 0],
+                               [0, 0, 1]]),
         names   = np.array(['X', 'Y', 'Z']),
         unit    = "m"
         ):
 
         # initialize the ReferenceFrame
-        super().__init__(origin, versors, names, unit)
+        super().__init__(origin, orientation, names, unit)
+
+        # check the sample frequency
+        txt = "'fs' must be a positive float."
+        assert isinstance(fs, (float)) and fs > 0, txt
+        self.fs = fs
 
         # check the coordinates
         txt = "coords must be a 2D numpy array or a pandas DataFrame with "
         txt += "{} dimensions.".format(self.ndim)
         assert isinstance(coords, (pd.DataFrame, np.ndarray)), txt
-
-        # check the coordinates labels
+        txt = "'coords' must have {} dimensions.".format(self.ndim)
         if isinstance(coords, (pd.DataFrame)):
+            N = coords.columns
+            assert len(N.to_list()) == self.ndim, txt
+            self.origin.columns = N
+            self.versors.columns = N
+            C = coords.values
+        else:
+            N = self.origin.columns
+            C = np.atleast_2d(coords)
+            assert C.shape[1] == self.ndim, txt
 
+        # get the coordinates
+        self.coordinates = pd.DataFrame(
+            data    = C,
+            index   = np.arange(C.shape[0]) * fs,
+            columns = N
+            )
+
+    def to_frame(self, R):
+        """
+        move the current reference frame to a new frame R.
+
+        Input
+
+            R (ReferenceFrame)
+
+                the ReferenceFrame object on which the current Marker has to be
+                aligned.
+
+        Output
+
+            M (Marker)
+
+                the marker represented by the ReferenceFrame R
+        """
+
+        # check the reference frame
+        assert isinstance(R, (ReferenceFrame)), "'R' must be a ReferenceFrame."
+        assert self.unit == R.unit, "'R' unit diverge from coordinates unit."
+        C = self.coordinates.columns.to_numpy()
+        N = R.origin.columns.to_numpy()
+        assert np.all([i in N for i in C]), "R dimensions must be {}".format(C)
+        assert self.unit == R.unit, "'R' unit diverge from coordinates unit."
+
+        # move the coordinates of the actual marker to the "global" frame
+        M0 = self._rot.inv().apply(self.coordinates) + self.origin.values
+        M1 = R._rot.apply(M0 - R.origin.values)
+        return Marker(
+            coords      = M1,
+            fs          = self.fs,
+            origin      = R.origin.values,
+            orientation = R.versors.values,
+            names       = self.coordinates.columns.to_list(),
+            unit        = R.unit
+            )
+
+    def __str__(self):
+        O = self.coordinates.copy()
+        C = O.columns.to_list()
+        O.columns = pd.Index([(i + " ({})".format(self.unit)) for i in C])
+        O.index = pd.Index([(str(i) + " (s)") for i in O.index.to_numpy()])
+        O = "Coordinates:\n" + O.__str__() + "\n\n"
+        O += "ReferenceFrame:\n" + super().__str__()
+        return O
 
 
 
