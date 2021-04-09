@@ -10,119 +10,159 @@ from scipy.spatial.transform import Rotation
 
 # CLASSES
 
-
 class ReferenceFrame():
+    """
+    Create a ReferenceFrame instance.
 
-    def __init__(self, origin = None, versors = None, unit = "m", fs = 1):
+    Input
+
+        origin (numpy 1 or 2 dimensional array)
+
+            a numpy array containing the origin of the "local"
+            reference frame. 'origin' is casted to a 2D ndarray and it must
+            result in 1 single row with n-dimensions.
+
+        orientation (numpy 2 dimensional array)
+
+            a 2D numpy array containing the unit vectors defining the
+            orientation of the ReferenceFrame with respect to the "global"
+            Frame.
+            The orientation must be a 2D numpy array where each row is a versor
+            and each column a dimension.
+
+        names (list, numpy 1 dimensional array)
+
+            the names of each dimension provided as array or list of strings.
+
+        unit (str)
+
+            the unit of measurement of the ReferenceFrame.
+    """
+
+    def __init__(
+        self,
+        origin = np.array([0, 0, 0]),
+        orientation = np.array([[1, 0, 0],
+                                [0, 1, 0],
+                                [0, 0, 1]]),
+        names = np.array(['X', 'Y', 'Z']),
+        unit = "m"
+        ):
+        # check the entered data
+        O = np.array([origin]).flatten().astype(np.float)
+        self.ndim = len(O)
+        N = np.array([names]).flatten()
+
+        # store the relevant data
+        self.unit = unit
+        self.origin = pd.DataFrame(O, index=N, columns=['Origin']).T
+        self.versors = pd.DataFrame(
+            data    = self._orthogonalize(orientation),
+            index   = ['v{}'.format(i+1) for i in np.arange(self.ndim)],
+            columns = N
+            )
+
+        # calculate the rotation matrix
+        self._rot = Rotation.from_matrix(self.versors)
+
+    def _orthogonalize(self, vectors):
         """
-        Create a ReferenceFrame instance.
+        return the orthogonal basis defined by a set of vectors using the
+        Gram-Schmidt algorithm.
 
         Input
 
-            origin (2D numpy.ndarray or pandas.DataFrame)
+            normalized (bool)
 
-                a numpy array containing the origin of the "local"
-                reference frame.
+                should the projected points returned in normalized units?
 
-            versors (dict of pandas.DataFrame of 2D numpy.ndarray(s))
+            args / kwargs (Point)
 
-                a list of len equal to the number of keys of origin.
-                Each dict must have same keys of origin with one numeric value
-                per key.
+                one or more points from which the orthogonal projections have
+                to be calculated.
+
+        Output
+
+            W (Container)
+
+                a Container object containing the orthogonal points.
         """
 
-        # check the origin
-        assert isinstance(origin, dict), "'origin' must be a dict."
+        # internal functions to simplify the calculation
+        def proj(a, b):
+            return (np.inner(a, b) / np.inner(b, b) * b).astype(np.float)
 
-        # check each versor
-        assert len(versors) == len(origin), str(
-            len(origin)) + " versors are required."
-        dims = np.array([i for i in origin])
-        V = []
-        for versor in versors:
-            assert np.all([j in dims for j in versor]
-                          ), "all versors must have keys: " + str(dims)
-            vec = _UnitDataFrame(versor, index=[
-                0], type="versor", dim_unit="", time_unit="")
-            V += [vec / vec.norm.values]
+        def norm(v):
+            return v / np.sqrt(np.sum(v ** 2))
 
-        # store the data
-        self.origin = origin
-        self.versors = V
+        # calculate the projection points
+        W = []
+        for i, u in enumerate(vectors):
+            w = np.copy(u).astype(np.float)
+            for j in vectors[:i, :]:
+                w -= proj(u, j)
+            W += [w]
 
-        # calculate the rotation matrix
-        self._to_global = np.vstack([i.values for i in V])
-        self._to_local = np.linalg.inv(self._to_global)
+        # normalize
+        return np.vstack([norm(u) for u in W])
 
-    def _build_origin(self, vector):
-        """
-        Internal method used to build a Vector with the same index of "vector" containing the
-        origin coordinates.
 
-        Input:
-            vector: (pyomech.Vector)
-                    the vector used to mimimc the shape of the output orgin vector.
+class Marker(ReferenceFrame):
+    """
+    Create a Marker object instance.
 
-        Output:
-            O:      (pyomech.Vector)
-                    the vector representing the origin at each index of vector.
-        """
+    Input
 
-        # ensure vector is a vector
-        assert _UnitDataFrame.match(
-            vector), "'vector' must be an instance of pyomech.Vector."
+        coords (numpy 2 dimensional array, pandas.DataFrame)
 
-        # build O
-        O = {i: np.tile(self.origin[i], vector.shape[0]) for i in self.origin}
-        return _UnitDataFrame(O, index=vector.index, time_unit=vector.time_unit, dim_unit=vector.dim_unit,
-                             type="Coordinates")
+            the coordinates of the marker within the provided ReferenceFrame.
+            each row denotes one single sample.
+            if a pandas.DataFrame is provided, the columns are used as
+            names of the dimensions.
 
-    def to_local(self, vector):
-        """
-        Rotate "vector" from the current "global" ReferenceFrame to the "local" ReferenceFrame
-        defined by the current instance of this class.
+        origin (numpy 1 or 2 dimensional array)
 
-        Input:
-            vector: (pyomech.Vector)
-                    the vector to be aligned.
+            a numpy array containing the origin of the "local"
+            reference frame. 'origin' is casted to a 2D ndarray and it must
+            result in 1 single row with n-dimensions.
 
-        Output:
-            v_loc:  (pyomech.Vector)
-                    the same vector with coordinates aligned to the current "local" ReferenceFrame.
-        """
+        versors (numpy 2 dimensional array)
 
-        # ensure vector can be converted
-        O = self._build_origin(vector)
-        assert _UnitDataFrame.match(
-            O, vector), "'vector' cannot be aligned to the local ReferenceFrame."
+            a 2D numpy array containing the unit vectors defining the
+            orientation of the ReferenceFrame with respect to the "global"
+            Frame.
+            The versors must be a 2D numpy array where each row is a versor
+            and each column a dimension.
 
-        # rotate vector
-        V = vector - O
-        V.loc[V.index] = V.values.dot(self._to_local)
-        return V
+        names (list, numpy 1 dimensional array)
 
-    def to_global(self, vector):
-        """
-        Rotate "vector" from the current "local" ReferenceFrame to the "global" ReferenceFrame.
+            the names of each dimension provided as array or list of strings.
+            In case the
 
-        Input:
-            vector: (pyomech.Vector)
-                    the vector to be aligned.
+        unit (str)
 
-        Output:
-            v_glo:  (pyomech.Vector)
-                    the same vector with coordinates aligned to the "global" ReferenceFrame.
-        """
+            the unit of measurement of the ReferenceFrame.
+    """
 
-        # ensure vector can be converted
-        O = self._build_origin(vector)
-        assert _UnitDataFrame.match(
-            O, vector), "'vector' cannot be aligned to the local ReferenceFrame."
+    def __init__(
+        self,
+        coords,
+        origin  = np.array([0, 0, 0]),
+        versors = np.array([[1, 0, 0],
+                            [0, 1, 0],
+                            [0, 0, 1]]),
+        names   = np.array(['X', 'Y', 'Z']),
+        unit    = "m"
+        ):
 
-        # rotate vector
-        V = vector.copy()
-        V.loc[V.index] = V.values.dot(self._to_global)
-        return V + O
+        # initialize the ReferenceFrame
+        super().__init__(origin, versors, names, unit)
+
+        # add the coordinates
+        txt = "coords must be a 2D numpy array or a pandas DataFrame with "
+        txt += "{} dimensions.".format(self.ndim)
+        assert isinstance(coords, (pd.DataFrame, np.ndarray)), txt
+
 
 
 class _UnitDataFrame(pd.DataFrame):
@@ -365,7 +405,7 @@ class _UnitDataFrame(pd.DataFrame):
         if replacement is not None:
 
             # validate the replacement argument
-            _validate_obj(replacement, (dict))
+            validate_obj(replacement, (dict))
             alert_dim = 'The current object does not have dimension {}'
             alert_len = '{} must be of len = 1'
             keys = np.array([i for i in replacement])
@@ -373,7 +413,7 @@ class _UnitDataFrame(pd.DataFrame):
                 if isinstance(replacement[key], (np.ndarray, list)):
                     assert len(replacement[key]) == 1, alert_len.format(key)
                     replacement[key] = replacement[key][0]
-                _validate_obj(replacement[key], (float, int))
+                validate_obj(replacement[key], (float, int))
 
             # replace the missing values
             replacement = [replacement[key] for key in self.columns]
@@ -388,10 +428,10 @@ class _UnitDataFrame(pd.DataFrame):
         valid_index = pd.Index(valid_index)
 
         # validate x
-        _validate_obj(x, (list))
+        validate_obj(x, (list))
         X = []
         for key in x:
-            _validate_obj(x[key], _UnitDataFrame)
+            validate_obj(x[key], _UnitDataFrame)
         X = pd.concat(X, axis=1)
 
         # obtain the regression coefficients
@@ -550,7 +590,7 @@ class Point(_UnitDataFrame):
     def __add__(self, value):
         valid = (Point, Vector, float, int, np.float, np.int,
                  np.ndarray)
-        _validate_obj(value, valid)
+        validate_obj(value, valid)
         if isinstance(value, (np.ndarray)):
             r, c = value.shape
             ck_1 = (r == 1) & (c == self)
@@ -1001,63 +1041,6 @@ def angle_between_2_vectors(A, B):
     k.dim_unit = "rad"
     k.type = "Angle"
     return k
-
-
-def gram_schmidt(normalized=False, *args, **kwargs):
-    """
-    return the orthogonal basis defined by a set of points using the
-    Gram-Schmidt algorithm.
-
-    Input
-
-        normalized (bool)
-
-            should the projected points returned in normalized units?
-
-        args / kwargs (Point)
-
-            one or more points from which the orthogonal projections have
-            to be calculated.
-
-    Output
-
-        W (Container)
-
-            a Container object containing the orthogonal points.
-    """
-
-    # check the input
-    _validate_obj(normalized, bool)
-    D = {**kwargs}
-    keys = np.array([i for i in kwargs.keys()])
-    n_args = np.arange(len(args))
-    names = ["V" + str(i + 1) + ("_1" if i in keys else "") for i in n_args]
-    D.update(**{i: j for i, j in zip(names, args)})
-    txt = "All input data must be Points with equal index and columns."
-    assert _UnitDataFrame.match(**D), txt
-
-    # internal function to simplify projection calculation
-    def proj(a, b):
-        aa = a.values
-        bb = b.values
-        return np.inner(aa, bb) / np.inner(bb, bb) * bb
-
-    # calculate the projection points
-    keys = np.array([i for i in D])
-    W = {keys[0]: D[keys[0]]}
-    for i in np.arange(1, len(D)):
-        W[keys[i]] = D[keys[i]]
-        for j in np.arange(i):
-            W[keys[i]] -= proj(D[keys[i]], D[keys[j]])
-
-    # normalize if required
-    if normalized:
-        for key in W:
-            W[key] /= W[key].norm.values
-
-    # return the output
-    return W
-
 
 def angle_by_3_points(A, B, C):
         """
