@@ -10,6 +10,121 @@ from scipy.spatial.transform import Rotation
 
 # CLASSES
 
+
+class ReferenceFrame():
+
+    def __init__(self, origin = None, versors = None, unit = "m", fs = 1):
+        """
+        Create a ReferenceFrame instance.
+
+        Input
+
+            origin (2D numpy.ndarray or pandas.DataFrame)
+
+                a numpy array containing the origin of the "local"
+                reference frame.
+
+            versors (dict of pandas.DataFrame of 2D numpy.ndarray(s))
+
+                a list of len equal to the number of keys of origin.
+                Each dict must have same keys of origin with one numeric value
+                per key.
+        """
+
+        # check the origin
+        assert isinstance(origin, dict), "'origin' must be a dict."
+
+        # check each versor
+        assert len(versors) == len(origin), str(
+            len(origin)) + " versors are required."
+        dims = np.array([i for i in origin])
+        V = []
+        for versor in versors:
+            assert np.all([j in dims for j in versor]
+                          ), "all versors must have keys: " + str(dims)
+            vec = _UnitDataFrame(versor, index=[
+                0], type="versor", dim_unit="", time_unit="")
+            V += [vec / vec.norm.values]
+
+        # store the data
+        self.origin = origin
+        self.versors = V
+
+        # calculate the rotation matrix
+        self._to_global = np.vstack([i.values for i in V])
+        self._to_local = np.linalg.inv(self._to_global)
+
+    def _build_origin(self, vector):
+        """
+        Internal method used to build a Vector with the same index of "vector" containing the
+        origin coordinates.
+
+        Input:
+            vector: (pyomech.Vector)
+                    the vector used to mimimc the shape of the output orgin vector.
+
+        Output:
+            O:      (pyomech.Vector)
+                    the vector representing the origin at each index of vector.
+        """
+
+        # ensure vector is a vector
+        assert _UnitDataFrame.match(
+            vector), "'vector' must be an instance of pyomech.Vector."
+
+        # build O
+        O = {i: np.tile(self.origin[i], vector.shape[0]) for i in self.origin}
+        return _UnitDataFrame(O, index=vector.index, time_unit=vector.time_unit, dim_unit=vector.dim_unit,
+                             type="Coordinates")
+
+    def to_local(self, vector):
+        """
+        Rotate "vector" from the current "global" ReferenceFrame to the "local" ReferenceFrame
+        defined by the current instance of this class.
+
+        Input:
+            vector: (pyomech.Vector)
+                    the vector to be aligned.
+
+        Output:
+            v_loc:  (pyomech.Vector)
+                    the same vector with coordinates aligned to the current "local" ReferenceFrame.
+        """
+
+        # ensure vector can be converted
+        O = self._build_origin(vector)
+        assert _UnitDataFrame.match(
+            O, vector), "'vector' cannot be aligned to the local ReferenceFrame."
+
+        # rotate vector
+        V = vector - O
+        V.loc[V.index] = V.values.dot(self._to_local)
+        return V
+
+    def to_global(self, vector):
+        """
+        Rotate "vector" from the current "local" ReferenceFrame to the "global" ReferenceFrame.
+
+        Input:
+            vector: (pyomech.Vector)
+                    the vector to be aligned.
+
+        Output:
+            v_glo:  (pyomech.Vector)
+                    the same vector with coordinates aligned to the "global" ReferenceFrame.
+        """
+
+        # ensure vector can be converted
+        O = self._build_origin(vector)
+        assert _UnitDataFrame.match(
+            O, vector), "'vector' cannot be aligned to the local ReferenceFrame."
+
+        # rotate vector
+        V = vector.copy()
+        V.loc[V.index] = V.values.dot(self._to_global)
+        return V + O
+
+
 class _UnitDataFrame(pd.DataFrame):
     """
     Create n-dimensional point sampled over time.
@@ -434,8 +549,11 @@ class Point(_UnitDataFrame):
     # valid operators
     def __add__(self, value):
         valid = (Point, Vector, float, int, np.float, np.int,
-                 np.ndarray, pd.DataFrame)
+                 np.ndarray)
         _validate_obj(value, valid)
+        if isinstance(value, (np.ndarray)):
+            r, c = value.shape
+            ck_1 = (r == 1) & (c == self)
         return super().__add__(value).__finalize__(self)
 
 
@@ -807,116 +925,6 @@ class Container(dict):
     def __setattr__(self, *args, **kwargs):
         super(Container, self).__setattr__(*args, **kwargs)
         self.__finalize__()
-
-
-class ReferenceFrame():
-
-    def __init__(self, origin, versors):
-        """
-        Create a ReferenceFrame instance.
-
-        Input:
-            origin:     (dict)
-                        the coordinates of the origin of a "local" ReferenceFrame. Each key must have
-                        a numeric value.
-
-            versors:    (list)
-                        a list of len equal to the number of keys of origin. Each dict must have same
-                        keys of origin with one numeric value per key.
-        """
-
-        # check the origin
-        assert isinstance(origin, dict), "'origin' must be a dict."
-
-        # check each versor
-        assert len(versors) == len(origin), str(
-            len(origin)) + " versors are required."
-        dims = np.array([i for i in origin])
-        V = []
-        for versor in versors:
-            assert np.all([j in dims for j in versor]
-                          ), "all versors must have keys: " + str(dims)
-            vec = _UnitDataFrame(versor, index=[
-                0], type="versor", dim_unit="", time_unit="")
-            V += [vec / vec.norm.values]
-
-        # store the data
-        self.origin = origin
-        self.versors = V
-
-        # calculate the rotation matrix
-        self._to_global = np.vstack([i.values for i in V])
-        self._to_local = np.linalg.inv(self._to_global)
-
-    def _build_origin(self, vector):
-        """
-        Internal method used to build a Vector with the same index of "vector" containing the
-        origin coordinates.
-
-        Input:
-            vector: (pyomech.Vector)
-                    the vector used to mimimc the shape of the output orgin vector.
-
-        Output:
-            O:      (pyomech.Vector)
-                    the vector representing the origin at each index of vector.
-        """
-
-        # ensure vector is a vector
-        assert _UnitDataFrame.match(
-            vector), "'vector' must be an instance of pyomech.Vector."
-
-        # build O
-        O = {i: np.tile(self.origin[i], vector.shape[0]) for i in self.origin}
-        return _UnitDataFrame(O, index=vector.index, time_unit=vector.time_unit, dim_unit=vector.dim_unit,
-                             type="Coordinates")
-
-    def to_local(self, vector):
-        """
-        Rotate "vector" from the current "global" ReferenceFrame to the "local" ReferenceFrame
-        defined by the current instance of this class.
-
-        Input:
-            vector: (pyomech.Vector)
-                    the vector to be aligned.
-
-        Output:
-            v_loc:  (pyomech.Vector)
-                    the same vector with coordinates aligned to the current "local" ReferenceFrame.
-        """
-
-        # ensure vector can be converted
-        O = self._build_origin(vector)
-        assert _UnitDataFrame.match(
-            O, vector), "'vector' cannot be aligned to the local ReferenceFrame."
-
-        # rotate vector
-        V = vector - O
-        V.loc[V.index] = V.values.dot(self._to_local)
-        return V
-
-    def to_global(self, vector):
-        """
-        Rotate "vector" from the current "local" ReferenceFrame to the "global" ReferenceFrame.
-
-        Input:
-            vector: (pyomech.Vector)
-                    the vector to be aligned.
-
-        Output:
-            v_glo:  (pyomech.Vector)
-                    the same vector with coordinates aligned to the "global" ReferenceFrame.
-        """
-
-        # ensure vector can be converted
-        O = self._build_origin(vector)
-        assert _UnitDataFrame.match(
-            O, vector), "'vector' cannot be aligned to the local ReferenceFrame."
-
-        # rotate vector
-        V = vector.copy()
-        V.loc[V.index] = V.values.dot(self._to_global)
-        return V + O
 
 
 def match(*args, **kwargs):
