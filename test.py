@@ -11,8 +11,8 @@ print(R)
 print("M --> R:")
 K = M.change_frame(R).as_vector()
 V = M.as_vector()
-K = V * np.array([-1, 1, 1]) # 180°
-G = K.rotation_from(V)
+K = V * np.array([-1, -1, -1]) # 180°
+G, M = K.angle_from(V, return_matrix = True)
 print(M + K)
 print(K + M)
 print(M + M.coordinates)

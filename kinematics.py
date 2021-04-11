@@ -16,19 +16,24 @@ class ReferenceFrame():
 
     Input
 
-        origin (numpy 1 or 2 dimensional array)
+        origin (numpy 2 dimensional array)
 
             a numpy array containing the origin of the "local"
-            reference frame. 'origin' is casted to a 2D ndarray and it must
-            result in 1 single row with n-dimensions.
+            reference frame. 'origin' must have shape N x D where N are the
+            number of samples and D the number of dimensions.
 
-        orientation (numpy 2 dimensional array)
 
-            a 2D numpy array containing the unit vectors defining the
-            orientation of the ReferenceFrame with respect to the "global"
-            Frame.
-            The orientation must be a 2D numpy array where each row is a versor
-            and each column a dimension.
+        orientation (numpy 3 dimensional array)
+
+            a 3D numpy array with shape N x D x D, where N are the number of
+            samples and D the number of dimensions. Please note that the 2nd
+            dimension defines the versors, while the 3rd the coordinates of each
+            versor in the provided dimensions.
+
+        fs (float)
+
+            the sampling frequency (in Hz) at which the samples have been
+            collected.
 
         names (list, numpy 1 dimensional array)
 
@@ -41,26 +46,35 @@ class ReferenceFrame():
 
     def __init__(
         self,
-        origin = np.array([0, 0, 0]),
-        orientation = np.array([[1, 0, 0],
-                                [0, 1, 0],
-                                [0, 0, 1]]),
-        names = np.array(['X', 'Y', 'Z']),
-        unit = "m"
+        origin      = np.array([[[0, 0, 0]]]),
+        orientation = np.array([[[1, 0, 0],
+                                 [0, 1, 0],
+                                 [0, 0, 1]]]),
+        fs          = 1,
+        names       = np.array(['X', 'Y', 'Z']),
+        unit        = "m"
         ):
+
+        # check the sampling frequency
+        valid = (int, float)
+        assert isinstance(fs, valid), "'fs' must be an int or float value."
 
         # check the names
         txt = "'{}' must be a numpy array or list."
         valid = (list, np.ndarray)
         assert isinstance(names, valid), txt.format("names")
-        N = np.array([names]).flatten()
-        self.ndim = len(N)
+        dim = np.array([names]).flatten()
+        self.ndim = len(dim)
+        self.dim = dim
 
         # handle the origin
         assert isinstance(origin, valid), txt.format("origin")
-        O = np.array([origin]).flatten().astype(np.float)
-        assert len(O) == self.ndim, "'origin' len must be {}".format(self.ndim)
-        self.origin = pd.DataFrame(O, columns = ['Origin'], index = N).T
+        O = np.atleast_2d(origin).astype(float)
+        N, D = O.shape
+        self.nsamples = N
+        assert D == self.ndim, "'origin' shape[1] must be {}".format(self.ndim)
+        self.time = np.arange(self.nsamples) * fs
+        self.origin = O
 
         # handle the unit
         assert isinstance(unit, (str)), "'unit' must be a str."
@@ -68,19 +82,14 @@ class ReferenceFrame():
 
         # handle the orientation
         assert isinstance(orientation, valid), txt.format("orientation")
-        O = np.atleast_2d(orientation)
-        r, c = O.shape
-        txt = "'orientation' must be a {} x {} matrix."
-        txt = txt.format(self.ndim, self.ndim)
-        assert r == c == self.ndim, txt
-        self.versors = pd.DataFrame(
-            data    = self._orthogonalize(O),
-            index   = ['v{}'.format(i+1) for i in np.arange(self.ndim)],
-            columns = N
-            )
-
-        # get the dimension names
-        self.dim = self.versors.columns.to_list()
+        self.versors = np.atleast_3d(orientation)
+        N, R, D = self.versors.shape
+        txt = "'orientation' must be a {} x {} x {} matrix."
+        txt = txt.format(self.nsamples, self.ndim, self.ndim)
+        assert R == D == self.ndim, txt
+        assert N == self.nsamples, txt
+        for i in np.arange(N):
+            self.versors[i] = self._orthogonalize(self.versors[i])
 
         # calculate the rotation matrix
         self._rot = Rotation.from_matrix(self.versors)
@@ -92,25 +101,20 @@ class ReferenceFrame():
 
         Input
 
-            normalized (bool)
+            vectors (DxD numpy.ndarray)
 
-                should the projected points returned in normalized units?
-
-            args / kwargs (Point)
-
-                one or more points from which the orthogonal projections have
-                to be calculated.
+                a set of vectors with D dimensions to be orthogonalized
 
         Output
 
-            W (Container)
+            W (DxD numpy.ndarray)
 
-                a Container object containing the orthogonal points.
+                the array containing the orthogonalized unit versors.
         """
 
         # internal functions to simplify the calculation
         def proj(a, b):
-            return (np.inner(a, b) / np.inner(b, b) * b).astype(np.float)
+            return (np.inner(a, b) / np.inner(b, b) * b).astype(float)
 
         def norm(v):
             return v / np.sqrt(np.sum(v ** 2))
@@ -118,7 +122,7 @@ class ReferenceFrame():
         # calculate the projection points
         W = []
         for i, u in enumerate(vectors):
-            w = np.copy(u).astype(np.float)
+            w = np.copy(u).astype(float)
             for j in vectors[:i, :]:
                 w -= proj(u, j)
             W += [w]
@@ -126,44 +130,68 @@ class ReferenceFrame():
         # normalize
         return np.vstack([norm(u) for u in W])
 
+    def to_df(self):
+        """
+        generate a pandas.DataFrame representing the ReferenceFrame.
+        """
+        cols = ["Origin {} ({})".format(d, self.unit) for d in self.dim]
+        data = [self.origin]
+        for i, d in enumerate(self.dim):
+            data += [self.versors[:, i, :]]
+            cols += ["Versor {} {} ({})".format(i + 1, k, self.unit)
+                     for k in self.dim]
+        data = np.hstack(data)
+        indx = pd.Index(time, name = "Time (s)")
+        return pd.DataFrame(data = data, columns = cols, index = indx)
+
+    def _is_comparable_to_(self, B):
+        """
+        private method used to evaluate if B is a similar to ReferenceFrame.
+
+        Input
+
+            B (ReferenceFrame)
+
+                a ReferenceFrame object to be compared.
+
+        Output
+
+            C (bool)
+
+                True if the dimensions, time index and unit are the same.
+                False otherwise.
+        """
+        if type(self) != type(B): return False
+        if self.nsamples != B.nsamples: return False
+        if np.sum(self.time - B.time) != 0: return False
+        if self.ndim != B.ndim: return False
+        if self.unit != B.unit: return False
+        if np.any([self.dim[i] != B.dim[i] for i in np.arange(self.ndim)]):
+            return False
+        return True
+
     def __str__(self):
-        D = self.to_dict()
-        return D[[i for i in D][0]].__str__() + "\n"
+        return self.to_df().__str__()
 
     def __repr__(self):
         return self.__str__()
 
     def __eq__(self, other):
         if isinstance(other, (ReferenceFrame)):
-            return (
-                (other.ndim == self.ndim) &
-                (other.nsamples == self.nsamples) &
-                np.all([i in np.array(self.dim) for i in other.dim]) &
-                (np.sum(self.origin.values - other.origin.values) == 0) &
-                (np.sum(self.versors.values - other.versors.values) == 0) &
-                (other.unit == self.unit)
-            )
+            return self.to_df() == other.to_df()
         return False
 
     def __ne__(self, other):
         return not self.__eq__(other)
-
-    def to_dict(self):
-        """
-        return a dict representing the content of the ReferenceFrame.
-        """
-        O = pd.concat([self.origin, self.versors], axis = 0)
-        C = O.columns.to_list()
-        O.columns = pd.Index([(i + " ({})".format(self.unit)) for i in C])
-        return {'ReferenceFrame': O}
 
     def copy(self):
         """
         return a copy of the object.
         """
         return ReferenceFrame(
-            origin      = self.origin.values,
-            orientation = self.versors.values,
+            origin      = self.origin,
+            orientation = self.versors,
+            fs          = self.fs,
             names       = self.dim,
             unit        = self.unit
             )
@@ -182,27 +210,28 @@ class Marker(ReferenceFrame):
             if a pandas.DataFrame is provided, the columns are used as
             names of the dimensions.
 
-        fs (float)
-            the sampling rate (in Hz) at which the coordinates are sampled.
-
-        origin (numpy 1 or 2 dimensional array)
+        origin (numpy 2 dimensional array)
 
             a numpy array containing the origin of the "local"
-            reference frame. 'origin' is casted to a 2D ndarray and it must
-            result in 1 single row with n-dimensions.
+            reference frame. 'origin' must have shape N x D where N are the
+            number of samples and D the number of dimensions.
 
-        orientation (numpy 2 dimensional array)
 
-            a 2D numpy array containing the unit vectors defining the
-            orientation of the ReferenceFrame with respect to the "global"
-            Frame.
-            The orientation must be a 2D numpy array where each row is a versor
-            and each column a dimension.
+        orientation (numpy 3 dimensional array)
+
+            a 3D numpy array with shape N x D x D, where N are the number of
+            samples and D the number of dimensions. Please note that the 2nd
+            dimension defines the versors, while the 3rd the coordinates of each
+            versor in the provided dimensions.
+
+        fs (float)
+
+            the sampling frequency (in Hz) at which the samples have been
+            collected.
 
         names (list, numpy 1 dimensional array)
 
             the names of each dimension provided as array or list of strings.
-            In case the
 
         unit (str)
 
@@ -211,58 +240,48 @@ class Marker(ReferenceFrame):
 
     def __init__(
         self,
-        coords,
-        fs = 1,
-        origin  = np.array([0, 0, 0]),
-        orientation = np.array([[1, 0, 0],
-                               [0, 1, 0],
-                               [0, 0, 1]]),
-        names   = np.array(['X', 'Y', 'Z']),
-        unit    = "m"
+        coords      = np.array([[0, 0, 0]]),
+        origin      = None,
+        orientation = None,
+        fs          = 1,
+        names       = np.array(['X', 'Y', 'Z']),
+        unit        = "m"
         ):
 
-        # initialize the ReferenceFrame
-        super().__init__(origin, orientation, names, unit)
+        # handle the absence of origin and orientation parameters being
+        # provided
+        txt = "coords must be a 2D numpy array or a pandas DataFrame."
+        assert isinstance(coords, (pd.DataFrame, np.ndarray)), txt
+        if isinstance(coords, (pd.DataFrame)):
+            C = coords.values
+            nn = coords.columns.to_numpy()
+        else:
+            nn = names
+            C = np.copy(coords)
+        if origin is None:
+            origin = np.zeros_like(coords)
+        if orientation is None:
+            r, c = C.shape
+            orientation = [np.atleast_3d(np.eye(c)) for i in np.arange(r)]
+            orientation = np.concatenate(v, axis=0)
 
-        # check the sample frequency
-        txt = "'fs' must be a positive float."
-        assert isinstance(fs, (float)) and fs > 0, txt
-        self.fs = fs
+        # initialize the ReferenceFrame
+        super().__init__(origin, orientation, fs, nn, unit)
 
         # check the coordinates
         txt = "coords must be a 2D numpy array or a pandas DataFrame with "
-        txt += "{} dimensions.".format(self.ndim)
+        txt += "{} rows and {} columns.".format(self.nsamples, self.ndim)
         assert isinstance(coords, (pd.DataFrame, np.ndarray)), txt
-        txt = "'coords' must have {} dimensions.".format(self.ndim)
+        N, D = coords.shape
+        assert N == self.nsamples, txt
+        assert D == self.ndim, txt
         if isinstance(coords, (pd.DataFrame)):
-            N = coords.columns
-            assert len(N.to_list()) == self.ndim, txt
-            self.origin.columns = N
-            self.versors.columns = N
-            C = coords.values
+            self.dim = coords.columns.to_list()
+            self.coordinates = coords.values
         else:
-            N = self.origin.columns
-            C = np.atleast_2d(coords)
-            assert C.shape[1] == self.ndim, txt
+            self.coordinates = np.copy(coords)
 
-        # get the coordinates
-        self.coordinates = pd.DataFrame(
-            data    = C,
-            index   = np.arange(C.shape[0]) * fs,
-            columns = N
-            )
-
-        # set the number of samples
-        self.nsamples = self.coordinates.shape[0]
-
-    def __str__(self):
-        D = self.to_dict()
-        O = ""
-        for d in D:
-            O += d + ":\n" + D[d].__str__() + "\n\n"
-        return O
-
-    def _validate_arg(self, value):
+    def _validate_arg_(self, value):
         """
         private method used to ensure that value can be used as argument for
         arithmetic operators.
@@ -281,35 +300,26 @@ class Marker(ReferenceFrame):
 
         # handle Marker
         if isinstance(value, (Marker)):
-
-            # align the right hand element of the sum to the ReferenceFrame
-            # of the left hand side of the equation
-            V = value.change_frame(self)
-
-            # ensure that the coordinates sum is possible
-            idx = V.coordinates.index.to_numpy()
-            iii = self.coordinates.index.to_numpy()
-            txt = "coordinates index does not match between the arguments."
-            assert np.all([i in iii for i in idx]), txt
-
-            # get the array
-            A = V.coordinates.values
+            assert self._is_comparable_to_(value)
+            A = value.change_frame(self).coordinates
 
         # handle dataframes
         elif isinstance(value, (pd.DataFrame)):
-
-            # ensure the coordinates can be added together
-            D = np.array(self.dim).flatten()
-            txt = "'value' must have columns: {}".format(D)
-            assert np.all([i in D for i in value.columns.to_list()]), txt
-
-            # get the array
+            txt = "'value' index is not comparable to 'self' index."
+            assert self.nsamples == value.shape[0], txt
+            assert np.sum(self.time - value.index.to_numpy()) == 0, txt
+            txt = "'value' columns are not the same as 'self' coordinates."
+            assert value.shape[1] == self.ndim, txt
+            cols = value.columns.to_numpy()
+            assert np.all([i in cols for i in self.dim]), txt
             A = value.values
+            try:
+                A = A.astype(float)
+            except Exception:
+                ValueError("All elements of 'value' must be numeric.")
 
         # handle numpy arrays
         elif isinstance(value, (np.ndarray, list)):
-
-            # ensure value has an applicable format
             A = np.atleast_2d(value)
             if A.shape[1] == 1:
                 A = np.hstack([A for i in np.arange(self.ndim)])
@@ -317,11 +327,13 @@ class Marker(ReferenceFrame):
                 A = np.vstack([A for i in np.arange(self.nsamples)])
             txt = "value's shape is not compatible with '+' operator."
             assert A.shape[0] == self.nsamples and A.shape[1] == self.ndim, txt
+            try:
+                A = A.astype(float)
+            except Exception:
+                ValueError("All elements of 'value' must be numeric.")
 
         # handle scalar values
         elif isinstance(value, (float, int)):
-
-            # make an array replicating the value
             A = np.atleast_2d([value])
             A = np.hstack([A for i in np.arange(self.ndim)])
             A = np.vstack([A for i in np.arange(self.nsamples)])
@@ -335,63 +347,47 @@ class Marker(ReferenceFrame):
 
     def __add__(self, value):
         V = self.copy()
-        V.coordinates += self._validate_arg(value)
+        V.coordinates += self._validate_arg_(value)
         return V
 
     def __radd__(self, value):
         return self.__add__(value)
 
     def __iadd__(self, value):
-        self.coordinates += self._validate_arg(value)
+        self.coordinates += self._validate_arg_(value)
 
     def __sub__(self, value):
         V = self.copy()
-        V.coordinates -= self._validate_arg(value)
+        V.coordinates -= self._validate_arg_(value)
         return V
 
     def __rsub__(self, value):
         return self.__sub__(value)
 
     def __isub__(self, value):
-        self.coordinates -= self._validate_arg(value)
+        self.coordinates -= self._validate_arg_(value)
 
     def __mul__(self, value):
-        not_valid = (Marker)
-        if isinstance(value, not_valid):
-            txt = "scalar product is not a valid operation between {} objects."
-            TypeError(txt.format(not_valid))
         V = self.copy()
-        V.coordinates *= self._validate_arg(value)
+        V.coordinates *= self._validate_arg_(value)
         return V
 
     def __rmul__(self, value):
         return self.__mul__(value)
 
     def __imul__(self, value):
-        not_valid = (Marker)
-        if isinstance(value, not_valid):
-            txt = "scalar product is not a valid operation between {} objects."
-            TypeError(txt.format(not_valid))
-        self.coordinates *= self._validate_arg(value)
+        self.coordinates *= self._validate_arg_(value)
 
     def __truediv__(self, value):
-        not_valid = (Marker)
-        if isinstance(value, not_valid):
-            txt = "true division is not a valid operation between {} objects."
-            TypeError(txt.format(not_valid))
         V = self.copy()
-        V.coordinates /= self._validate_arg(value)
+        V.coordinates /= self._validate_arg_(value)
         return V
 
     def __rtruediv__(self, value):
         return self.__truediv__(value)
 
     def __itruediv__(self, value):
-        not_valid = (Marker)
-        if isinstance(value, not_valid):
-            txt = "true division is not a valid operation between {} objects."
-            TypeError(txt.format(not_valid))
-        self.coordinates /= self._validate_arg(value)
+        self.coordinates /= self._validate_arg_(value)
 
     def __neg__(self):
         V = self.copy()
@@ -399,12 +395,10 @@ class Marker(ReferenceFrame):
         return V
 
     def __pow__(self, value):
-        not_valid = (Marker, np.ndarray, pd.DataFrame)
-        if isinstance(value, not_valid):
-            txt = "{} objects cannot be used as power arguments."
-            TypeError(txt.format(not_valid))
+        txt = "power operator is allowed only for float or int exponents."
+        assert isinstance(value, (float, int)), txt
         V = self.copy()
-        V.coordinates ** self._validate_arg(value)
+        V.coordinates ** value
         return V
 
     def __abs__(self):
@@ -412,69 +406,9 @@ class Marker(ReferenceFrame):
         V.coordinates = abs(V.coordinates)
         return V
 
-    def __matmul__(self, value):
-        if isinstance(value, (pd.DataFrame)):
-            A = value.copy()
-        elif isinstance(value, (np.ndarray)):
-            A = pd.DataFrame(
-                data = np.atleast_2d(value),
-                index = ['N{}'.format(i) for i in np.arange(value.shape[0])],
-                columns = ['X{}'.format(i) for i in np.arange(value.shape[1])]
-            )
-        elif isinstance(value, (float, int)):
-            A = pd.DataFrame(
-                data    = np.atleast_2d([value]),
-                index   = ["N0"],
-                columns = ["X0"]
-            )
-        else:
-            TypeError("'value' type not supported for this operation.")
-
-        # ensure the shape of value is compatible with matrix product
-        r = A.shape[0]
-        txt = "value must have {} rows".format(self.ndim)
-        assert r == self.ndim, txt
-
-        # perform the matrix multiplication
-        A.index = self.coordinates.columns
-        return self.coordinates.dot(A)
-
-    def __rmatmul__(self, value):
-        if isinstance(value, (pd.DataFrame)):
-            A = value.copy()
-        elif isinstance(value, (np.ndarray)):
-            A = pd.DataFrame(
-                data    = np.atleast_2d(value),
-                index   = ['N{}'.format(i) for i in np.arange(value.shape[0])],
-                columns = ['X{}'.format(i) for i in np.arange(value.shape[1])]
-            )
-        elif isinstance(value, (float, int)):
-            A = pd.DataFrame(
-                data    = np.atleast_2d([value]),
-                index   = ["N0"],
-                columns = ["X0"]
-            )
-        else:
-            TypeError("'value' type not supported for this operation.")
-
-        # ensure the shape of value is compatible with matrix product
-        r = A.shape[1]
-        txt = "value must have {} columns".format(self.nsamples)
-        assert r == self.nsamples, txt
-
-        # perform the matrix multiplication
-        V = self.coordinates.copy()
-        V.index = A.columns
-        return A.dot(V)
-
     def __eq__(self, other):
         if isinstance(other, (Marker)):
-            return (
-                super().__eq__(other) &
-                (np.sum((other.coordinates - self.coordinates).values) == 0) &
-                (np.sum((other.coordinates.index.to_numpy() -
-                         self.coordinates.index.to_numpy())) == 0)
-            )
+            return self.to_df() == other.to_df()
         return False
 
     def __ne__(self, other):
@@ -488,8 +422,8 @@ class Marker(ReferenceFrame):
 
             R (ReferenceFrame)
 
-                the ReferenceFrame object on which the current Marker has to be
-                aligned.
+                the ReferenceFrame object on which the current Marker
+                has to be aligned.
 
         Output
 
@@ -499,76 +433,66 @@ class Marker(ReferenceFrame):
         """
 
         # check the reference frame
-        assert isinstance(R, (ReferenceFrame)), "'R' must be a ReferenceFrame."
-        assert self.unit == R.unit, "'R' unit diverge from coordinates unit."
-        C = self.coordinates.columns.to_numpy()
-        N = R.origin.columns.to_numpy()
-        assert np.all([i in N for i in C]), "R dimensions must be {}".format(C)
-        assert self.unit == R.unit, "'R' unit diverge from coordinates unit."
+        txt = "'R' must be a ReferenceFrame like object."
+        assert self._is_comparable_to_(R), txt
 
         # move the coordinates of the actual marker to the "global" frame
-        M0 = self._rot.inv().apply(self.coordinates) + self.origin.values
-        M1 = R._rot.apply(M0 - R.origin.values)
+        M0 = self._rot.inv().apply(self.coordinates) + self.origin
+        M1 = R._rot.apply(M0 - R.origin)
         return Marker(
             coords      = M1,
-            fs          = self.fs,
             origin      = R.origin.values,
             orientation = R.versors.values,
-            names       = self.coordinates.columns.to_list(),
+            fs          = self.fs,
+            names       = self.dim,
             unit        = R.unit
             )
 
-    def to_dict(self):
+    def as_Vector(self):
         """
-        create a dict object summarizing all the relevant components of the
-        Marker.
-
-        Output:
-
-            D (dict)
-
-                a dict with 2 keys (Coordinates and ReferenceFrame) containing
-                a pandas DataFrame with all the relevant data.
+        return a copy of the current Marker as Vector instance.
         """
-        O = self.coordinates.copy()
-        C = O.columns.to_list()
-        O.columns = pd.Index([(i + " ({})".format(self.unit)) for i in C])
-        O.index = pd.Index([(str(i) + " (s)") for i in O.index.to_numpy()])
-        return {'Coordinates': O, **super().to_dict()}
+        return Vector(
+            coords      = self.coordinates,
+            origin      = self.origin,
+            orientation = self.versors,
+            fs          = self.fs,
+            names       = self.dim,
+            unit        = self.unit
+            )
+
+    def as_ReferenceFrame(self):
+        """
+        return the ReferenceFrame instance of the current object.
+        """
+        return ReferenceFrame(
+            origin      = self.origin,
+            orientation = self.versors,
+            fs          = self.fs,
+            names       = self.dim,
+            unit        = self.unit
+            )
+
+    # overridden methods
+
+    def to_df(self):
+        """
+        generate a pandas.DataFrame representing the Marker.
+        """
+        cols = ["{} ({})".format(d, self.unit) for d in self.dim]
+        indx = pd.Index(self.time, name = "Time (s)")
+        cord = pd.DataFrame(self.coordinates, columns = cols, index = indx)
+        return pd.concat([cord, super().to_df()], axis=1)
 
     def copy(self):
         """
         return a copy of the object.
         """
         return Marker(
-            coords      = self.coordinates.values,
+            coords      = self.coordinates,
+            origin      = self.origin,
+            orientation = self.versors,
             fs          = self.fs,
-            origin      = self.origin.values,
-            orientation = self.versors.values,
-            names       = self.dim,
-            unit        = self.unit
-            )
-
-    def as_vector(self):
-        """
-        return a copy of the current Marker as Vector instance.
-        """
-        return Vector(
-            coords      = self.coordinates.values,
-            fs          = self.fs,
-            origin      = self.origin.values,
-            orientation = self.versors.values,
-            names       = self.dim,
-            unit        = self.unit
-            )
-
-    def as_referenceframe(self):
-        """
-        return the ReferenceFrame instance of the current object.
-        """
-        return ReferenceFrame(
-            origin      = self.origin.values,
-            orientation = self.versors.values,
             names       = self.dim,
             unit        = self.unit
             )
@@ -587,27 +511,28 @@ class Vector(Marker):
             if a pandas.DataFrame is provided, the columns are used as
             names of the dimensions.
 
-        fs (float)
-            the sampling rate (in Hz) at which the coordinates are sampled.
-
-        origin (numpy 1 or 2 dimensional array)
+        origin (numpy 2 dimensional array)
 
             a numpy array containing the origin of the "local"
-            reference frame. 'origin' is casted to a 2D ndarray and it must
-            result in 1 single row with n-dimensions.
+            reference frame. 'origin' must have shape N x D where N are the
+            number of samples and D the number of dimensions.
 
-        orientation (numpy 2 dimensional array)
 
-            a 2D numpy array containing the unit vectors defining the
-            orientation of the ReferenceFrame with respect to the "global"
-            Frame.
-            The orientation must be a 2D numpy array where each row is a versor
-            and each column a dimension.
+        orientation (numpy 3 dimensional array)
+
+            a 3D numpy array with shape N x D x D, where N are the number of
+            samples and D the number of dimensions. Please note that the 2nd
+            dimension defines the versors, while the 3rd the coordinates of
+            each versor in the provided dimensions.
+
+        fs (float)
+
+            the sampling frequency (in Hz) at which the samples have been
+            collected.
 
         names (list, numpy 1 dimensional array)
 
             the names of each dimension provided as array or list of strings.
-            In case the
 
         unit (str)
 
@@ -615,16 +540,29 @@ class Vector(Marker):
     """
     def __init__(
         self,
-        coords,
+        coords      = np.array([[0, 0, 0]]),
+        origin      = np.array([[0, 0, 0]]),
+        orientation = np.array([[[1, 0, 0],
+                                 [0, 1, 0],
+                                 [0, 0, 1]]]),
         fs          = 1,
-        origin      = np.array([0, 0, 0]),
-        orientation = np.array([[1, 0, 0],
-                                [0, 1, 0],
-                                [0, 0, 1]]),
         names       = np.array(['X', 'Y', 'Z']),
         unit        = "m"
         ):
-        super().__init__(coords, fs, origin, orientation, names, unit)
+        super().__init__(coords, origin, orientation, fs, names, unit)
+
+    def as_Marker(self):
+        """
+        return a copy of the current object as Marker instance.
+        """
+        return Marker(
+            coords      = self.coordinates,
+            origin      = self.origin,
+            orientation = self.versors,
+            fs          = self.fs,
+            names       = self.dim,
+            unit        = self.unit
+            )
 
     def cross(self, value):
         """
@@ -637,8 +575,9 @@ class Vector(Marker):
                 a 3D vector to be cross multiplied to self.
         """
         # check value
+        coords = np.cross(self.coordinates, self._validate_arg_(value))
         return(Vector(
-            coords      = np.cross(self.coordinates, self._validate_arg(value)),
+            coords      = coords,
             fs          = self.fs,
             origin      = self.origin.values,
             orientation = self.versors.values,
@@ -663,10 +602,10 @@ class Vector(Marker):
             index   = self.coordinates.index
             )
 
-    def rotation_from(self, B):
+    def angle_from(self, B, return_matrix = False, degrees = True):
         """
-        obtain the scipy.spatial_transform.Rotation class object describing
-        the rotation from B to the current vector:
+        obtain the angle allowing to rotate B into self.
+        Optionally return also the unit vector around which the rotation occurs.
 
         Input
 
@@ -676,59 +615,81 @@ class Vector(Marker):
                 If B has a different ReferenceFrame than self, it is firstly
                 aligned to it.
 
+            return_matrix (bool)
+
+                if True, return the rotation matrix rotating B into self.
+
+            degrees (bool)
+
+                if True the output angle is returned with degrees as unit.
+                Otherwise, it is returned in radians
+
         Output
 
-            R (scipy.spatial_transform.Rotation)
+            A (pandas.DataFrame)
 
-                The rotation to be applied for obtaining self from B.
+                the angle from B to self.
+
+            R (dict, optional)
+
+                if return_matrix is True, a dict is returned where each key
+                will be a time sample of self and B and its argument the
+                rotation matrix allowing to rotate B into self
+                by post multiplication.
         """
 
-        # check the entries
+        # check B
         assert isinstance(B, (Vector)), "'B' must be a Vector object."
-        txt = "'B' must have dimensions {}.".format(self.dim)
-        assert B.ndim == self.ndim, txt
-        assert np.all([i in np.array(self.dim) for i in B.dim]), txt
-        txt = "'B' must have {} samples.".format(self.nsamples)
-        assert B.nsamples == self.nsamples, txt
-        txt = "'B' samples does not match with self.coordinates.index."
-        ii = self.coordinates.index.to_numpy()
-        assert np.all([i in ii for i in B.coordinates.index.to_numpy()]), txt
+        K = B.change_frame(self)
 
-        # obtain the vector (w) around which the rotation is provided
-        w = B.cross(self)
-        w = w / w.norm().values
+        # get both B and self have length > 0
+        an = self.norm()
+        bn = K.norm()
+        txt = "All samples of '{}' must have norm > 0."
+        assert np.all(an.values > 0), txt.format('self')
+        assert np.all(bn.values > 0), txt.format('B')
 
-        # get the rotation angle
-        C = (B - self).norm()
-        A = self.norm()
-        K = B.norm()
-        zeros = np.argwhere((C.values == 0) | (A.values == 0) | (K.values == 0))
-        f = np.arccos((A ** 2 + K ** 2 - C ** 2) / (2 * A * K)).values
-        f[zeros] = 0
+        # check the other options
+        txt = "'{}' must be a 'bool' object."
+        assert return_matrix or not return_matrix, txt.format("return_matrix")
+        assert degrees or not degrees, txt.format("degrees")
 
-        # return the rotations
-        return Rotation.from_rotvec(w.coordinates.values * f)
+        # get the angle
+        cn = (K - self).norm()
+        A = np.arccos((an ** 2 + bn ** 2 - cn ** 2) / (2 * an * bn))
+        if degrees:
+            unit = " (deg)"
+            A *= 180 / np.pi
+        else:
+            unit = " (rad)"
+        A.columns = pd.Index(['Angle{}'.format(unit)])
 
-    def rotation_to(self, B):
-        """
-        obtain the scipy.spatial_transform.Rotation class object describing
-        the rotation from the current vector to B:
+        # return the angle
+        if not return_matrix:
+            return A
 
-        Input
+        # get the (normalized) rotation vector and
+        # handle the case that self = -B
+        a = self / an.values
+        b = K / bn.values
+        w = (b).cross(a)
+        inv = np.isclose(np.sum((a + b).coordinates.values, 1), 0)
+        inv = np.argwhere(inv).flatten()
+        n = w.norm().values
+        n[inv] = 1
+        w = w / n
 
-            B (Vector)
+        # get the rotations
+        R = Rotation.from_rotvec(w.coordinates.values * A.values).as_matrix()
 
-                the vector from which the angle has to be calculated.
-                If B has a different ReferenceFrame than self, it is firstly
-                aligned to it.
+        # handle the non-definite cases
+        R[inv] = -np.eye(self.ndim).astype(int)
 
-        Output
+        # return the set of rotations
+        R = {i: R[j] for j, i in enumerate(self.coordinates.index.to_numpy())}
+        return A, R
 
-            R (scipy.spatial_transform.Rotation)
-
-                The rotation to be applied for obtaining B from self.
-        """
-        return self.rotation_from(B).inv()
+    # overridden methods
 
     def copy(self):
         """
@@ -743,18 +704,24 @@ class Vector(Marker):
             unit        = self.unit
             )
 
-    def as_marker(self):
+    def change_frame(self, R):
         """
-        return a copy of the current object as Marker instance.
+        view the current object from another Reference Frame.
+
+        Input
+
+            R (ReferenceFrame)
+
+                the ReferenceFrame object on which the current Vector
+                has to be aligned.
+
+        Output
+
+            M (Vector)
+
+                the vector represented by the ReferenceFrame R
         """
-        return Marker(
-            coords      = self.coordinates.values,
-            fs          = self.fs,
-            origin      = self.origin.values,
-            orientation = self.versors.values,
-            names       = self.dim,
-            unit        = self.unit
-            )
+        return super().change_frame(R).as_Vector()
 
 
 class Container(dict):
@@ -1011,120 +978,3 @@ class Container(dict):
     def __setattr__(self, *args, **kwargs):
         super(Container, self).__setattr__(*args, **kwargs)
         self.__finalize__()
-
-
-def match(*args, **kwargs):
-    """
-    check if the entered objects are comparable
-
-    Output
-
-        C (bool)
-
-            True if all inputs are Points or a pandas.DataFrame with the
-            same columns and index of self. False, otherwise.
-    """
-
-    # get the elements entered
-    objs = [i for i in args] + [kwargs[i] for i in kwargs]
-
-    # check the columns and index of all objs
-    IX = objs[0].index.to_numpy()
-    CL = objs[0].columns.to_numpy()
-    SH = objs[0].shape
-    TY = objs[0].__class__
-    for obj in objs:
-        OI = obj.index.to_numpy()
-        OC = obj.columns.to_numpy()
-        col_check = np.all([i in OC for i in CL])
-        idx_check = np.all([i in OI for i in IX])
-        shp_check = np.all([i == j for i, j in zip(obj.shape, SH)])
-        cls_check = isinstance(obj, (TY))
-        if not np.all([col_check, idx_check, shp_check, cls_check]):
-            return False
-    return True
-
-
-def angle_between_2_vectors(A, B):
-    """
-    return the angle between the vectors A and B originating from the same
-    point using the Cosine theorem.
-
-    Input
-
-        A (Vector)
-
-            The coordinates of one point.
-
-        B (Vector)
-
-            The coordinates of the point over which the angle has
-            to be calculated.
-
-    Output
-
-        K (DF)
-            A 1D point containing the result of:
-                                 2          2            2
-                       /  (A - B)  +  (C - B)  -  (A - C)  \
-                arcos | ----------------------------------- |
-                       \      2 * (A - B) * (C - B)        /
-    """
-
-    # ensure all entered parameters are points
-    txt = "'A' and 'B' must be Points with equal index and columns."
-    assert match(A, B), txt
-
-    # get a, b and c
-    a = A.norm()
-    b = B.norm()
-    c = (A - B).norm()
-
-    # return the angle
-    k = (a ** 2 + b ** 2 - c ** 2) / (2 * a * b).values
-    k.loc[k.index] = np.arccos(k.values)
-    k.time_unit = A.time_unit
-    k.dim_unit = "rad"
-    k.type = "Angle"
-    return k
-
-def angle_by_3_points(A, B, C):
-        """
-        return the angle ABC using the Cosine theorem.
-
-        Input:
-            A:  (Point)
-                The coordinates of one point.
-
-            B:  (Point)
-                The coordinates of the point over which the angle has
-                to be calculated.
-
-            C:  (Point)
-                The coordinates of the third point.
-
-        Output:
-            K:  (Point)
-                A 1D point containing the result of:
-                                     2          2            2
-                           /  (A - B)  +  (C - B)  -  (A - C)  \
-                    arcos | ----------------------------------- |
-                           \      2 * (A - B) * (C - B)        /
-        """
-
-        # ensure all entered parameters are points
-        txt = "'A', 'B' and 'C' must be Points with equal index and columns."
-        assert _UnitDataFrame.match(A, B, C), txt
-
-        # get a, b and c
-        a = (A - B).norm()
-        b = (C - B).norm()
-        c = (A - C).norm()
-
-        # return the angle
-        k = (a ** 2 + b ** 2 - c ** 2) / (2 * a * b).values
-        k.loc[k.index] = np.arccos(k.values)
-        k.time_unit = A.time_unit
-        k.dim_unit = "rad"
-        k.type = "Angle"
-        return k
