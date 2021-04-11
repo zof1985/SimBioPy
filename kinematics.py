@@ -79,6 +79,9 @@ class ReferenceFrame():
             columns = N
             )
 
+        # get the dimension names
+        self.dim = self.versors.columns.to_list()
+
         # calculate the rotation matrix
         self._rot = Rotation.from_matrix(self.versors)
 
@@ -124,13 +127,46 @@ class ReferenceFrame():
         return np.vstack([norm(u) for u in W])
 
     def __str__(self):
-        O = pd.concat([self.origin, self.versors], axis = 0)
-        C = O.columns.to_list()
-        O.columns = pd.Index([(i + " ({})".format(self.unit)) for i in C])
-        return O.__str__() + "\n"
+        D = self.to_dict()
+        return D[[i for i in D][0]].__str__() + "\n"
 
     def __repr__(self):
         return self.__str__()
+
+    def __eq__(self, other):
+        if isinstance(other, (ReferenceFrame)):
+            return (
+                (other.ndim == self.ndim) &
+                (other.nsamples == self.nsamples) &
+                np.all([i in np.array(self.dim) for i in other.dim]) &
+                (np.sum(self.origin.values - other.origin.values) == 0) &
+                (np.sum(self.versors.values - other.versors.values) == 0) &
+                (other.unit == self.unit)
+            )
+        return False
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def to_dict(self):
+        """
+        return a dict representing the content of the ReferenceFrame.
+        """
+        O = pd.concat([self.origin, self.versors], axis = 0)
+        C = O.columns.to_list()
+        O.columns = pd.Index([(i + " ({})".format(self.unit)) for i in C])
+        return {'ReferenceFrame': O}
+
+    def copy(self):
+        """
+        return a copy of the object.
+        """
+        return ReferenceFrame(
+            origin      = self.origin.values,
+            orientation = self.versors.values,
+            names       = self.dim,
+            unit        = self.unit
+            )
 
 
 class Marker(ReferenceFrame):
@@ -216,9 +252,237 @@ class Marker(ReferenceFrame):
             columns = N
             )
 
-    def to_frame(self, R):
+        # set the number of samples
+        self.nsamples = self.coordinates.shape[0]
+
+    def __str__(self):
+        D = self.to_dict()
+        O = ""
+        for d in D:
+            O += d + ":\n" + D[d].__str__() + "\n\n"
+        return O
+
+    def _validate_arg(self, value):
         """
-        move the current reference frame to a new frame R.
+        private method used to ensure that value can be used as argument for
+        arithmetic operators.
+
+        Input
+
+            value (Marker, Vector, pandas.DataFrame, numpy.ndarray, float, int)
+
+        Output
+
+            array (numpy.ndarray)
+
+                a 2D numpy array ready to be used for arithmetic operations
+                with the Marker coordinates.
+        """
+
+        # handle Marker
+        if isinstance(value, (Marker)):
+
+            # align the right hand element of the sum to the ReferenceFrame
+            # of the left hand side of the equation
+            V = value.change_frame(self)
+
+            # ensure that the coordinates sum is possible
+            idx = V.coordinates.index.to_numpy()
+            iii = self.coordinates.index.to_numpy()
+            txt = "coordinates index does not match between the arguments."
+            assert np.all([i in iii for i in idx]), txt
+
+            # get the array
+            A = V.coordinates.values
+
+        # handle dataframes
+        elif isinstance(value, (pd.DataFrame)):
+
+            # ensure the coordinates can be added together
+            D = np.array(self.dim).flatten()
+            txt = "'value' must have columns: {}".format(D)
+            assert np.all([i in D for i in value.columns.to_list()]), txt
+
+            # get the array
+            A = value.values
+
+        # handle numpy arrays
+        elif isinstance(value, (np.ndarray, list)):
+
+            # ensure value has an applicable format
+            A = np.atleast_2d(value)
+            if A.shape[1] == 1:
+                A = np.hstack([A for i in np.arange(self.ndim)])
+            elif A.shape[0] == 1:
+                A = np.vstack([A for i in np.arange(self.nsamples)])
+            txt = "value's shape is not compatible with '+' operator."
+            assert A.shape[0] == self.nsamples and A.shape[1] == self.ndim, txt
+
+        # handle scalar values
+        elif isinstance(value, (float, int)):
+
+            # make an array replicating the value
+            A = np.atleast_2d([value])
+            A = np.hstack([A for i in np.arange(self.ndim)])
+            A = np.vstack([A for i in np.arange(self.nsamples)])
+
+        # objects of other instances are not supported
+        else:
+            TypeError("'value' type not supported for this operation.")
+
+        # return the array
+        return A
+
+    def __add__(self, value):
+        V = self.copy()
+        V.coordinates += self._validate_arg(value)
+        return V
+
+    def __radd__(self, value):
+        return self.__add__(value)
+
+    def __iadd__(self, value):
+        self.coordinates += self._validate_arg(value)
+
+    def __sub__(self, value):
+        V = self.copy()
+        V.coordinates -= self._validate_arg(value)
+        return V
+
+    def __rsub__(self, value):
+        return self.__sub__(value)
+
+    def __isub__(self, value):
+        self.coordinates -= self._validate_arg(value)
+
+    def __mul__(self, value):
+        not_valid = (Marker)
+        if isinstance(value, not_valid):
+            txt = "scalar product is not a valid operation between {} objects."
+            TypeError(txt.format(not_valid))
+        V = self.copy()
+        V.coordinates *= self._validate_arg(value)
+        return V
+
+    def __rmul__(self, value):
+        return self.__mul__(value)
+
+    def __imul__(self, value):
+        not_valid = (Marker)
+        if isinstance(value, not_valid):
+            txt = "scalar product is not a valid operation between {} objects."
+            TypeError(txt.format(not_valid))
+        self.coordinates *= self._validate_arg(value)
+
+    def __truediv__(self, value):
+        not_valid = (Marker)
+        if isinstance(value, not_valid):
+            txt = "true division is not a valid operation between {} objects."
+            TypeError(txt.format(not_valid))
+        V = self.copy()
+        V.coordinates /= self._validate_arg(value)
+        return V
+
+    def __rtruediv__(self, value):
+        return self.__truediv__(value)
+
+    def __itruediv__(self, value):
+        not_valid = (Marker)
+        if isinstance(value, not_valid):
+            txt = "true division is not a valid operation between {} objects."
+            TypeError(txt.format(not_valid))
+        self.coordinates /= self._validate_arg(value)
+
+    def __neg__(self):
+        V = self.copy()
+        V.coordinates *= (-1)
+        return V
+
+    def __pow__(self, value):
+        not_valid = (Marker, np.ndarray, pd.DataFrame)
+        if isinstance(value, not_valid):
+            txt = "{} objects cannot be used as power arguments."
+            TypeError(txt.format(not_valid))
+        V = self.copy()
+        V.coordinates ** self._validate_arg(value)
+        return V
+
+    def __abs__(self):
+        V = self.copy()
+        V.coordinates = abs(V.coordinates)
+        return V
+
+    def __matmul__(self, value):
+        if isinstance(value, (pd.DataFrame)):
+            A = value.copy()
+        elif isinstance(value, (np.ndarray)):
+            A = pd.DataFrame(
+                data = np.atleast_2d(value),
+                index = ['N{}'.format(i) for i in np.arange(value.shape[0])],
+                columns = ['X{}'.format(i) for i in np.arange(value.shape[1])]
+            )
+        elif isinstance(value, (float, int)):
+            A = pd.DataFrame(
+                data    = np.atleast_2d([value]),
+                index   = ["N0"],
+                columns = ["X0"]
+            )
+        else:
+            TypeError("'value' type not supported for this operation.")
+
+        # ensure the shape of value is compatible with matrix product
+        r = A.shape[0]
+        txt = "value must have {} rows".format(self.ndim)
+        assert r == self.ndim, txt
+
+        # perform the matrix multiplication
+        A.index = self.coordinates.columns
+        return self.coordinates.dot(A)
+
+    def __rmatmul__(self, value):
+        if isinstance(value, (pd.DataFrame)):
+            A = value.copy()
+        elif isinstance(value, (np.ndarray)):
+            A = pd.DataFrame(
+                data    = np.atleast_2d(value),
+                index   = ['N{}'.format(i) for i in np.arange(value.shape[0])],
+                columns = ['X{}'.format(i) for i in np.arange(value.shape[1])]
+            )
+        elif isinstance(value, (float, int)):
+            A = pd.DataFrame(
+                data    = np.atleast_2d([value]),
+                index   = ["N0"],
+                columns = ["X0"]
+            )
+        else:
+            TypeError("'value' type not supported for this operation.")
+
+        # ensure the shape of value is compatible with matrix product
+        r = A.shape[1]
+        txt = "value must have {} columns".format(self.nsamples)
+        assert r == self.nsamples, txt
+
+        # perform the matrix multiplication
+        V = self.coordinates.copy()
+        V.index = A.columns
+        return A.dot(V)
+
+    def __eq__(self, other):
+        if isinstance(other, (Marker)):
+            return (
+                super().__eq__(other) &
+                (np.sum((other.coordinates - self.coordinates).values) == 0) &
+                (np.sum((other.coordinates.index.to_numpy() -
+                         self.coordinates.index.to_numpy())) == 0)
+            )
+        return False
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def change_frame(self, R):
+        """
+        view the current object from another Reference Frame.
 
         Input
 
@@ -254,561 +518,243 @@ class Marker(ReferenceFrame):
             unit        = R.unit
             )
 
-    def __str__(self):
+    def to_dict(self):
+        """
+        create a dict object summarizing all the relevant components of the
+        Marker.
+
+        Output:
+
+            D (dict)
+
+                a dict with 2 keys (Coordinates and ReferenceFrame) containing
+                a pandas DataFrame with all the relevant data.
+        """
         O = self.coordinates.copy()
         C = O.columns.to_list()
         O.columns = pd.Index([(i + " ({})".format(self.unit)) for i in C])
         O.index = pd.Index([(str(i) + " (s)") for i in O.index.to_numpy()])
-        O = "Coordinates:\n" + O.__str__() + "\n\n"
-        O += "ReferenceFrame:\n" + super().__str__()
-        return O
+        return {'Coordinates': O, **super().to_dict()}
+
+    def copy(self):
+        """
+        return a copy of the object.
+        """
+        return Marker(
+            coords      = self.coordinates.values,
+            fs          = self.fs,
+            origin      = self.origin.values,
+            orientation = self.versors.values,
+            names       = self.dim,
+            unit        = self.unit
+            )
+
+    def as_vector(self):
+        """
+        return a copy of the current Marker as Vector instance.
+        """
+        return Vector(
+            coords      = self.coordinates.values,
+            fs          = self.fs,
+            origin      = self.origin.values,
+            orientation = self.versors.values,
+            names       = self.dim,
+            unit        = self.unit
+            )
+
+    def as_referenceframe(self):
+        """
+        return the ReferenceFrame instance of the current object.
+        """
+        return ReferenceFrame(
+            origin      = self.origin.values,
+            orientation = self.versors.values,
+            names       = self.dim,
+            unit        = self.unit
+            )
 
 
-
-class _UnitDataFrame(pd.DataFrame):
+class Vector(Marker):
     """
-    Create n-dimensional point sampled over time.
+    Create a Vector object instance.
 
-    Input:
+    Input
 
-        data (ndarray, list, pandas.Series, pandas.DataFrame, dict)
+        coords (numpy 2 dimensional array, pandas.DataFrame)
 
-            the data which creates the Point.
+            the coordinates of the marker within the provided ReferenceFrame.
+            each row denotes one single sample.
+            if a pandas.DataFrame is provided, the columns are used as
+            names of the dimensions.
 
-        index (list)
+        fs (float)
+            the sampling rate (in Hz) at which the coordinates are sampled.
 
-            the index representing each time sample. It must provide 1 value
-            for each sample in data.
+        origin (numpy 1 or 2 dimensional array)
 
-        columns (list)
+            a numpy array containing the origin of the "local"
+            reference frame. 'origin' is casted to a 2D ndarray and it must
+            result in 1 single row with n-dimensions.
 
-            the names of the dimensions of the points.
+        orientation (numpy 2 dimensional array)
 
-        dim_unit (str)
+            a 2D numpy array containing the unit vectors defining the
+            orientation of the ReferenceFrame with respect to the "global"
+            Frame.
+            The orientation must be a 2D numpy array where each row is a versor
+            and each column a dimension.
 
-            the unit of measurement of each dimension
+        names (list, numpy 1 dimensional array)
 
-        time_unit (str)
+            the names of each dimension provided as array or list of strings.
+            In case the
 
-            the unit of measurement of the samples
+        unit (str)
+
+            the unit of measurement of the ReferenceFrame.
     """
-    _metadata = ["time_unit", "dim_unit", "type"]
+    def __init__(
+        self,
+        coords,
+        fs          = 1,
+        origin      = np.array([0, 0, 0]),
+        orientation = np.array([[1, 0, 0],
+                                [0, 1, 0],
+                                [0, 0, 1]]),
+        names       = np.array(['X', 'Y', 'Z']),
+        unit        = "m"
+        ):
+        super().__init__(coords, fs, origin, orientation, names, unit)
 
-    # CONVERTERS
-
-    def to_dict(self):
+    def cross(self, value):
         """
-        return the data as dict.
-        """
-        return {d: self[d].values.flatten() for d in self.columns}
-
-    def to_df(self):
-        """
-        Store the Point into a "pandas DataFrame" formatted having a column
-        named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
-
-            'XXX' the type of the point
-            'YYY' the dimension of the point
-            'ZZZ' the dim_unit
-        """
-
-        # create the Point df
-        v_df = pd.DataFrame(
-            data=self.values,
-            columns=[self.type + "|" + i + "_" + self.dim_unit
-                     for i in self.columns]
-        )
-
-        # add the index column
-        v_df.insert(0, 'Index_' + self.time_unit, self.index.to_numpy())
-
-        # return the df
-        return v_df
-
-    def to_csv(self, file, **kwargs):
-        """
-        Store the Point into a "csv". The file is formatted having a column
-        named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
-
-            'XXX' the type of the point
-            'YYY' the dimension of the point
-            'ZZZ' the dim_unit
+        get the cross product between 3D Vectors.
 
         Input:
 
-            file (str)
+            value (Vector)
 
-                the file path.
+                a 3D vector to be cross multiplied to self.
         """
-
-        # ensure the file can be stored
-        os.makedirs(lvlup(file), exist_ok=True)
-
-        # store the output data
-        try:
-            kwargs.pop('index')
-        except Exception:
-            pass
-        try:
-            kwargs.pop('path')
-        except Exception:
-            pass
-        self.to_df().to_csv(file, index=False, **kwargs)
-
-    def to_excel(self, file, sheet="Sheet1", new_file=False):
-        """
-        Store the Point into an excel file sheet. The file is formatted
-        having a column named "Index_ZZZ" and the others as "XXX|YYY_ZZZ" where:
-
-            'XXX' the type of the point
-            'YYY' the dimension of the point
-            'ZZZ' the dim_unit
-
-        Input:
-
-            file (str)
-
-                the file path.
-
-            sheet (str or None)
-
-                the sheet name.
-
-            new_file (bool)
-
-                should a new file be created rather than adding the current
-                point to an existing one?
-        """
-        return to_excel(file, self.to_df(), sheet, new_file)
-
-    # CLASS SPECIFIC METHODS
-
-    def fs(self):
-        """
-        get the mean sampling frequency of the Point in Hz.
-        """
-        return 1. / np.mean(np.diff(self.index.to_numpy()))
-
-    def applyc(self, fun, *args, **kwargs):
-        """
-        apply a given function to all columns of the Point.
-
-        Input:
-
-            fun (function)
-
-                the function to be applied.
-                Please note that each column is passed as first argument to fun.
-
-            args/kwargs
-
-                function arguments that are directly passed to fun.
-
-        Output:
-
-            V (Point)
-
-                The point with the function applied to each row.
-        """
-        V = self.copy()
-        for d in self.columns:
-            V.loc[V.index, [d]] = fun(
-                self[d].values.flatten(), *args, **kwargs)
-
-    def applyr(self, fun, *args, **kwargs):
-        """
-        apply a given function to all samples of the Point.
-
-        Input:
-
-            fun (function)
-
-                the function to be applied.
-                Please note that each row is passed as first argument to fun.
-
-            args/kwargs
-
-                function arguments that are directly passed to fun.
-
-        Output:
-
-            V (Point)
-
-                The point with the function applied to each column.
-        """
-        V = self.copy()
-        for i in V.index:
-            V.loc[i, V.columns] = fun(self.loc[i].values, *args, **kwargs)
-        return V
-
-    def applya(self, fun, *args, **kwargs):
-        """
-        apply a given function to all values of the point as one.
-
-        Input:
-
-            fun (function)
-
-                the function to be applied.
-                Please note that each row is passed as first argument to fun.
-
-            args/kwargs
-
-                function arguments that are directly passed to fun.
-
-        Output:
-
-            V (Point)
-
-                The point with the function applied to all values.
-        """
-        V = self.copy()
-        V.loc[V.index, V.columns] = fun(self.values, *args, **kwargs)
-        return V
-
-    def replace_missing(self, replacement=None, x=None, *args, **kwargs):
-        """
-        replace missing values.
-
-        Input
-
-            replacement (dict or None, default = None)
-
-                a dict mapping the replacing value of each dimension to a key.
-
-            x (list(_Point) or None)
-
-                if replacement is None, Linear Regression is used to predict
-                the values to replace the missing data.
-                If this is the case, 'x' represents the list of _Point objects
-                to be used as Indipendent variables for the prediction.
-                These objects must be provided as list. The index of each
-                Point must mimic the index of the actual object.
-
-            *args, **kwargs (any)
-
-                the additional parameters to be passed to LinearRegression.
-
-        Output
-
-            F (UnitDataFrame subclass)
-
-                A new object with the missing values being replaced.
-        """
-        # ensure missing data exist
-        missing_index = self.loc[self.isna().any(1)].index
-        if missing_index.shape[0] == 0:
-            return self.copy()
-
-        # use the provided replacement (if any)
-        F = self.copy()
-        if replacement is not None:
-
-            # validate the replacement argument
-            validate_obj(replacement, (dict))
-            alert_dim = 'The current object does not have dimension {}'
-            alert_len = '{} must be of len = 1'
-            keys = np.array([i for i in replacement])
-            for key in keys:
-                if isinstance(replacement[key], (np.ndarray, list)):
-                    assert len(replacement[key]) == 1, alert_len.format(key)
-                    replacement[key] = replacement[key][0]
-                validate_obj(replacement[key], (float, int))
-
-            # replace the missing values
-            replacement = [replacement[key] for key in self.columns]
-            replacement = np.atleast_2d(replacement)
-            replacement = np.vstack([replacement for i in missing_index])
-            F.loc[missing_index, F.columns] = replacement
-            return F
-
-        # get the set of valid values
-        valid_index = [i for i in self.index.values.flatten()
-                       if i not in missing_index.values.flatten()]
-        valid_index = pd.Index(valid_index)
-
-        # validate x
-        validate_obj(x, (list))
-        X = []
-        for key in x:
-            validate_obj(x[key], _UnitDataFrame)
-        X = pd.concat(X, axis=1)
-
-        # obtain the regression coefficients
-        LM = LinearRegression(
-            y=self.loc[valid_index, self.columns],
-            x=X.loc[valid_index, X.columns],
-            *args, **kwargs
-        )
-
-        # replace the missing values
-        pred = LM.predict(X.loc[missing_index, X.columns])
-        F.loc[missing_index, F.columns] = pred
-        return F
-
-    # PRIVATE METHODS
-
-    def __init__(self, *args, **kwargs):
-
-        # remove special class objects
-        meta_props = {}
-        for prop in self._metadata:
-            try:
-                meta_props[prop] = kwargs.pop(prop)
-            except Exception:
-                pass
-
-        # handle Series props
-        ser_props = {}
-        for prop in ["name", "fastpath"]:
-            try:
-                ser_props[prop] = kwargs.pop(prop)
-            except Exception:
-                pass
-
-        # generate the pandas object
-        if len(ser_props) > 0:
-            super().__init__(pd.Series(*args, **ser_props))
-        else:
-            super().__init__(*args, **kwargs)
-
-        # add the extra features
-        for prop in self._metadata:
-            try:
-                pr = meta_props[prop]
-            except Exception:
-                pr = ""
-            setattr(self, prop, pr)
-        self.type = self.__class__.__name__
-
-    def __finalize__(self, other, method=None):
-        """propagate metadata from other to self """
-
-        # merge operation: using metadata of the left object
-        if method == "merge":
-            for name in self._metadata:
-                object.__setattr__(self, name, getattr(
-                    other.left, name, getattr(self, name)))
-
-        # concat operation: using metadata of the first object
-        elif method == "concat":
-            for name in self._metadata:
-                object.__setattr__(self, name, getattr(
-                    other.objs[0], name, getattr(self, name)))
-
-        # any other condition
-        else:
-            for name in self._metadata:
-                object.__setattr__(self, name, getattr(
-                    other, name, getattr(self, name)))
-        return self
-
-    def __str__(self):
-        out = pd.DataFrame(self)
-        idx = [i + self.time_unit for i in self.index.to_numpy()]
-        out.index = pd.Index(idx)
-        col = [i + self.dim_unit for i in out.columns.to_numpy()]
-        out.columns = pd.Index(col)
-        out = out.__str__() + "\ntype: {}".format(self.type)
-        return out
-
-    def __repr__(self):
-        return self.__str__()
-
-    def __getattr__(self, *args, **kwargs):
-        try:
-            out = super(_UnitDataFrame, self).__getattr__(*args, **kwargs)
-            return out.__finalize__(self)
-        except Exception:
-            AttributeError()
-
-    def __getitem__(self, *args, **kwargs):
-        try:
-            out = super(_UnitDataFrame, self).__getitem__(*args, **kwargs)
-            return out.__finalize__(self)
-        except Exception:
-            NotImplementedError()
-
-    @property
-    def _constructor(self):
-        return _UnitDataFrame
-
-    @property
-    def _constructor_sliced(self):
-        return _UnitDataFrame
-
-    @property
-    def _constructor_expanddim(self):
-        return _UnitDataFrame
-
-
-class Point(_UnitDataFrame):
-    """
-    Create Point object sampled over time.
-
-    Input:
-
-        data (ndarray, list, pandas.Series, pandas.DataFrame, dict)
-
-            the data which creates the Point.
-
-        index (list)
-
-            the index representing each time sample. It must provide 1 value
-            for each sample in data.
-
-        columns (list)
-
-            the names of the dimensions of the points.
-
-        dim_unit (str)
-
-            the unit of measurement of each dimension
-
-        time_unit (str)
-
-            the unit of measurement of the samples
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.type = "Point"
-
-    @property
-    def _constructor(self):
-        return Point
-
-    @property
-    def _constructor_sliced(self):
-        return Point
-
-    @property
-    def _constructor_expanddim(self):
-        return Point
-
-    # valid operators
-    def __add__(self, value):
-        valid = (Point, Vector, float, int, np.float, np.int,
-                 np.ndarray)
-        validate_obj(value, valid)
-        if isinstance(value, (np.ndarray)):
-            r, c = value.shape
-            ck_1 = (r == 1) & (c == self)
-        return super().__add__(value).__finalize__(self)
-
-
-
-class Vector(_UnitDataFrame):
-    """
-    Create a Vector object sampled over time.
-
-    Input:
-
-        data (ndarray, list, pandas.Series, pandas.DataFrame, dict)
-
-            the data which creates the Point.
-
-        index (list)
-
-            the index representing each time sample. It must provide 1 value
-            for each sample in data.
-
-        columns (list)
-
-            the names of the dimensions of the points.
-
-        dim_unit (str)
-
-            the unit of measurement of each dimension
-
-        time_unit (str)
-
-            the unit of measurement of the samples
-
-        type (str)
-
-            a string describing the nature of the Point object.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.type = "Vector"
-
-    @property
-    def _constructor(self):
-        return Vector
-
-    @property
-    def _constructor_sliced(self):
-        return Vector
-
-    @property
-    def _constructor_expanddim(self):
-        return Vector
-
-    # CLASS SPECIFIC METHODS
+        # check value
+        return(Vector(
+            coords      = np.cross(self.coordinates, self._validate_arg(value)),
+            fs          = self.fs,
+            origin      = self.origin.values,
+            orientation = self.versors.values,
+            names       = self.dim,
+            unit        = self.unit
+            ))
 
     def norm(self):
         """
-        Get the norm of the point.
+        get the norm of the vector.
+
+        Output
+
+            N (pandas.DataFrame)
+
+                return a DataFrame with one column containing the norm of the
+                vector.
         """
-        return _UnitDataFrame(
-            data=(self ** 2).sum(1).values.flatten() ** 0.5,
-            index=self.index,
-            columns=["|" + " + ".join(self.columns) + "|"],
-            time_unit=self.time_unit,
-            dim_unit=self.dim_unit,
-            type=self.type
-        )
+        return pd.DataFrame(
+            data    = np.sqrt(np.sum(self.coordinates ** 2, 1)),
+            columns = ["||" + "+".join(self.dim) + "||"],
+            index   = self.coordinates.index
+            )
 
+    def rotation_from(self, B):
+        """
+        obtain the scipy.spatial_transform.Rotation class object describing
+        the rotation from B to the current vector:
 
-class ForcePlatform(Vector):
-    """
-    Create a Vector object sampled over time.
+        Input
 
-    Input:
+            B (Vector)
 
-        data (ndarray, list, pandas.Series, pandas.DataFrame, dict)
+                the vector from which the angle has to be calculated.
+                If B has a different ReferenceFrame than self, it is firstly
+                aligned to it.
 
-            the data which creates the Point.
+        Output
 
-        index (list)
+            R (scipy.spatial_transform.Rotation)
 
-            the index representing each time sample. It must provide 1 value
-            for each sample in data.
+                The rotation to be applied for obtaining self from B.
+        """
 
-        columns (list)
+        # check the entries
+        assert isinstance(B, (Vector)), "'B' must be a Vector object."
+        txt = "'B' must have dimensions {}.".format(self.dim)
+        assert B.ndim == self.ndim, txt
+        assert np.all([i in np.array(self.dim) for i in B.dim]), txt
+        txt = "'B' must have {} samples.".format(self.nsamples)
+        assert B.nsamples == self.nsamples, txt
+        txt = "'B' samples does not match with self.coordinates.index."
+        ii = self.coordinates.index.to_numpy()
+        assert np.all([i in ii for i in B.coordinates.index.to_numpy()]), txt
 
-            the names of the dimensions of the points.
+        # obtain the vector (w) around which the rotation is provided
+        w = B.cross(self)
+        w = w / w.norm().values
 
-        dim_unit (str)
+        # get the rotation angle
+        C = (B - self).norm()
+        A = self.norm()
+        K = B.norm()
+        zeros = np.argwhere((C.values == 0) | (A.values == 0) | (K.values == 0))
+        f = np.arccos((A ** 2 + K ** 2 - C ** 2) / (2 * A * K)).values
+        f[zeros] = 0
 
-            the unit of measurement of each dimension
+        # return the rotations
+        return Rotation.from_rotvec(w.coordinates.values * f)
 
-        time_unit (str)
+    def rotation_to(self, B):
+        """
+        obtain the scipy.spatial_transform.Rotation class object describing
+        the rotation from the current vector to B:
 
-            the unit of measurement of the samples
+        Input
 
-        type (str)
+            B (Vector)
 
-            a string describing the nature of the Point object.
-    """
+                the vector from which the angle has to be calculated.
+                If B has a different ReferenceFrame than self, it is firstly
+                aligned to it.
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.type = "ForcePlatform"
+        Output
 
-    @property
-    def _constructor(self):
-        return ForcePlatform
+            R (scipy.spatial_transform.Rotation)
 
-    @property
-    def _constructor_sliced(self):
-        return ForcePlatform
+                The rotation to be applied for obtaining B from self.
+        """
+        return self.rotation_from(B).inv()
 
-    @property
-    def _constructor_expanddim(self):
-        return ForcePlatform
+    def copy(self):
+        """
+        return a copy of the object.
+        """
+        return Vector(
+            coords      = self.coordinates.values,
+            fs          = self.fs,
+            origin      = self.origin.values,
+            orientation = self.versors.values,
+            names       = self.dim,
+            unit        = self.unit
+            )
+
+    def as_marker(self):
+        """
+        return a copy of the current object as Marker instance.
+        """
+        return Marker(
+            coords      = self.coordinates.values,
+            fs          = self.fs,
+            origin      = self.origin.values,
+            orientation = self.versors.values,
+            names       = self.dim,
+            unit        = self.unit
+            )
 
 
 class Container(dict):
