@@ -2,7 +2,16 @@
 import kinematics as sbk
 import numpy as np
 
+F1 = np.array([[0, 0, 1]])
+X1 = np.array([[0, 1, 0]])
+F2 = np.array([[0, 0, 2]])
+X2 = np.array([[0, -2, 0]])
+FX = (np.cross(F1, X1) + np.cross(F2, X2)) / (F1 + F2)
+
 M = sbk.Marker(coords=np.array([[0.5, 0.6, 0.7], [0.4, 0.3, 0.2]]), fs=2.3)
+V = M.as_Vector()
+V + 0.5
+print(V)
 R = sbk.ReferenceFrame(origin=np.array([[1, 0, 0]]), orientation=np.array([[1,0,0], [0, 0,1], [0,1,0]]))
 print("M:")
 print(M)
