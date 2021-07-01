@@ -3,14 +3,15 @@
 import itertools as it
 import os
 import time
+
 import numpy as np
 import openpyxl as xl
 import pandas as pd
 import scipy.interpolate as si
-import scipy.signal as ss
 import scipy.linalg as sl
+import scipy.signal as ss
 import sympy as sy
-from sklearn.svm import SVR
+
 
 
 # CLASSES
@@ -54,6 +55,8 @@ class LinearRegression:
         self.order = order
 
         # correct the shape of y and x
+        self.X = x
+        self.Y = y
         YY = self.__simplify__(y, "Y", None)
         XX = self.__simplify__(x, "X", self.order)
         txt = "'X' and 'Y' number of rows must be identical."
@@ -65,23 +68,24 @@ class LinearRegression:
 
         # get the coefficients and intercept
         self._coefs = pd.DataFrame(
-            data=sl.pinv(XX.T.dot(XX)).dot(XX.T).dot(self.Y),
-            index=self.__IV_labels__,
-            columns=self.__DV_labels__,
-        )
+                data = sl.pinv(XX.T.dot(XX)).dot(XX.T).dot(YY),
+                index = self.__IV_labels__,
+                columns = self.__DV_labels__,
+                )
 
         # obtain the symbolic representation of the equation
         self.symbolic = []
-        for c, var in enumerate(self.coefs):
-            vars = self.X.columns.to_numpy()
-            bs = self.coefs[var].values[1:]
-            line = sy.Float(self.coefs[var].values[0], self.digits)
-            for v, b in zip(vars, bs):
+        for c, var in enumerate(self.betas):
+            predictors = XX.columns.to_numpy()
+            bs = self.betas[var].values[1:]
+            line = sy.Float(self.betas[var].values[0], self.digits)
+            for v, b in zip(predictors, bs):
                 line = line + sy.symbols(v) ** sy.Float(b, self.digits)
             self.symbolic += [sy.Eq(sy.symbols(var), line)]
 
+
     @property
-    def coefs(self):
+    def betas(self):
         """
         vector of the regression coefficients.
         """
@@ -180,13 +184,13 @@ class LinearRegression:
         """
         X = self.__simplify__(x, "x", self.order)
         if self.fit_intercept:
-            n = self.coefs.shape[0] - 1
+            n = self.betas.shape[0] - 1
             assert X.shape[1] == n, "'X' must have {} columns.".format(n)
-            Z = X.dot(self.coefs.values[1:]) + self.coefs.values[0]
+            Z = X.dot(self.betas.values[1:]) + self.betas.values[0]
         else:
-            n = self.coefs.shape[0]
+            n = self.betas.shape[0]
             assert X.shape[1] == n, "'X' must have {} columns.".format(n)
-            Z = X.dot(self.coefs.values)
+            Z = X.dot(self.betas.values)
         if isinstance(x, pd.DataFrame):
             idx = x.index
         else:
@@ -288,10 +292,10 @@ class PowerRegression(LinearRegression):
 
         # obtain the symbolic representation of the equation
         self.symbolic = []
-        for c, var in enumerate(self.coefs):
+        for c, var in enumerate(self.betas):
             vars = self.X.columns.to_numpy()
-            a = self.coefs[var].values[0]
-            bs = self.coefs[var].values[1:]
+            a = self.betas[var].values[0]
+            bs = self.betas[var].values[1:]
             line = sy.Float(a, digits)
             for v, b in zip(vars, bs):
                 line = line * sy.symbols(v) ** sy.Float(b, digits)
@@ -308,18 +312,18 @@ class PowerRegression(LinearRegression):
         predict the fitted Y value according to the provided x.
         """
         X = self.__simplify__(x, "x", None)
-        m = self.coefs.shape[0] - 1
+        m = self.betas.shape[0] - 1
         assert X.shape[1] == m, "'X' must have {} columns.".format(m)
         Z = []
-        for dim in self.coefs:
-            coefs = self.coefs[dim].values.T
-            Z += [np.prod(X ** coefs[1:], axis=1) * coefs[0]]
+        for dim in self.betas:
+            coefs = self.betas[dim].values.T
+            Z += [np.prod(X ** coefs[1:], axis = 1) * coefs[0]]
         Z = pd.DataFrame(np.atleast_2d(Z).T)
         if isinstance(x, pd.DataFrame):
             idx = x.index
         else:
             idx = pd.Index(np.arange(X.shape[0]))
-        return pd.DataFrame(Z, index=idx, columns=self.__DV_labels__)
+        return pd.DataFrame(Z, index = idx, columns = self.__DV_labels__)
 
     @property
     def __IV_labels__(self):
@@ -379,13 +383,13 @@ class HyperbolicRegression(LinearRegression):
         # b =  slope / intercept
         coefs = [[coefs[1][0] / coefs[0][0]], [-1 / coefs[0][0]]]
         self._coefs = pd.DataFrame(
-            data=coefs, index=self.__IV_labels__, columns=self.__DV_labels__
-        )
+                data = coefs, index = self.__IV_labels__, columns = self.__DV_labels__
+                )
 
         # obtain the symbolic representation of the equation
         x = sy.symbols(self.X.columns.to_numpy()[0])
-        c = [sy.Float(i, self.digits) for i in self.coefs.values]
-        y = sy.symbols(self.coefs.columns.to_numpy()[0])
+        c = [sy.Float(i, self.digits) for i in self.betas.values]
+        y = sy.symbols(self.betas.columns.to_numpy()[0])
         self.symbolic = [sy.Eq(y, (c[1] * x) / (c[0] + x))]
 
     def copy(self):
@@ -400,7 +404,7 @@ class HyperbolicRegression(LinearRegression):
         """
         X = self.__simplify__(x, "x", None)
         assert X.shape[1] == 1, "'X' must have 1 column."
-        Z = -self.coefs.loc["b"].values * X / (self.coefs.loc["a"].values + X)
+        Z = -self.betas.loc["b"].values * X / (self.betas.loc["a"].values + X)
         if isinstance(x, pd.DataFrame):
             idx = x.index
         else:
@@ -430,12 +434,12 @@ class HyperbolicRegression(LinearRegression):
         frm = "{:+." + str(digits) + "f}"
         txt = "({} " + frm + ") * ({} " + frm + ") = " + frm
         return txt.format(
-            self.coefs.columns.to_numpy()[0],
-            self.coefs.loc["a"].values.flatten()[0],
-            self.__DV_labels__()[0],
-            self.coefs.loc["b"].values.flatten()[0],
-            np.prod(self.coefs.values.flatten()),
-        )
+                self.betas.columns.to_numpy()[0],
+                self.betas.loc["a"].values.flatten()[0],
+                self.__DV_labels__()[0],
+                self.betas.loc["b"].values.flatten()[0],
+                np.prod(self.betas.values.flatten()),
+                )
 
 
 # FUNCTIONS

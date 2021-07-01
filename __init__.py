@@ -1,2 +1,2 @@
-from base import *
-from kinematics import *
+from .base import *
+from .kinematics import *
