@@ -16,6 +16,16 @@ import sympy as sy
 
 # CLASSES
 
+class Rotation:
+
+
+
+    def __init__(self):
+        """
+        Create a Rotation object able to deal with both 3D and 2D rotations.
+        """
+
+
 class LinearRegression:
 
 

@@ -26,12 +26,15 @@ def gram_schmidt(vectors):
             the array containing the orthogonalized unit orientation.
     """
 
+
     # internal functions to simplify the calculation
     def proj(a, b):
         return (np.inner(a, b) / np.inner(b, b) * b).astype(float)
 
+
     def norm(v):
         return v / np.sqrt(np.sum(v ** 2))
+
 
     # calculate the projection points
     W = []
@@ -141,7 +144,7 @@ class ReferenceFrame:
 
     def _is_comparable_to_(self, B):
         """
-        private method used to evaluate if B is a similar to ReferenceFrame.
+        private method used to evaluate if B is similar to ReferenceFrame.
 
         Input
 
@@ -156,7 +159,7 @@ class ReferenceFrame:
                 True if the dimensions, time index and unit are the same.
                 False otherwise.
         """
-        if type(self) != type(B):
+        if not isinstance(B, (Marker, Vector, ReferenceFrame)):
             return False
         if self.sample_number != B.sample_number:
             return False
@@ -249,7 +252,7 @@ class Marker(ReferenceFrame):
             coordinates = np.array([[0, 0, 0]]),
             origin = None,
             orientation = None,
-            fs = 1,
+            sampling_frequency = 1,
             names = None,
             unit = "m"
             ):
@@ -279,7 +282,7 @@ class Marker(ReferenceFrame):
             orientation = np.concatenate([np.reshape(np.eye(c), [1, c, c]) for _ in np.arange(r)], axis = 0)
 
         # initialize the ReferenceFrame
-        super().__init__(origin, orientation, fs, names, unit)
+        super().__init__(origin, orientation, sampling_frequency, names, unit)
 
         # check the coordinates
         txt = "coordinates must be a 2D numpy array or a pandas DataFrame with "
@@ -363,7 +366,7 @@ class Marker(ReferenceFrame):
 
     def __add__(self, value):
         vv = self.copy()
-        vv.coordinates += self._validate_arg_(value)
+        vv.coordinates = vv.coordinates + self._validate_arg_(value)
         return vv
 
 
@@ -377,7 +380,7 @@ class Marker(ReferenceFrame):
 
     def __sub__(self, value):
         V = self.copy()
-        V.coordinates -= self._validate_arg_(value)
+        V.coordinates = V.coordinates - self._validate_arg_(value)
         return V
 
 
@@ -477,7 +480,7 @@ class Marker(ReferenceFrame):
                 coordinates = target_obj,
                 origin = R.origin,
                 orientation = R.orientation,
-                fs = self.sampling_frequency,
+                sampling_frequency = self.sampling_frequency,
                 names = self.dimensions,
                 unit = R.unit
                 )
@@ -491,7 +494,7 @@ class Marker(ReferenceFrame):
                 coordinates = self.coordinates,
                 origin = self.origin,
                 orientation = self.orientation,
-                fs = self.sampling_frequency,
+                sampling_frequency = self.sampling_frequency,
                 names = self.dimensions,
                 unit = self.unit
                 )
@@ -514,7 +517,7 @@ class Marker(ReferenceFrame):
         """
         generate a pandas.DataFrame representing the Marker.
         """
-        cols = ["{} ({})".format(d, self.unit) for d in self.dim]
+        cols = ["{} ({})".format(d, self.unit) for d in self.dimensions]
         index = pd.Index(self.time, name = "Time (s)")
         cord = pd.DataFrame(self.coordinates, columns = cols, index = index)
         return pd.concat([cord, super().to_df()], axis = 1)
@@ -528,8 +531,8 @@ class Marker(ReferenceFrame):
                 coordinates = self.coordinates,
                 origin = self.origin,
                 orientation = self.orientation,
-                fs = self.sampling_frequency,
-                names = self.dim,
+                sampling_frequency = self.sampling_frequency,
+                names = self.dimensions,
                 unit = self.unit
                 )
 
@@ -579,17 +582,13 @@ class Vector(Marker):
     def __init__(
             self,
             coordinates = np.array([[0, 0, 0]]),
-            origin = np.array([[0, 0, 0]]),
-            orientation = np.array(
-                    [[[1, 0, 0],
-                      [0, 1, 0],
-                      [0, 0, 1]]]
-                    ),
-            fs = 1,
-            names = np.array(['X', 'Y', 'Z']),
+            origin = None,
+            orientation = None,
+            sampling_frequency = 1,
+            names = None,
             unit = "m"
             ):
-        super().__init__(coordinates, origin, orientation, fs, names, unit)
+        super().__init__(coordinates, origin, orientation, sampling_frequency, names, unit)
 
 
     def as_Marker(self):
@@ -601,7 +600,7 @@ class Vector(Marker):
                 origin = self.origin,
                 orientation = self.orientation,
                 fs = self.sampling_frequency,
-                names = self.dim,
+                names = self.dimensions,
                 unit = self.unit
                 )
 
@@ -619,7 +618,7 @@ class Vector(Marker):
         # check value
         return (Vector(
                 coordinates = np.cross(self.coordinates, self._validate_arg_(value)),
-                fs = self.sampling_frequency,
+                sampling_frequency = self.sampling_frequency,
                 origin = self.origin.values,
                 orientation = self.orientation.values,
                 names = self.dimensions,
@@ -640,7 +639,7 @@ class Vector(Marker):
         """
         return pd.DataFrame(
                 data = np.sqrt(np.sum(self.coordinates ** 2, 1)),
-                columns = ["||" + "+".join(self.dim) + "||"],
+                columns = ["||" + "+".join(self.dimensions) + "||"],
                 index = self.time
                 )
 
@@ -739,7 +738,7 @@ class Vector(Marker):
         """
         return Vector(
                 coordinates = self.coordinates,
-                fs = self.sampling_frequency,
+                sampling_frequency = self.sampling_frequency,
                 origin = self.origin,
                 orientation = self.orientation,
                 names = self.dimensions,
