@@ -16,9 +16,11 @@ import sympy as sy
 
 # CLASSES
 
-
 class LinearRegression:
-    def __init__(self, y, x, order=1, fit_intercept=True, digits=5):
+
+
+
+    def __init__(self, y, x, order = 1, fit_intercept = True, digits = 5):
         """
         Obtain the regression coefficients according to the Ordinary Least
         Squares approach.
@@ -47,16 +49,14 @@ class LinearRegression:
 
         # add the input parameters
         txt = "{} must be a {} object."
-        assert isinstance(digits, (int)), txt.format("digits", "int")
+        assert isinstance(digits, int), txt.format("digits", "int")
         self.digits = digits
-        assert isinstance(fit_intercept, (bool)), txt.format("fit_intercept", "bool")
+        assert isinstance(fit_intercept, bool), txt.format("fit_intercept", "bool")
         self.fit_intercept = fit_intercept
-        assert isinstance(order, (int)), txt.format("order", "int")
+        assert isinstance(order, int), txt.format("order", "int")
         self.order = order
 
         # correct the shape of y and x
-        self.X = x
-        self.Y = y
         YY = self.__simplify__(y, "Y", None)
         XX = self.__simplify__(x, "X", self.order)
         txt = "'X' and 'Y' number of rows must be identical."
@@ -67,7 +67,7 @@ class LinearRegression:
             XX = np.hstack([np.ones((XX.shape[0], 1)), XX])
 
         # get the coefficients and intercept
-        self._coefs = pd.DataFrame(
+        self._coefficients = pd.DataFrame(
                 data = sl.pinv(XX.T.dot(XX)).dot(XX.T).dot(YY),
                 index = self.__IV_labels__,
                 columns = self.__DV_labels__,
@@ -89,7 +89,8 @@ class LinearRegression:
         """
         vector of the regression coefficients.
         """
-        return self._coefs
+        return self._coefficients
+
 
     @property
     def residuals(self):
@@ -97,6 +98,7 @@ class LinearRegression:
         obtain the residuals of the current regression model.
         """
         return self.Y - self.predict(self.X)
+
 
     @property
     def __IV_labels__(self):
@@ -117,6 +119,7 @@ class LinearRegression:
                 out += [c + "^{}".format(i)]
         return out
 
+
     @property
     def __DV_labels__(self):
         """
@@ -125,6 +128,7 @@ class LinearRegression:
         if isinstance(self.Y, pd.DataFrame):
             return self.Y.columns.to_numpy().tolist()
         return ["Y{}".format(i) for i in np.arange(self.Y.shape[1])]
+
 
     def __simplify__(self, v, name, order):
         """
@@ -149,8 +153,7 @@ class LinearRegression:
                         raise ValueError(txt)
                 XX = np.atleast_2d([[] for i in np.arange(N)])
 
-                # try to convert to the most similar pandas.DataFrame
-                # to the other parameter.
+                # try to convert to the most similar pandas.DataFrame to the other parameter.
                 try:
                     IX = self.Y.index
                 except Exception:
@@ -160,7 +163,7 @@ class LinearRegression:
                         IX = pd.Index(np.arange(N))
                 N = np.arange(XX.shape[1]) + 1
                 CX = pd.Index(name + "{}".format(i) for i in N)
-                XX = pd.DataFrame(XX, index=IX, columns=CX).astype(float)
+                XX = pd.DataFrame(XX, index = IX, columns = CX).astype(float)
             else:
                 raise NotImplementedError(txt)
         setattr(self, name, XX)
@@ -172,11 +175,13 @@ class LinearRegression:
                     ZZ = np.hstack([ZZ, K.T])
         return ZZ
 
+
     def copy(self):
         """
         copy the current instance
         """
         return LinearRegression(self.Y, self.X, self.fit_intercept)
+
 
     def predict(self, x):
         """
@@ -195,20 +200,24 @@ class LinearRegression:
             idx = x.index
         else:
             idx = np.arange(X.shape[0])
-        return pd.DataFrame(Z, index=idx, columns=self.__DV_labels__)
+        return pd.DataFrame(Z, index = idx, columns = self.__DV_labels__)
 
-    def to_latex(self, digits=None):
+
+    def to_latex(self, digits = None):
         if digits is None:
             digits = self.digits
-        out = [sy.latex(i, min=digits, max=digits) for i in self.symbolic]
-        out = "\\begin{array}{rcl}" + "\\".join(out) + "\end{array}"
+        out = [sy.latex(i, min = digits, max = digits) for i in self.symbolic]
+        out = "\\begin{array}{rcl}" + "\\".join(out) + "\\end{array}"
         return out
 
+
     def __repr__(self):
-        [sy.pprint(i, use_unicode=True) for i in self.symbolic]
+        [sy.pprint(i, use_unicode = True) for i in self.symbolic]
+
 
     def __str__(self):
         return str(self.symbolic)
+
 
     @property
     def sumSq(self):
@@ -219,6 +228,7 @@ class LinearRegression:
         SS.columns = self.Y.columns
         return SS
 
+
     @property
     def R2(self):
         """
@@ -226,6 +236,7 @@ class LinearRegression:
         """
         D = ((self.Y.values - self.Y.values.mean(0)) ** 2).sum(0)
         return 1 - self.sumSq / D
+
 
     @property
     def R2_adjusted(self):
@@ -235,8 +246,9 @@ class LinearRegression:
         n, k = self.X.shape
         return 1 - ((1 - self.R2) * (n - 1) / (n - k - 1))
 
+
     @property
-    def RMSE(self):
+    def rmse(self):
         """
         Get the Root Mean Squared Error
         """
@@ -246,7 +258,10 @@ class LinearRegression:
 
 
 class PowerRegression(LinearRegression):
-    def __init__(self, y, x, digits=5):
+
+
+
+    def __init__(self, y, x, digits = 5):
         """
         Obtain the regression coefficients according to the power model:
 
@@ -287,8 +302,8 @@ class PowerRegression(LinearRegression):
 
         # get the coefficients and intercept
         self._coefs = pd.DataFrame(
-            data=coefs, index=self.__IV_labels__, columns=self.__DV_labels__
-        )
+                data = coefs, index = self.__IV_labels__, columns = self.__DV_labels__
+                )
 
         # obtain the symbolic representation of the equation
         self.symbolic = []
@@ -301,11 +316,13 @@ class PowerRegression(LinearRegression):
                 line = line * sy.symbols(v) ** sy.Float(b, digits)
             self.symbolic += [sy.Eq(sy.symbols(var), line)]
 
+
     def copy(self):
         """
         copy the current instance
         """
         return PowerRegression(self.Y, self.X)
+
 
     def predict(self, x):
         """
@@ -325,6 +342,7 @@ class PowerRegression(LinearRegression):
             idx = pd.Index(np.arange(X.shape[0]))
         return pd.DataFrame(Z, index = idx, columns = self.__DV_labels__)
 
+
     @property
     def __IV_labels__(self):
         """
@@ -335,7 +353,10 @@ class PowerRegression(LinearRegression):
 
 
 class HyperbolicRegression(LinearRegression):
-    def __init__(self, y, x, digits=5):
+
+
+
+    def __init__(self, y, x, digits = 5):
         """
         Obtain the regression coefficients according to the (Rectangular) Least
         Squares Hyperbolic function:
@@ -392,11 +413,13 @@ class HyperbolicRegression(LinearRegression):
         y = sy.symbols(self.betas.columns.to_numpy()[0])
         self.symbolic = [sy.Eq(y, (c[1] * x) / (c[0] + x))]
 
+
     def copy(self):
         """
         copy the current instance
         """
         return HyperbolicRegression(self.Y, self.X)
+
 
     def predict(self, x):
         """
@@ -409,7 +432,8 @@ class HyperbolicRegression(LinearRegression):
             idx = x.index
         else:
             idx = pd.Index(np.arange(X.shape[0]))
-        return pd.DataFrame(Z, index=idx, columns=self.__DV_labels__)
+        return pd.DataFrame(Z, index = idx, columns = self.__DV_labels__)
+
 
     @property
     def __IV_labels__(self):
@@ -418,7 +442,8 @@ class HyperbolicRegression(LinearRegression):
         """
         return ["a", "b"]
 
-    def to_string(self, digits=3):
+
+    def to_string(self, digits = 3):
         """
         Create a textual representation of the fitted model.
 
@@ -445,7 +470,7 @@ class HyperbolicRegression(LinearRegression):
 # FUNCTIONS
 
 
-def d1y(y, x=None, dt=1):
+def d1y(y, x = None, dt = 1):
     """
     return the first derivative of y.
 
@@ -489,7 +514,7 @@ def d1y(y, x=None, dt=1):
     return (y[2:] - y[:-2]) / (x[2:] - x[:-2])
 
 
-def d2y(y, x=None, dt=1):
+def d2y(y, x = None, dt = 1):
     """
     return the second derivative of y.
 
@@ -536,7 +561,7 @@ def d2y(y, x=None, dt=1):
     return dy / dx
 
 
-def pad(y, before=0, after=0, value=0):
+def pad(y, before = 0, after = 0, value = 0):
     """
     pad the signal at its ends.
 
@@ -570,10 +595,10 @@ def pad(y, before=0, after=0, value=0):
     b_pad = np.tile(value, before)
 
     # concatenate the signal
-    return np.concatenate([b_pad, y, a_pad], axis=0).flatten()
+    return np.concatenate([b_pad, y, a_pad], axis = 0).flatten()
 
 
-def rescale_arr(y, vmin=0, vmax=1):
+def rescale_arr(y, vmin = 0, vmax = 1):
     """
     scale the array y to have minimum equal to vmin and maximum equal to vmax.
 
@@ -654,7 +679,7 @@ def freedman_diaconis_bins(y):
     return d
 
 
-def mean_filter(y, n=1, offset=0.5):
+def mean_filter(y, n = 1, offset = 0.5):
     """
     mean filter.
 
@@ -707,7 +732,7 @@ def mean_filter(y, n=1, offset=0.5):
     return np.array([np.mean(y[j]) for j in i]).flatten()
 
 
-def median_filter(y, n=1, offset=0.5):
+def median_filter(y, n = 1, offset = 0.5):
     """
     median filter.
 
@@ -760,7 +785,7 @@ def median_filter(y, n=1, offset=0.5):
     return np.array([np.median(y[j]) for j in i]).flatten()
 
 
-def interpolate_cs(y, n=None, x_old=None, x_new=None):
+def interpolate_cs(y, n = None, x_old = None, x_new = None):
     """
     Get the cubic spline interpolation of y.
 
@@ -802,16 +827,16 @@ def interpolate_cs(y, n=None, x_old=None, x_new=None):
 
 
 def residuals_analysis(
-    y,
-    fs,
-    f_num=1000,
-    f_max=None,
-    segments=2,
-    min_samples=2,
-    which_segment=None,
-    filt_fun=None,
-    filt_opt=None,
-):
+        y,
+        fs,
+        f_num = 1000,
+        f_max = None,
+        segments = 2,
+        min_samples = 2,
+        which_segment = None,
+        filt_fun = None,
+        filt_opt = None,
+        ):
     """
     Perform Winter's residual analysis of y.
 
@@ -821,7 +846,7 @@ def residuals_analysis(
 
             the signal to be investigated
 
-        fs (float)
+        sampling_frequency (float)
 
             the sampling frequency of the signal.
 
@@ -899,7 +924,7 @@ def residuals_analysis(
     """
 
     # control the inputs
-    assert fs > 0, "'fs' must be > 0."
+    assert fs > 0, "'sampling_frequency' must be > 0."
     assert f_num > 1, "'f_num' must be > 1."
     if f_max is None:
         P, F = psd(y, fs)
@@ -913,7 +938,7 @@ def residuals_analysis(
     if filt_fun is None:
         filt_fun = butt_filt
     if filt_opt is None:
-        filt_opt = {"order": 4, "fs": fs, "type": "lowpass", "phase_corrected": True}
+        filt_opt = {"order": 4, "sampling_frequency": fs, "type": "lowpass", "phase_corrected": True}
 
     # get the frequency span
     freqs = np.linspace(0, f_max, f_num + 1)[1:]
@@ -923,7 +948,7 @@ def residuals_analysis(
     Q = np.array(Q)
 
     # reshape the SSE as dataframe
-    D = pd.DataFrame(Q, index=freqs, columns=["SSE"])
+    D = pd.DataFrame(Q, index = freqs, columns = ["SSE"])
 
     # get the optimal crossing over point that separates the S regression
     # lines best fitting the residuals data.
@@ -943,7 +968,7 @@ def residuals_analysis(
     return opt, D
 
 
-def crossovers(y, segments=2, min_samples=5):
+def crossovers(y, segments = 2, min_samples = 5):
     """
     Detect the position of the crossing over points between K regression
     lines used to best fit the data.
@@ -1001,9 +1026,9 @@ def crossovers(y, segments=2, min_samples=5):
     # control the inputs
     assert min_samples >= 2, "'min_samples' must be >= 2."
 
+
     # get the residuals calculating formula
     def SSEs(x, y, s):
-
         # get the coordinates
         C = [np.arange(s[i], s[i + 1] + 1) for i in np.arange(len(s) - 1)]
 
@@ -1016,14 +1041,15 @@ def crossovers(y, segments=2, min_samples=5):
         # get the sum of squared residuals
         return np.sum([np.sum((y[C[i]] - v) ** 2) for i, v in enumerate(V)])
 
+
     # get the X axis
     x = np.arange(len(y))
 
     # get all the possible combinations of segments
     J = [
-        np.arange(min_samples * i, len(y) - min_samples * (segments - i))
-        for i in np.arange(1, segments)
-    ]
+            np.arange(min_samples * i, len(y) - min_samples * (segments - i))
+            for i in np.arange(1, segments)
+            ]
     J = [j for j in it.product(*J)]
 
     # remove those combinations having segments shorter than "samples"
@@ -1031,8 +1057,8 @@ def crossovers(y, segments=2, min_samples=5):
 
     # generate the crossovers matrix
     J = np.hstack(
-        (np.zeros((len(J), 1)), np.atleast_2d(J), np.ones((len(J), 1)) * len(y) - 1)
-    ).astype(int)
+            (np.zeros((len(J), 1)), np.atleast_2d(J), np.ones((len(J), 1)) * len(y) - 1)
+            ).astype(int)
 
     # calculate the residuals for each combination
     R = np.array([SSEs(x, y, i) for i in J])
@@ -1051,7 +1077,7 @@ def crossovers(y, segments=2, min_samples=5):
     return O[1:-1], F
 
 
-def butt_filt(y, cutoff, fs, order=4, type="lowpass", phase_corrected=True):
+def butt_filt(y, cutoff, fs, order = 4, type = "lowpass", phase_corrected = True):
     """
     Provides a convenient function to call a Butterworth filter with the
     specified parameters.
@@ -1066,7 +1092,7 @@ def butt_filt(y, cutoff, fs, order=4, type="lowpass", phase_corrected=True):
 
             the filter cutoff in Hz.
 
-        fs (float)
+        sampling_frequency (float)
 
             the sampling frequency of the signal in Hz.
 
@@ -1095,14 +1121,14 @@ def butt_filt(y, cutoff, fs, order=4, type="lowpass", phase_corrected=True):
 
     # get the filter coefficients
     sos = ss.butter(
-        order, (np.array([cutoff]).flatten() / (0.5 * fs)), type, output="sos"
-    )
+            order, (np.array([cutoff]).flatten() / (0.5 * fs)), type, output = "sos"
+            )
 
     # get the filtered data
     return ss.sosfiltfilt(sos, y) if phase_corrected else ss.sosfilt(sos, y)
 
 
-def psd(y, fs=1, n=None):
+def psd(y, fs = 1, n = None):
     """
     compute the power spectrum of y using fft
 
@@ -1112,7 +1138,7 @@ def psd(y, fs=1, n=None):
 
             A 1D numpy array
 
-        fs (float)
+        sampling_frequency (float)
 
             the sampling frequency
 
@@ -1152,7 +1178,7 @@ def psd(y, fs=1, n=None):
     return P, F
 
 
-def find_peaks(y, height=None):
+def find_peaks(y, height = None):
     """
     detect the location (in sample units) of the peaks within y.
 
@@ -1191,7 +1217,7 @@ def find_peaks(y, height=None):
     return zc[y[zc] >= height] + 1
 
 
-def crossings(y, value=0.0):
+def crossings(y, value = 0.0):
     """
     Dectect the crossing points in x compared to value.
 
@@ -1234,7 +1260,7 @@ def crossings(y, value=0.0):
     return sn, cr
 
 
-def xcorr(y, biased=False, full=False, *args):
+def xcorr(y, biased = False, full = False, *args):
     """
     set the (multiple) auto/cross correlation of the data in y.
 
@@ -1298,8 +1324,8 @@ def xcorr(y, biased=False, full=False, *args):
     # adjust the output
     lags = np.arange(-(N - 1), N)
     if not full:
-        xc = xc[(N - 1) :]
-        lags = lags[(N - 1) :]
+        xc = xc[(N - 1):]
+        lags = lags[(N - 1):]
 
     # normalize
     xc /= (N + 1 - abs(lags)) if not biased else (N + 1)
@@ -1308,7 +1334,7 @@ def xcorr(y, biased=False, full=False, *args):
     return xc, lags
 
 
-def magnitude(y, base=10):
+def magnitude(y, base = 10):
     """
     return the order in the given base of the value
 
@@ -1336,7 +1362,7 @@ def magnitude(y, base=10):
         return np.log(abs(y)) / np.log(base)
 
 
-def get_files(path, extension="", check_subfolders=False):
+def get_files(path, extension = "", check_subfolders = False):
     """
     list all the files having the required extension in the
     provided folder and its subfolders (if required).
@@ -1370,7 +1396,7 @@ def get_files(path, extension="", check_subfolders=False):
     # surf the path by the os. walk function
     for root, files in os.walk(path)[0, 2]:
         for obj in files:
-            if obj[-len(extension) :] == extension:
+            if obj[-len(extension):] == extension:
                 out += [os.path.join(root, obj)]
 
         # handle the subfolders
@@ -1381,7 +1407,7 @@ def get_files(path, extension="", check_subfolders=False):
     return out
 
 
-def to_excel(path, df, sheet="Sheet1", keep_index=True, new_file=False):
+def to_excel(path, df, sheet = "Sheet1", keep_index = True, new_file = False):
     """
     a shorthand function to save a pandas dataframe to an excel file
 
@@ -1467,7 +1493,7 @@ def to_excel(path, df, sheet="Sheet1", keep_index=True, new_file=False):
     wb.save(path)
 
 
-def from_excel(path, sheets=None, **kwargs):
+def from_excel(path, sheets = None, **kwargs):
     """
     a shorthand function to collect data from an excel file
     and to store them into a dict.
@@ -1506,7 +1532,7 @@ def from_excel(path, sheets=None, **kwargs):
     return {i: pd.read_excel(path, i, **kwargs) for i in sheets}
 
 
-def get_time(tic=None, toc=None, as_string=True, compact=True):
+def get_time(tic = None, toc = None, as_string = True, compact = True):
     """
     get the days, hours, minutes and seconds between the two times.
     If only tic is provided, it is considered as the lapsed time.
@@ -1563,12 +1589,12 @@ def get_time(tic=None, toc=None, as_string=True, compact=True):
     # report the calculated time
     if not as_string:
         return {
-            "Days": [d],
-            "Hours": [h],
-            "Minutes": [m],
-            "Seconds": [s],
-            "Milliseconds": [ms],
-        }
+                "Days":         [d],
+                "Hours":        [h],
+                "Minutes":      [m],
+                "Seconds":      [s],
+                "Milliseconds": [ms],
+                }
     else:
         st = "{:0>2d}".format(d) + (" Days - " if not compact else ":")
         st += "{:0>2d}".format(h)
