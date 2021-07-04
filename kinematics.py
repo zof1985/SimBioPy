@@ -7,7 +7,6 @@ import pandas as pd
 from scipy.spatial.transform import Rotation
 
 
-
 def gram_schmidt(vectors):
     """
     return the orthogonal basis defined by a set of vectors using the
@@ -596,13 +595,13 @@ class Vector(Marker):
         return a copy of the current object as Marker instance.
         """
         return Marker(
-                coordinates = self.coordinates,
-                origin = self.origin,
-                orientation = self.orientation,
-                fs = self.sampling_frequency,
-                names = self.dimensions,
-                unit = self.unit
-                )
+            coordinates=self.coordinates,
+            origin=self.origin,
+            orientation=self.orientation,
+            sampling_frequency=self.sampling_frequency,
+            names=self.dimensions,
+            unit=self.unit
+        )
 
 
     def cross(self, value):

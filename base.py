@@ -13,11 +13,18 @@ import scipy.signal as ss
 import sympy as sy
 
 
-
 # CLASSES
 
 class Rotation:
 
+
+    def __init__(self):
+        """
+        Create a Rotation object able to deal with both 3D and 2D rotations.
+        """
+
+
+class Rotation:
 
 
     def __init__(self):
@@ -29,8 +36,7 @@ class Rotation:
 class LinearRegression:
 
 
-
-    def __init__(self, y, x, order = 1, fit_intercept = True, digits = 5):
+    def __init__(self, y, x, order=1, fit_intercept=True, digits=5):
         """
         Obtain the regression coefficients according to the Ordinary Least
         Squares approach.
@@ -1427,7 +1433,7 @@ def to_excel(path, df, sheet = "Sheet1", keep_index = True, new_file = False):
 
             the path to the file where to store the file.
 
-        df (pandas.DataFrame)
+        data (pandas.DataFrame)
 
             a pandas.DataFrame.
 
