@@ -1,8 +1,7 @@
 # IMPORTS
 
-import os
-
 import numpy as np
+import os
 import pandas as pd
 from scipy.spatial.transform import Rotation
 
@@ -25,15 +24,12 @@ def gram_schmidt(vectors):
             the array containing the orthogonalized unit orientation.
     """
 
-
     # internal functions to simplify the calculation
     def proj(a, b):
         return (np.inner(a, b) / np.inner(b, b) * b).astype(float)
 
-
     def norm(v):
         return v / np.sqrt(np.sum(v ** 2))
-
 
     # calculate the projection points
     W = []
@@ -81,15 +77,14 @@ class ReferenceFrame:
             the unit of measurement of the ReferenceFrame.
     """
 
-
     def __init__(
             self,
-            origin = np.array([[0, 0, 0]]),
-            orientation = None,
-            sampling_frequency = 1,
-            names = None,
-            unit = "m"
-            ):
+            origin=np.array([[0, 0, 0]]),
+            orientation=None,
+            sampling_frequency=1,
+            names=None,
+            unit="m"
+    ):
 
         # check the sampling frequency
         valid = (int, float)
@@ -108,7 +103,7 @@ class ReferenceFrame:
         # handle the orientation parameter
         if orientation is None:
             r, c = self.origin.shape
-            orientation = np.concatenate([np.reshape(np.eye(c), [1, c, c]) for _ in np.arange(r)], axis = 0)
+            orientation = np.concatenate([np.reshape(np.eye(c), [1, c, c]) for _ in np.arange(r)], axis=0)
         assert isinstance(orientation, np.ndarray), "orientation must be a numpy 3D array."
         assert orientation.ndim == 3, "orientation must be a numpy 3D array"
         self.orientation = np.atleast_3d([gram_schmidt(i) for i in np.atleast_3d(orientation)])
@@ -126,7 +121,6 @@ class ReferenceFrame:
         assert isinstance(unit, str), "'unit' must be a str."
         self.unit = unit
 
-
     def to_df(self):
         """
         generate a pandas.DataFrame representing the ReferenceFrame.
@@ -137,9 +131,8 @@ class ReferenceFrame:
             data += [self.orientation[:, i, :]]
             cols += ["Versor {} {} ({})".format(i + 1, k, self.unit) for k in self.dimensions]
         data = np.hstack(data)
-        index = pd.Index(self.time, name = "Time (s)")
-        return pd.DataFrame(data = data, columns = cols, index = index)
-
+        index = pd.Index(self.time, name="Time (s)")
+        return pd.DataFrame(data=data, columns=cols, index=index)
 
     def _is_comparable_to_(self, B):
         """
@@ -172,36 +165,31 @@ class ReferenceFrame:
             return False
         return True
 
-
     def __str__(self):
         return self.to_df().__str__()
 
-
     def __repr__(self):
         return self.__str__()
-
 
     def __eq__(self, other):
         if isinstance(other, ReferenceFrame):
             return self.to_df() == other.to_df()
         return False
 
-
     def __ne__(self, other):
         return not self.__eq__(other)
-
 
     def copy(self):
         """
         return a copy of the object.
         """
         return ReferenceFrame(
-                origin = self.origin,
-                orientation = self.orientation,
-                sampling_frequency = self.sampling_frequency,
-                names = self.dimensions,
-                unit = self.unit
-                )
+            origin=self.origin,
+            orientation=self.orientation,
+            sampling_frequency=self.sampling_frequency,
+            names=self.dimensions,
+            unit=self.unit
+        )
 
 
 class Marker(ReferenceFrame):
@@ -245,16 +233,15 @@ class Marker(ReferenceFrame):
             the unit of measurement of the ReferenceFrame.
     """
 
-
     def __init__(
             self,
-            coordinates = np.array([[0, 0, 0]]),
-            origin = None,
-            orientation = None,
-            sampling_frequency = 1,
-            names = None,
-            unit = "m"
-            ):
+            coordinates=np.array([[0, 0, 0]]),
+            origin=None,
+            orientation=None,
+            sampling_frequency=1,
+            names=None,
+            unit="m"
+    ):
 
         # handle the coordinates parameter
         txt = "coordinates must be a 2D numpy array or a pandas DataFrame."
@@ -278,7 +265,7 @@ class Marker(ReferenceFrame):
         # handle the orientation parameter
         if orientation is None:
             r, c = coordinates.shape
-            orientation = np.concatenate([np.reshape(np.eye(c), [1, c, c]) for _ in np.arange(r)], axis = 0)
+            orientation = np.concatenate([np.reshape(np.eye(c), [1, c, c]) for _ in np.arange(r)], axis=0)
 
         # initialize the ReferenceFrame
         super().__init__(origin, orientation, sampling_frequency, names, unit)
@@ -295,7 +282,6 @@ class Marker(ReferenceFrame):
             self.coordinates = coordinates.values
         else:
             self.coordinates = np.copy(coordinates)
-
 
     def _validate_arg_(self, value):
         """
@@ -362,68 +348,54 @@ class Marker(ReferenceFrame):
         # return the array
         return aa
 
-
     def __add__(self, value):
         vv = self.copy()
         vv.coordinates = vv.coordinates + self._validate_arg_(value)
         return vv
 
-
     def __radd__(self, value):
         return self.__add__(value)
 
-
     def __iadd__(self, value):
         self.coordinates += self._validate_arg_(value)
-
 
     def __sub__(self, value):
         V = self.copy()
         V.coordinates = V.coordinates - self._validate_arg_(value)
         return V
 
-
     def __rsub__(self, value):
         return self.__sub__(value)
 
-
     def __isub__(self, value):
         self.coordinates -= self._validate_arg_(value)
-
 
     def __mul__(self, value):
         V = self.copy()
         V.coordinates *= self._validate_arg_(value)
         return V
 
-
     def __rmul__(self, value):
         return self.__mul__(value)
 
-
     def __imul__(self, value):
         self.coordinates *= self._validate_arg_(value)
-
 
     def __truediv__(self, value):
         V = self.copy()
         V.coordinates /= self._validate_arg_(value)
         return V
 
-
     def __rtruediv__(self, value):
         return self.__truediv__(value)
 
-
     def __itruediv__(self, value):
         self.coordinates /= self._validate_arg_(value)
-
 
     def __neg__(self):
         V = self.copy()
         V.coordinates *= (-1)
         return V
-
 
     def __pow__(self, value):
         txt = "power operator is allowed only for float or int exponents."
@@ -432,22 +404,18 @@ class Marker(ReferenceFrame):
         V.coordinates ** value
         return V
 
-
     def __abs__(self):
         V = self.copy()
         V.coordinates = abs(V.coordinates)
         return V
-
 
     def __eq__(self, other):
         if isinstance(other, Marker):
             return self.to_df() == other.to_df()
         return False
 
-
     def __ne__(self, other):
         return not self.__eq__(other)
-
 
     def change_frame(self, R):
         """
@@ -476,64 +444,60 @@ class Marker(ReferenceFrame):
         actual_obj = actual_frame.inv().apply(self.coordinates) + self.origin
         target_obj = Rotation.from_matrix(R.orientation).apply(actual_obj - R.origin)
         return Marker(
-                coordinates = target_obj,
-                origin = R.origin,
-                orientation = R.orientation,
-                sampling_frequency = self.sampling_frequency,
-                names = self.dimensions,
-                unit = R.unit
-                )
-
+            coordinates=target_obj,
+            origin=R.origin,
+            orientation=R.orientation,
+            sampling_frequency=self.sampling_frequency,
+            names=self.dimensions,
+            unit=R.unit
+        )
 
     def as_Vector(self):
         """
         return a copy of the current Marker as Vector instance.
         """
         return Vector(
-                coordinates = self.coordinates,
-                origin = self.origin,
-                orientation = self.orientation,
-                sampling_frequency = self.sampling_frequency,
-                names = self.dimensions,
-                unit = self.unit
-                )
-
+            coordinates=self.coordinates,
+            origin=self.origin,
+            orientation=self.orientation,
+            sampling_frequency=self.sampling_frequency,
+            names=self.dimensions,
+            unit=self.unit
+        )
 
     def as_ReferenceFrame(self):
         """
         return the ReferenceFrame instance of the current object.
         """
         return ReferenceFrame(
-                origin = self.origin,
-                orientation = self.orientation,
-                sampling_frequency = self.sampling_frequency,
-                names = self.dimensions,
-                unit = self.unit
-                )
-
+            origin=self.origin,
+            orientation=self.orientation,
+            sampling_frequency=self.sampling_frequency,
+            names=self.dimensions,
+            unit=self.unit
+        )
 
     def to_df(self):
         """
         generate a pandas.DataFrame representing the Marker.
         """
         cols = ["{} ({})".format(d, self.unit) for d in self.dimensions]
-        index = pd.Index(self.time, name = "Time (s)")
-        cord = pd.DataFrame(self.coordinates, columns = cols, index = index)
-        return pd.concat([cord, super().to_df()], axis = 1)
-
+        index = pd.Index(self.time, name="Time (s)")
+        cord = pd.DataFrame(self.coordinates, columns=cols, index=index)
+        return pd.concat([cord, super().to_df()], axis=1)
 
     def copy(self):
         """
         return a copy of the object.
         """
         return Marker(
-                coordinates = self.coordinates,
-                origin = self.origin,
-                orientation = self.orientation,
-                sampling_frequency = self.sampling_frequency,
-                names = self.dimensions,
-                unit = self.unit
-                )
+            coordinates=self.coordinates,
+            origin=self.origin,
+            orientation=self.orientation,
+            sampling_frequency=self.sampling_frequency,
+            names=self.dimensions,
+            unit=self.unit
+        )
 
 
 class Vector(Marker):
@@ -577,18 +541,16 @@ class Vector(Marker):
             the unit of measurement of the ReferenceFrame.
     """
 
-
     def __init__(
             self,
-            coordinates = np.array([[0, 0, 0]]),
-            origin = None,
-            orientation = None,
-            sampling_frequency = 1,
-            names = None,
-            unit = "m"
-            ):
+            coordinates=np.array([[0, 0, 0]]),
+            origin=None,
+            orientation=None,
+            sampling_frequency=1,
+            names=None,
+            unit="m"
+    ):
         super().__init__(coordinates, origin, orientation, sampling_frequency, names, unit)
-
 
     def as_Marker(self):
         """
@@ -603,7 +565,6 @@ class Vector(Marker):
             unit=self.unit
         )
 
-
     def cross(self, value):
         """
         get the cross product between 3D Vectors.
@@ -616,14 +577,13 @@ class Vector(Marker):
         """
         # check value
         return (Vector(
-                coordinates = np.cross(self.coordinates, self._validate_arg_(value)),
-                sampling_frequency = self.sampling_frequency,
-                origin = self.origin.values,
-                orientation = self.orientation.values,
-                names = self.dimensions,
-                unit = self.unit
-                ))
-
+            coordinates=np.cross(self.coordinates, self._validate_arg_(value)),
+            sampling_frequency=self.sampling_frequency,
+            origin=self.origin.values,
+            orientation=self.orientation.values,
+            names=self.dimensions,
+            unit=self.unit
+        ))
 
     def norm(self):
         """
@@ -637,13 +597,12 @@ class Vector(Marker):
                 vector.
         """
         return pd.DataFrame(
-                data = np.sqrt(np.sum(self.coordinates ** 2, 1)),
-                columns = ["||" + "+".join(self.dimensions) + "||"],
-                index = self.time
-                )
+            data=np.sqrt(np.sum(self.coordinates ** 2, 1)),
+            columns=["||" + "+".join(self.dimensions) + "||"],
+            index=self.time
+        )
 
-
-    def angle_from(self, B, return_matrix = False, degrees = True):
+    def angle_from(self, B, return_matrix=False, degrees=True):
         """
         obtain the angle allowing to rotate B into self.
         Optionally return also the unit vector around which the rotation occurs.
@@ -730,20 +689,18 @@ class Vector(Marker):
         R = {i: R[j] for j, i in enumerate(self.time)}
         return A, R
 
-
     def copy(self):
         """
         return a copy of the object.
         """
         return Vector(
-                coordinates = self.coordinates,
-                sampling_frequency = self.sampling_frequency,
-                origin = self.origin,
-                orientation = self.orientation,
-                names = self.dimensions,
-                unit = self.unit
-                )
-
+            coordinates=self.coordinates,
+            sampling_frequency=self.sampling_frequency,
+            origin=self.origin,
+            orientation=self.orientation,
+            names=self.dimensions,
+            unit=self.unit
+        )
 
     def change_frame(self, R):
         """
@@ -806,36 +763,33 @@ class ForcePlatform(Vector):
             the unit of measurement of the ReferenceFrame.
     """
 
-
     def __init__(
             self,
-            coordinates = np.array([[0, 0, 0]]),
-            origin = np.array([[0, 0, 0]]),
-            orientation = np.array(
-                    [[[1, 0, 0],
-                      [0, 1, 0],
-                      [0, 0, 1]]]
-                    ),
-            sampling_frequency = 1,
-            names = np.array(['X', 'Y', 'Z']),
-            unit = "m"
-            ):
+            coordinates=np.array([[0, 0, 0]]),
+            origin=np.array([[0, 0, 0]]),
+            orientation=np.array(
+                [[[1, 0, 0],
+                  [0, 1, 0],
+                  [0, 0, 1]]]
+            ),
+            sampling_frequency=1,
+            names=np.array(['X', 'Y', 'Z']),
+            unit="m"
+    ):
         super().__init__(coordinates, origin, orientation, sampling_frequency, names, unit)
-
 
     def copy(self):
         """
         return a copy of the object.
         """
         return ForcePlatform(
-                coordinates = self.coordinates,
-                sampling_frequency = self.sampling_frequency,
-                origin = self.origin,
-                orientation = self.orientation,
-                names = self.dimensions,
-                unit = self.unit
-                )
-
+            coordinates=self.coordinates,
+            sampling_frequency=self.sampling_frequency,
+            origin=self.origin,
+            orientation=self.orientation,
+            names=self.dimensions,
+            unit=self.unit
+        )
 
     def change_frame(self, R):
         """
@@ -869,7 +823,6 @@ class Container(dict):
             objects of class "Point", "Point", or any subclass.
     """
 
-
     def to_csv(self, path, **kwargs):
         """
         store pandas.DataFrames containing the points formatted as:
@@ -891,8 +844,7 @@ class Container(dict):
         for v in self.keys():
             self[v].to_csv(os.path.sep.join([path, v + ".csv"]), **kwargs)
 
-
-    def to_excel(self, path, new_file = False):
+    def to_excel(self, path, new_file=False):
         """
         store an excel file containing the vectors formatted as: "XXX|YYY_ZZZ".
 
@@ -911,9 +863,7 @@ class Container(dict):
         # store all Vectors
         [self[v].to_excel(path, v) for v in self]
 
-
     # GETTERS
-
 
     @staticmethod
     def from_csv(path, **kwargs):
@@ -953,9 +903,8 @@ class Container(dict):
         # return the dict
         return vd
 
-
     @staticmethod
-    def from_excel(path, sheets = None, exclude_errors = True):
+    def from_excel(path, sheets=None, exclude_errors=True):
         """
         Create a "VectorDict" object from an excel file.
 
@@ -999,7 +948,6 @@ class Container(dict):
 
         # return the dict
         return vd
-
 
     @staticmethod
     def from_emt(file):
@@ -1049,9 +997,9 @@ class Container(dict):
 
         # get the data values (now should work)
         values = np.vstack(
-                [np.atleast_2d(i[:len(V)])
-                 for i in lines[11:-2]]
-                ).astype(float)
+            [np.atleast_2d(i[:len(V)])
+             for i in lines[11:-2]]
+        ).astype(float)
 
         # get the columns of interest
         cols = np.arange(np.argwhere(V == "Time").flatten()[0] + 1, len(V))
@@ -1079,16 +1027,15 @@ class Container(dict):
 
             # setup the output variable
             vd[v] = _UnitDataFrame(
-                    data = K,
-                    index = time,
-                    time_unit = time_unit,
-                    dim_unit = dim_unit,
-                    type = type
-                    )
+                data=K,
+                index=time,
+                time_unit=time_unit,
+                dim_unit=dim_unit,
+                type=type
+            )
 
         # return vd
         return vd
-
 
     # SUBCLASSED METHODS
 
@@ -1096,14 +1043,12 @@ class Container(dict):
         super(Container, self).__init__(*args, **kwargs)
         self.__finalize__()
 
-
     def __finalize__(self):
         for i in self.keys():
             assert isinstance(
-                    self[i], _UnitDataFrame
-                    ), "{} is not a Point".format(i)
+                self[i], _UnitDataFrame
+            ), "{} is not a Point".format(i)
         return self
-
 
     def __str__(self):
         lst = []
@@ -1111,15 +1056,12 @@ class Container(dict):
             lst += [" ".join(["\n\nVector:\t ", i, "\n\n", self[i].__str__()])]
         return "\n".join(lst)
 
-
     def __repr__(self):
         return self.__str__()
-
 
     def __setitem__(self, *args, **kwargs):
         super(Container, self).__setitem__(*args, **kwargs)
         self.__finalize__()
-
 
     def __setattr__(self, *args, **kwargs):
         super(Container, self).__setattr__(*args, **kwargs)
