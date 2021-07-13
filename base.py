@@ -441,6 +441,37 @@ class HyperbolicRegression(LinearRegression):
 # FUNCTIONS
 
 
+def gram_schmidt(vectors):
+    """
+    Return the orthogonal basis defined by a set of vectors using the
+    Gram-Schmidt algorithm.
+
+    Parameters:
+        vectors (np.ndarray): a NxN numpy.ndarray to be orthogonalized (by row).
+
+    Returns:
+        a NxN numpy.ndarray containing the orthogonalized arrays.
+    """
+
+    # internal functions to simplify the calculation
+    def proj(a, b):
+        return (np.inner(a, b) / np.inner(b, b) * b).astype(float)
+
+    def norm(v):
+        return v / np.sqrt(np.sum(v ** 2))
+
+    # calculate the projection points
+    W = []
+    for i, u in enumerate(vectors):
+        w = np.copy(u).astype(float)
+        for j in vectors[:i, :]:
+            w -= proj(u, j)
+        W += [w]
+
+    # normalize
+    return np.vstack([norm(u) for u in W])
+
+
 def d1y(y, x=None, dt=1):
     """
     return the first derivative of y.
@@ -1378,13 +1409,13 @@ def get_files(path, extension="", check_subfolders=False):
 
 def to_excel(path, df, sheet="Sheet1", keep_index=True, new_file=False):
     """
-    a shorthand function to save a pandas dataframe to an excel file
+    a shorthand function to save a pandas dataframe to an excel path
 
     Input:
 
         path (str)
 
-            the path to the file where to store the file.
+            the path to the path where to store the path.
 
         data (pandas.DataFrame)
 
@@ -1401,11 +1432,11 @@ def to_excel(path, df, sheet="Sheet1", keep_index=True, new_file=False):
 
         new_file (boolean)
 
-            if True, a completely new file will be created.
+            if True, a completely new path will be created.
 
     Output:
 
-        The data stored to the indicated file.
+        The data stored to the indicated path.
     """
 
     # get the workbook
@@ -1464,14 +1495,14 @@ def to_excel(path, df, sheet="Sheet1", keep_index=True, new_file=False):
 
 def from_excel(path, sheets=None, **kwargs):
     """
-    a shorthand function to collect data from an excel file
+    a shorthand function to collect data from an excel path
     and to store them into a dict.
 
     Input:
 
         path (str)
 
-            the path to the file where to store the file.
+            the path to the path where to store the path.
 
         sheets (list of str)
 
@@ -1485,10 +1516,10 @@ def from_excel(path, sheets=None, **kwargs):
     Output:
 
         a dict object with keys equal to the sheets name and pandas
-        dataframe as elements of each sheet in the excel file.
+        dataframe as elements of each sheet in the excel path.
     """
 
-    # retrive the data in the path file
+    # retrive the data in the path path
     try:
         xlfile = pd.ExcelFile(path)
         sheets = np.array(xlfile.sheet_names if sheets is None else [sheets]).flatten()
@@ -1585,14 +1616,14 @@ def lvlup(path):
 
         path (str)
 
-            a file or a directory. Otherwise a message is casted and
+            a path or a directory. Otherwise a message is casted and
             the function returns the input as is.
 
     Output:
 
         s (str)
 
-            a string reflecting the superior directory of file.
+            a string reflecting the superior directory of path.
     """
 
     # return the upper level
