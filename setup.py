@@ -8,5 +8,5 @@ setup(
     license='MIT',
     author='Luca Zoffoli',
     author_email='zof1985@gmail.com',
-    description='simple biomechanics with python'
+    description='simple biomechanics module'
 )

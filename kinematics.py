@@ -392,7 +392,8 @@ class Vector:
         setattr(self, "index", np.array([index]).flatten())
         setattr(self, "unit", unit)
 
-    def _get_indices(self, item):
+    '''
+    def _get_selection(self, item):
         """
 
         Parameters
@@ -404,24 +405,52 @@ class Vector:
         -------
             a tuple to be interpreted as item(s) selector
         """
-        if isinstance(item, tuple):
-            item = list(item)
-        elif not isinstance(item, (list, np.ndarray)):
-            item = [item]
-        any_slice = False
-        for i, v in enumerate(item):
-            if isinstance(v, slice):
-                any_slice = True
-            else:
-                if not isinstance(v, (list, np.ndarray)):
-                    v = [v]
-                for j, k in enumerate(v):
-                    if np.any(self.names == str(k)):
-                        v[j] = np.argwhere(self.names == str(k)).flatten()[0]
-                item[i] = v
-        if not any_slice:
-            item = [np.s_[:]] + np.atleast_2d(item).tolist()
-        return tuple(item)
+        txt = "item must be a tuple of len = 2 with the first element being the rows selection and"
+        txt += " the second element the column selection."
+        assert len(item) == 2, txt
+        rows_item, cols_item = item
+
+        def check_items(items, max_val):
+            out = []
+            for itm in items:
+                if isinstance(itm, slice):
+                    line = np.arange(
+                        itm.start if itm.start is not None else 0,
+                        itm.stop if itm.stop is not None else max_val,
+                        itm.step if itm.step is not None else 1
+                        )
+                elif isinstance(itm, np.ndarray):
+                    line = itm.flatten().tolist()
+                elif isinstance(itm, (int, float)):
+                    line = [itm]
+                else:
+                    line = list(itm)
+                out += [line]
+            return np.array(out).flatten().tolist()
+
+        # get the rows and cols indices
+        if not isinstance(rows_item, (tuple, list, np.ndarray)):
+            rows_item = [rows_item]
+        rows = check_items(rows_item, self.coordinates.shape[0])
+        if not isinstance(cols_item, (tuple, list, np.ndarray)):
+            cols_item = [cols_item]
+        cols = check_items(cols_item, self.coordinates.shape[1])
+
+        # adjust the cols by the (existing) names attribute
+        for i, v in enumerate(cols):
+            try:
+                cols[i] = np.int(v)
+            except ValueError:
+                ref = np.argwhere(self.names == str(v)).flatten()
+                if len(ref) > 0:
+                    cols[i] = ref[0]
+
+        # get the validity of the selection
+        out_of_range_rows = np.argwhere(rows not in np.arange(self.coordinates.shape[0])).flatten()
+        assert len(out_of_range_rows) == 0, "rows out of samples: {}".format(out_of_range_rows)
+        out_of_range_cols = [np.isreal(i) for i in cols]
+        assert np.all(out_of_range_cols), "cols out of samples: {}".format(out_of_range_cols)
+        return rows, cols
 
     def __getitem__(self, item):
         """
@@ -437,7 +466,9 @@ class Vector:
         val:    array-like
             the item required
         """
-        return self.coordinates.__getitem__(self._get_indices(item))
+        keys = self._get_selection(item)
+        
+        return self.coordinates.__getitem__(np.s_[keys[0]], np.s_[keys[1]])
 
     def __setitem__(self, item, value):
         """
@@ -461,7 +492,7 @@ class Vector:
                 self.names = np.append(self.names, [k])
                 index = len(self.names) - 1
             self.coordinates[:, index] = value[i]
-
+    '''
 
     def __getattr__(self, item):
         """
@@ -482,7 +513,6 @@ class Vector:
                 return self.coordinates[:, np.argwhere(item == self.names).flatten()]
         else:
             raise AttributeError("{} not found.".format(item))
-
 
     def __setattr__(self, key, value):
         """
@@ -507,13 +537,11 @@ class Vector:
             self.names = np.append(self.names, [key])
             self.coordinates = np.hstack([self.coordinates, np.atleast_2d(value)])
 
-
     def __str__(self):
         """
         printing function
         """
         return self.to_df().__str__()
-
 
     def __repr__(self):
         """
@@ -521,14 +549,12 @@ class Vector:
         """
         return self.__str__()
 
-
     @property
     def sampling_frequency(self):
         """
         return the "average" sampling frequency of the Vector.
         """
         return float(np.mean(np.diff(self.index)))
-
 
     def to_df(self):
         """
@@ -539,7 +565,6 @@ class Vector:
             index=self.index,
             columns=[i + " ({})".format(self.unit) for i in self.names]
         )
-
 
     def _matches(self, vector):
         """
@@ -568,13 +593,11 @@ class Vector:
             return False
         return True
 
-
     def copy(self):
         """
         Return a copy of self.
         """
         return Vector(coordinates=self.coordinates, index=self.index, names=self.names, unit=self.unit)
-
 
     def __add__(self, value):
         """
@@ -592,7 +615,6 @@ class Vector:
         """
         return self.copy().__iadd__(value)
 
-
     def __radd__(self, value):
         """
         The "value + self" operator.
@@ -609,7 +631,6 @@ class Vector:
         """
         return self.__add__(value)
 
-
     def __iadd__(self, value):
         """
         The "self += value" operator.
@@ -624,7 +645,6 @@ class Vector:
             self.coordinates += value.coordinates
         else:
             self.coordinates += value
-
 
     def __sub__(self, value):
         """
@@ -642,7 +662,6 @@ class Vector:
         """
         return self.copy().__isub__(value)
 
-
     def __isub__(self, value):
         """
         The "self -= value" operator.
@@ -657,7 +676,6 @@ class Vector:
             self.coordinates -= value.coordinates
         else:
             self.coordinates -= value
-
 
     def __mul__(self, value):
         """
@@ -675,7 +693,6 @@ class Vector:
         """
         return self.copy().__imul__(value)
 
-
     def __rmul__(self, value):
         """
         The "value * self" operator.
@@ -692,7 +709,6 @@ class Vector:
         """
         return self.__mul__(value)
 
-
     def __imul__(self, value):
         """
         The "self *= value" operator.
@@ -707,7 +723,6 @@ class Vector:
             self.coordinates *= value.coordinates
         else:
             self.coordinates *= value
-
 
     def __truediv__(self, value):
         """
@@ -725,7 +740,6 @@ class Vector:
         """
         return self.copy().__itruediv__(value)
 
-
     def __itruediv__(self, value):
         """
         The "self /= value" operator.
@@ -741,7 +755,6 @@ class Vector:
         else:
             self.coordinates /= value
 
-
     def __neg__(self):
         """
         Get the negative of the coordinates.
@@ -749,7 +762,6 @@ class Vector:
         vec = self.copy()
         vec.coordinates *= (-1)
         return vec
-
 
     def __pow__(self, value):
         """
@@ -771,7 +783,6 @@ class Vector:
         vec.coordinates = vec.coordinates ** value
         return vec
 
-
     def __abs__(self):
         """
         Take the absolute values of all the coordinates.
@@ -779,7 +790,6 @@ class Vector:
         vec = self.copy()
         vec.coordinates = abs(vec.coordinates)
         return vec
-
 
     def __eq__(self, other):
         """
@@ -799,7 +809,6 @@ class Vector:
             return self.to_df() == other.to_df()
         return False
 
-
     def __ne__(self, other):
         """
         Disequality compare.
@@ -815,7 +824,6 @@ class Vector:
             the result of the equality comparison
         """
         return not self.__eq__(other)
-
 
     def rotate(self, ref):
         """
@@ -834,7 +842,6 @@ class Vector:
         assert isinstance(ref, ReferenceFrame), "ref must be a ReferenceFrame object."
         return ref.rotate(self)
 
-
     def invert(self, ref):
         """
         invert the rotation generated by the provided reference frame
@@ -851,7 +858,6 @@ class Vector:
         """
         assert isinstance(ref, ReferenceFrame), "ref must be a ReferenceFrame object."
         return ref.invert(self)
-
 
     def cross(self, value):
         """
@@ -874,7 +880,6 @@ class Vector:
         vec.coordinates = np.cross(vec.coordinates, value.coordinates)
         return vec
 
-
     def norm(self):
         """
         get the norm of the vector.
@@ -886,7 +891,6 @@ class Vector:
             unit=self.unit
         )
 
-
     def to_csv(self, path):
         """
         Store the current Vector data as csv path.
@@ -897,7 +901,6 @@ class Vector:
             the path where to store the data.
         """
         self.to_df().to_csv(path)
-
 
     def to_excel(self, path, sheet, new_file=False):
         """
@@ -915,260 +918,3 @@ class Vector:
             should the saving overwrite exising excel path?
         """
         to_excel(path=path, df=self.to_df(), sheet=sheet, keep_index=True, new_file=new_file)
-
-
-class Container(dict):
-    """
-    Create a dict of or" object(s). It is a simple wrapper of the
-    "dict" class with additional methods.
-
-    Input:
-
-        args (objects)
-
-            objects of class "Point", "Point", or any subclass.
-    """
-
-    def to_csv(self, path, **kwargs):
-        """
-        store pandas.DataFrames containing the points formatted as:
-        "XXX|YYY_ZZZ". where:
-            'XXX' is the type of the vector
-            'YYY' is the dimension of the vector
-            'ZZZ'  if the dim_unit.
-
-        In addition, the first column will be the index of the vectors.
-        """
-
-        # remove the filename from kwargs
-        try:
-            kwargs['path'] = None
-        except Exception:
-            pass
-
-        # store all Vectors
-        for v in self.keys():
-            self[v].to_csv(os.path.sep.join([path, v + ".csv"]), **kwargs)
-
-    def to_excel(self, path, new_file=False):
-        """
-        store an excel path containing the vectors formatted as: "XXX|YYY_ZZZ".
-
-        where:
-            'XXX' is the type of the vector
-            'YYY' is the dimension of the vector
-            'ZZZ'  if the dim_unit.
-
-        In addition, the first column will be the index of the vectors.
-        """
-
-        # check if a new path must be created
-        if new_file:
-            os.remove(path)
-
-        # store all Vectors
-        [self[v].to_excel(path, v) for v in self]
-
-    # GETTERS
-
-    @staticmethod
-    def from_csv(path, **kwargs):
-        """
-        Create a "VectorDict" object from a "csv" or "txt" path.
-
-        Input:
-            path: (str)
-                an existing ".csv" or "txt" path or a folder containing csv
-                files. The files must contain 1 column named "Index_ZZZ" and the
-                others as "WWW:XXX|YYY_ZZZ" where:
-                    'WWW' is the type of the vector
-                    'XXX' is the name of the vector
-                    'YYY' is the dimension of the vector
-                    'ZZZ'  if the dim_unit.
-        """
-
-        # control the kwargs
-        try:
-            kwargs['index_col'] = False
-        except Exception:
-            pass
-
-        # get the output dict
-        vd = Container()
-
-        # check if the path is a path or a folder and populate the
-        # Container accordingly
-        if os.path.isfile(path):
-            vd[".".join(path.split(os.path.sep)[-1].split(".")[:-1])
-            ] = _UnitDataFrame.from_csv(path, **kwargs)
-        else:
-            for i in get_files(path, ".csv", False):
-                key = ".".join(i.split(os.path.sep)[-1].split(".")[:-1])
-                vd[key] = _UnitDataFrame.from_csv(i, **kwargs)
-
-        # return the dict
-        return vd
-
-    @staticmethod
-    def from_excel(path, sheets=None, exclude_errors=True):
-        """
-        Create a "VectorDict" object from an excel path.
-
-        Input:
-            path:           (str)
-                            an existing excel path. The sheets must contain 1
-                            column named "Index_ZZZ" and the
-                            others as "WWW:XXX|YYY_ZZZ" where:
-                                'WWW' is the type of the vector
-                                'XXX' is the name of the vector
-                                'YYY' is the dimension of the vector
-                                'ZZZ'  if the dim_unit.
-
-            sheets:         (str, list or None)
-                            the sheets to be imported. In None, all sheets are
-                            imported.
-
-            exclude_errors: (bool)
-                            If a sheet generates an error during the import
-                            would you like to skip it and import the
-                            others?
-
-        Output:
-            a new VectorDict with the imported vectors.
-        """
-
-        vd = Container()
-
-        # get the sheets
-        dfs = from_excel(path, sheets)
-
-        # import the sheets
-        for i in dfs:
-            if exclude_errors:
-                try:
-                    vd[i] = _UnitDataFrame.from_df(dfs[i])
-                except Exception:
-                    pass
-            else:
-                vd[i] = _UnitDataFrame.from_df(dfs[i])
-
-        # return the dict
-        return vd
-
-    @staticmethod
-    def from_emt(file):
-        """
-        Create a "VectorDict" object from a ".emt" path.
-
-        Input:
-            path: (str)
-                an existing ".emt" path.
-        """
-
-        # check the validity of the entered path
-        assert os.path.exists(file), file + ' does not exist.'
-        assert file[-4:] == '.emt', file + ' must be an ".emt" path.'
-
-        # read the path
-        try:
-            file = open(file)
-
-            # get the lines of the path
-            lines = [[j.strip() for j in i]
-                     for i in [i.split('\t') for i in file]]
-
-        # something went wrong so close path
-        except Exception:
-            lines = []
-
-        # close the path
-        finally:
-            file.close()
-
-        # get the output VectorDict
-        vd = _UnitDataFrame()
-
-        # get the units
-        dim_unit = lines[3][1]
-        time_unit = 's'
-
-        # get the type
-        type = lines[2][1]
-
-        # get an array with all the variables
-        V = np.array([i for i in lines[10] if i != ""]).flatten()
-
-        # get the data names
-        names = np.unique([i.split('.')[0] for i in V[2:] if len(i) > 0])
-
-        # get the data values (now should work)
-        values = np.vstack(
-            [np.atleast_2d(i[:len(V)])
-             for i in lines[11:-2]]
-        ).astype(float)
-
-        # get the columns of interest
-        cols = np.arange(np.argwhere(V == "Time").flatten()[0] + 1, len(V))
-
-        # get the rows in the data to be extracted
-        rows = np.argwhere(np.any(~np.isnan(values[:, cols]), 1)).flatten()
-        rows = np.arange(np.min(rows), np.max(rows) + 1)
-
-        # get time
-        time = values[rows, 1].flatten()
-
-        # generate a dataframe for each variable
-        for v in names:
-
-            # get the dimensions
-            D = [i.split(".")[-1] for i in V if i.split(".")[0] == v]
-            D = [""] if len(D) == 1 else D
-
-            # get the data for each dimension
-            K = {}
-            for i in D:
-                key = i if i != "" else v
-                cols = np.argwhere(V == v + (("." + i) if i != "" else ""))
-                K[key] = values[rows, cols.flatten()]
-
-            # setup the output variable
-            vd[v] = _UnitDataFrame(
-                data=K,
-                index=time,
-                time_unit=time_unit,
-                dim_unit=dim_unit,
-                type=type
-            )
-
-        # return vd
-        return vd
-
-    # SUBCLASSED METHODS
-
-    def __init__(self, *args, **kwargs):
-        super(Container, self).__init__(*args, **kwargs)
-        self.__finalize__()
-
-    def __finalize__(self):
-        for i in self.keys():
-            assert isinstance(
-                self[i], _UnitDataFrame
-            ), "{} is not a Point".format(i)
-        return self
-
-    def __str__(self):
-        lst = []
-        for i in self.keys():
-            lst += [" ".join(["\n\nVector:\t ", i, "\n\n", self[i].__str__()])]
-        return "\n".join(lst)
-
-    def __repr__(self):
-        return self.__str__()
-
-    def __setitem__(self, *args, **kwargs):
-        super(Container, self).__setitem__(*args, **kwargs)
-        self.__finalize__()
-
-    def __setattr__(self, *args, **kwargs):
-        super(Container, self).__setattr__(*args, **kwargs)
-        self.__finalize__()
