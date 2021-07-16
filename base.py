@@ -1334,37 +1334,30 @@ def magnitude(y, base=10):
 
 def get_files(path, extension="", check_subfolders=False):
     """
-    list all the files having the required extension in the
-    provided folder and its subfolders (if required).
+    list all the files having the required extension in the provided folder and its subfolders (if required).
 
-    Input:
-
-        path (str)
-
+    Parameters
+    ----------
+        path: str
             a directory where to look for the files.
 
-        extension (str)
+        extension: str
+            a str object defining the ending of the files that have to be listed.
 
-            a str object defining the ending of the files that have
-            to be listed.
+        check_subfolders: bool
+            if True, also the subfolders found in path are searched, otherwise only path is checked.
 
-        check_subfolders (bool)
-
-            if True, also the subfolders found in path are searched,
-            otherwise only path is checked.
-
-    Output:
-
-        files (list)
-            a list containing the full_path to all the files corresponding
-            to the input criteria.
+    Returns
+    -------
+        files: list
+            a list containing the full_path to all the files corresponding to the input criteria.
     """
 
     # output storer
     out = []
 
     # surf the path by the os. walk function
-    for root, files in os.walk(path)[0, 2]:
+    for root, dirs, files in os.walk(path):
         for obj in files:
             if obj[-len(extension) :] == extension:
                 out += [os.path.join(root, obj)]
