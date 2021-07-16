@@ -1,9 +1,10 @@
 # IMPORTS
 
-from base import *
+from .base import *
 
 
 # METHODS
+
 
 def df2vector(df):
     """
@@ -50,8 +51,10 @@ def read_csv(path):
     """
 
     # check the validity of the entered path
-    assert os.path.exists(path), path + ' does not exist.'
-    assert path[-4:] == '.csv' or path[-4:] == '.txt', path + ' must be a ".csv" or ".txt" file.'
+    assert os.path.exists(path), path + " does not exist."
+    assert path[-4:] == ".csv" or path[-4:] == ".txt", (
+        path + ' must be a ".csv" or ".txt" file.'
+    )
 
     # return the data
     return df2vector(pd.read_csv(path, index_col=0))
@@ -83,8 +86,10 @@ def read_excel(path, sheets=None, exclude_errors=True):
     """
 
     # check the validity of the entered path
-    assert os.path.exists(path), path + ' does not exist.'
-    assert path[-5:] == '.xlsx' or path[-4:] == '.xls', path + ' must be a ".xlsx" or ".xls" file.'
+    assert os.path.exists(path), path + " does not exist."
+    assert path[-5:] == ".xlsx" or path[-4:] == ".xls", (
+        path + ' must be a ".xlsx" or ".xls" file.'
+    )
 
     # get the sheets
     dfs = from_excel(path, sheets)
@@ -120,13 +125,13 @@ def read_emt(path):
     """
 
     # check the validity of the entered path
-    assert os.path.exists(path), path + ' does not exist.'
-    assert path[-4:] == '.emt', path + ' must be an ".emt" path.'
+    assert os.path.exists(path), path + " does not exist."
+    assert path[-4:] == ".emt", path + ' must be an ".emt" path.'
 
     # read the path
     try:
-        path = open(path, 'r')
-        lines = [[j.strip() for j in i] for i in [i.split('\t') for i in path]]
+        path = open(path, "r")
+        lines = [[j.strip() for j in i] for i in [i.split("\t") for i in path]]
     except Exception:
         lines = []
     finally:
@@ -142,10 +147,12 @@ def read_emt(path):
     vars = np.array([i for i in lines[10] if i != ""]).flatten()
 
     # get the data names
-    names = np.unique([i.split('.')[0] for i in vars[2:] if len(i) > 0])
+    names = np.unique([i.split(".")[0] for i in vars[2:] if len(i) > 0])
 
     # get the data values
-    values = np.vstack([np.atleast_2d(i[:len(vars)]) for i in lines[11:-2]]).astype(float)
+    values = np.vstack([np.atleast_2d(i[: len(vars)]) for i in lines[11:-2]]).astype(
+        float
+    )
 
     # get the columns of interest
     cols = np.arange(np.argwhere(vars == "Time").flatten()[0] + 1, len(vars))
@@ -222,20 +229,28 @@ class ReferenceFrame:
         """
 
         # handle the origin parameter
-        assert isinstance(origin, (list, np.ndarray)), "origin must be a list or numpy array."
+        assert isinstance(
+            origin, (list, np.ndarray)
+        ), "origin must be a list or numpy array."
         self.origin = np.atleast_1d(origin).flatten()
 
         # handle the names parameter
         if names is None:
             names = ["X{}".format(i + 1) for i in range(len(self.origin))]
-        assert isinstance(names, (list, np.ndarray)), "names must be None, list or a numpy array."
+        assert isinstance(
+            names, (list, np.ndarray)
+        ), "names must be None, list or a numpy array."
         self.names = np.atleast_1d(names).flatten()
 
         # handle the orientation parameter
         if orientation is None:
             orientation = np.eye(len(self.origin))
-        assert isinstance(orientation, (list, np.ndarray)), "orientation must be a list or numpy array."
-        self.orientation = np.atleast_2d([gram_schmidt(i) for i in np.atleast_2d(orientation)])
+        assert isinstance(
+            orientation, (list, np.ndarray)
+        ), "orientation must be a list or numpy array."
+        self.orientation = np.atleast_2d(
+            [gram_schmidt(i) for i in np.atleast_2d(orientation)]
+        )
 
     def __str__(self):
         """
@@ -245,9 +260,9 @@ class ReferenceFrame:
         orientation_df = pd.DataFrame(
             data=self.orientation,
             columns=["dim{}".format(i + 1) for i in range(len(self.origin))],
-            index=self.names
+            index=self.names,
         )
-        return {'Origin': origin_df, 'Orientation': orientation_df}
+        return {"Origin": origin_df, "Orientation": orientation_df}
 
     def __repr__(self):
         return self.__str__()
@@ -279,7 +294,9 @@ class ReferenceFrame:
         """
         Return a copy of self.
         """
-        return ReferenceFrame(origin=self.origin, orientation=self.orientation, names=self.names)
+        return ReferenceFrame(
+            origin=self.origin, orientation=self.orientation, names=self.names
+        )
 
     def rotate(self, vector):
         """
@@ -301,7 +318,9 @@ class ReferenceFrame:
 
         # rotate marker's coordinates
         vec = vector.copy()
-        vec.coordinates -= np.vstack([np.atleast_2d(self.origin) for i in range(vec.coordinates.shape[0])])
+        vec.coordinates -= np.vstack(
+            [np.atleast_2d(self.origin) for i in range(vec.coordinates.shape[0])]
+        )
         vec.coordinates = vec.coordinates.dot(self.orientation.T)
         return vec
 
@@ -326,7 +345,9 @@ class ReferenceFrame:
         # rotate marker's coordinates
         vec = vector.copy()
         vec.coordinates = vec.coordinates.dot(self.orientation)
-        vec.coordinates += np.vstack([np.atleast_2d(self.origin) for i in range(vec.coordinates.shape[0])])
+        vec.coordinates += np.vstack(
+            [np.atleast_2d(self.origin) for i in range(vec.coordinates.shape[0])]
+        )
         return vec
 
 
@@ -335,7 +356,9 @@ class Vector:
     Create a Vector object instance.
     """
 
-    def __init__(self, coordinates, names=None, index=None, sampling_frequency=1., unit=""):
+    def __init__(
+        self, coordinates, names=None, index=None, sampling_frequency=1.0, unit=""
+    ):
         """
         Create a Vector reference object.
 
@@ -370,13 +393,21 @@ class Vector:
             coordinates = np.atleast_2d(coordinates)
             if names is None:
                 names = ["X{}".format(i + 1) for i in range(coordinates.shape[1])]
-            assert isinstance(names, (list, np.ndarray)), "names must be a 1D array-like object."
+            assert isinstance(
+                names, (list, np.ndarray)
+            ), "names must be a 1D array-like object."
             names = np.atleast_1d(names).flatten()
             if index is None:
-                assert isinstance(sampling_frequency, (int, float)), "sampling_frequency must be numeric."
-                index = np.linspace(0, sampling_frequency * coordinates.shape[0], coordinates.shape[0])
+                assert isinstance(
+                    sampling_frequency, (int, float)
+                ), "sampling_frequency must be numeric."
+                index = np.linspace(
+                    0, sampling_frequency * coordinates.shape[0], coordinates.shape[0]
+                )
             else:
-                txt = "index must be a 1D array-like object of len = {}".format(coordinates.shape[0])
+                txt = "index must be a 1D array-like object of len = {}".format(
+                    coordinates.shape[0]
+                )
                 assert isinstance(index, (list, np.ndarray)), txt
                 index = np.array(index).flatten()
                 assert len(index) == coordinates.shape[0], txt
@@ -392,7 +423,6 @@ class Vector:
         setattr(self, "index", np.array([index]).flatten())
         setattr(self, "unit", unit)
 
-    '''
     def _get_selection(self, item):
         """
 
@@ -417,8 +447,8 @@ class Vector:
                     line = np.arange(
                         itm.start if itm.start is not None else 0,
                         itm.stop if itm.stop is not None else max_val,
-                        itm.step if itm.step is not None else 1
-                        )
+                        itm.step if itm.step is not None else 1,
+                    )
                 elif isinstance(itm, np.ndarray):
                     line = itm.flatten().tolist()
                 elif isinstance(itm, (int, float)):
@@ -446,10 +476,16 @@ class Vector:
                     cols[i] = ref[0]
 
         # get the validity of the selection
-        out_of_range_rows = np.argwhere(rows not in np.arange(self.coordinates.shape[0])).flatten()
-        assert len(out_of_range_rows) == 0, "rows out of samples: {}".format(out_of_range_rows)
+        out_of_range_rows = np.argwhere(
+            rows not in np.arange(self.coordinates.shape[0])
+        ).flatten()
+        assert len(out_of_range_rows) == 0, "rows out of samples: {}".format(
+            out_of_range_rows
+        )
         out_of_range_cols = [np.isreal(i) for i in cols]
-        assert np.all(out_of_range_cols), "cols out of samples: {}".format(out_of_range_cols)
+        assert np.all(out_of_range_cols), "cols out of samples: {}".format(
+            out_of_range_cols
+        )
         return rows, cols
 
     def __getitem__(self, item):
@@ -467,7 +503,7 @@ class Vector:
             the item required
         """
         keys = self._get_selection(item)
-        
+
         return self.coordinates.__getitem__(np.s_[keys[0]], np.s_[keys[1]])
 
     def __setitem__(self, item, value):
@@ -492,7 +528,6 @@ class Vector:
                 self.names = np.append(self.names, [k])
                 index = len(self.names) - 1
             self.coordinates[:, index] = value[i]
-    '''
 
     def __getattr__(self, item):
         """
@@ -563,7 +598,7 @@ class Vector:
         return pd.DataFrame(
             data=self.coordinates,
             index=self.index,
-            columns=[i + " ({})".format(self.unit) for i in self.names]
+            columns=[i + " ({})".format(self.unit) for i in self.names],
         )
 
     def _matches(self, vector):
@@ -583,7 +618,15 @@ class Vector:
 
         if not isinstance(vector, Vector):
             return False
-        if not np.sum([np.sum([i, j]) for i, j in zip(vector.coordinates.shape, self.coordinates.shape)]) == 0:
+        if (
+            not np.sum(
+                [
+                    np.sum([i, j])
+                    for i, j in zip(vector.coordinates.shape, self.coordinates.shape)
+                ]
+            )
+            == 0
+        ):
             return False
         if np.all([i in vector.names for i in self.names]):
             return False
@@ -597,7 +640,12 @@ class Vector:
         """
         Return a copy of self.
         """
-        return Vector(coordinates=self.coordinates, index=self.index, names=self.names, unit=self.unit)
+        return Vector(
+            coordinates=self.coordinates,
+            index=self.index,
+            names=self.names,
+            unit=self.unit,
+        )
 
     def __add__(self, value):
         """
@@ -760,7 +808,7 @@ class Vector:
         Get the negative of the coordinates.
         """
         vec = self.copy()
-        vec.coordinates *= (-1)
+        vec.coordinates *= -1
         return vec
 
     def __pow__(self, value):
@@ -873,7 +921,7 @@ class Vector:
         crossed: Vector
             the result of the cross product operation.
         """
-        txt = 'cross operator is valid only between 3D Vectors.'
+        txt = "cross operator is valid only between 3D Vectors."
         assert isinstance(value, Vector), txt
         assert len(self.names) == len(value.names) == 3, txt
         vec = self.copy()
@@ -888,7 +936,7 @@ class Vector:
             coordinates=np.sqrt(np.sum(self.coordinates ** 2, axis=1)),
             names="||{}||".format("+".join(self.names)),
             index=self.index,
-            unit=self.unit
+            unit=self.unit,
         )
 
     def to_csv(self, path):
@@ -917,4 +965,6 @@ class Vector:
         new_file: bool
             should the saving overwrite exising excel path?
         """
-        to_excel(path=path, df=self.to_df(), sheet=sheet, keep_index=True, new_file=new_file)
+        to_excel(
+            path=path, df=self.to_df(), sheet=sheet, keep_index=True, new_file=new_file
+        )
