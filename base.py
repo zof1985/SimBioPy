@@ -14,8 +14,8 @@ import time
 
 # CLASSES
 
-class LinearRegression:
 
+class LinearRegression:
     def __init__(self, y, x, order=1, fit_intercept=True, digits=5):
         """
         Obtain the regression coefficients according to the Ordinary Least
@@ -240,7 +240,6 @@ class LinearRegression:
 
 
 class PowerRegression(LinearRegression):
-
     def __init__(self, y, x, digits=5):
         """
         Obtain the regression coefficients according to the power model:
@@ -330,7 +329,6 @@ class PowerRegression(LinearRegression):
 
 
 class HyperbolicRegression(LinearRegression):
-
     def __init__(self, y, x, digits=5):
         """
         Obtain the regression coefficients according to the (Rectangular) Least
@@ -439,37 +437,6 @@ class HyperbolicRegression(LinearRegression):
 
 
 # FUNCTIONS
-
-
-def gram_schmidt(vectors):
-    """
-    Return the orthogonal basis defined by a set of vectors using the
-    Gram-Schmidt algorithm.
-
-    Parameters:
-        vectors (np.ndarray): a NxN numpy.ndarray to be orthogonalized (by row).
-
-    Returns:
-        a NxN numpy.ndarray containing the orthogonalized arrays.
-    """
-
-    # internal functions to simplify the calculation
-    def proj(a, b):
-        return (np.inner(a, b) / np.inner(b, b) * b).astype(float)
-
-    def norm(v):
-        return v / np.sqrt(np.sum(v ** 2))
-
-    # calculate the projection points
-    W = []
-    for i, u in enumerate(vectors):
-        w = np.copy(u).astype(float)
-        for j in vectors[:i, :]:
-            w -= proj(u, j)
-        W += [w]
-
-    # normalize
-    return np.vstack([norm(u) for u in W])
 
 
 def d1y(y, x=None, dt=1):
@@ -829,15 +796,15 @@ def interpolate_cs(y, n=None, x_old=None, x_new=None):
 
 
 def residuals_analysis(
-        y,
-        fs,
-        f_num=1000,
-        f_max=None,
-        segments=2,
-        min_samples=2,
-        which_segment=None,
-        filt_fun=None,
-        filt_opt=None,
+    y,
+    fs,
+    f_num=1000,
+    f_max=None,
+    segments=2,
+    min_samples=2,
+    which_segment=None,
+    filt_fun=None,
+    filt_opt=None,
 ):
     """
     Perform Winter's residual analysis of y.
@@ -940,7 +907,12 @@ def residuals_analysis(
     if filt_fun is None:
         filt_fun = butt_filt
     if filt_opt is None:
-        filt_opt = {"order": 4, "sampling_frequency": fs, "type": "lowpass", "phase_corrected": True}
+        filt_opt = {
+            "order": 4,
+            "sampling_frequency": fs,
+            "type": "lowpass",
+            "phase_corrected": True,
+        }
 
     # get the frequency span
     freqs = np.linspace(0, f_max, f_num + 1)[1:]
@@ -1221,27 +1193,25 @@ def crossings(y, value=0.0):
     """
     Dectect the crossing points in x compared to value.
 
-    Input:
+    Parameters
+    ----------
 
-        y (1D array)
-
+        y: 1D array
             the 1D signal from which the crossings have to be found.
 
-        value (float or 1D array with the same shape of y)
-
-            the value/s to be used to detect the crossings. If value
-            is an array, the function will find those points in x
+        value: float or 1D array with the same shape of y
+            the value/s to be used to detect the crossings.
+            If value is an array, the function will find those points in x
             crossing values according to the value of values at a
             given location.
 
-    Output:
+    Returns
+    -------
 
-        c (1D array)
-
+        c: 1D array
             the samples corresponding to the crossings.
 
-        s (ndarray)
-
+        s: 1D array
             the sign of the crossings. Positive sign means crossings
             where the signal moves from values lower than "value" to
             values higher than "value". Negative sign indicate the
@@ -1257,7 +1227,7 @@ def crossings(y, value=0.0):
     cr = np.argwhere(abs(sn[1:] - sn[:-1]) == 2).flatten()
 
     # return the crossings
-    return sn, cr
+    return sn[cr], cr
 
 
 def xcorr(y, biased=False, full=False, *args):
@@ -1324,8 +1294,8 @@ def xcorr(y, biased=False, full=False, *args):
     # adjust the output
     lags = np.arange(-(N - 1), N)
     if not full:
-        xc = xc[(N - 1):]
-        lags = lags[(N - 1):]
+        xc = xc[(N - 1) :]
+        lags = lags[(N - 1) :]
 
     # normalize
     xc /= (N + 1 - abs(lags)) if not biased else (N + 1)
@@ -1396,7 +1366,7 @@ def get_files(path, extension="", check_subfolders=False):
     # surf the path by the os. walk function
     for root, files in os.walk(path)[0, 2]:
         for obj in files:
-            if obj[-len(extension):] == extension:
+            if obj[-len(extension) :] == extension:
                 out += [os.path.join(root, obj)]
 
         # handle the subfolders

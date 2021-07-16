@@ -6,6 +6,37 @@ from .base import *
 # METHODS
 
 
+def gram_schmidt(vectors):
+    """
+    Return the orthogonal basis defined by a set of vectors using the
+    Gram-Schmidt algorithm.
+
+    Parameters:
+        vectors (np.ndarray): a NxN numpy.ndarray to be orthogonalized (by row).
+
+    Returns:
+        a NxN numpy.ndarray containing the orthogonalized arrays.
+    """
+
+    # internal functions to simplify the calculation
+    def proj(a, b):
+        return (np.inner(a, b) / np.inner(b, b) * b).astype(float)
+
+    def norm(v):
+        return v / np.sqrt(np.sum(v ** 2))
+
+    # calculate the projection points
+    W = []
+    for i, u in enumerate(vectors):
+        w = np.copy(u).astype(float)
+        for j in vectors[:i, :]:
+            w -= proj(u, j)
+        W += [w]
+
+    # normalize
+    return np.vstack([norm(u) for u in W])
+
+
 def df2vector(df):
     """
     Try to convert a standard pandas DataFrame into a Vector.
@@ -248,21 +279,21 @@ class ReferenceFrame:
         assert isinstance(
             orientation, (list, np.ndarray)
         ), "orientation must be a list or numpy array."
-        self.orientation = np.atleast_2d(
-            [gram_schmidt(i) for i in np.atleast_2d(orientation)]
-        )
+        self.orientation = gram_schmidt(orientation)
 
     def __str__(self):
         """
         generate a pandas.DataFrame representing the ReferenceFrame.
         """
-        origin_df = pd.DataFrame(data=np.atleast_2d(self.origin), columns=self.names)
+        origin_df = pd.DataFrame(
+            data=np.atleast_2d(self.origin), columns=self.names, index=["Origin"]
+        )
         orientation_df = pd.DataFrame(
             data=self.orientation,
-            columns=["dim{}".format(i + 1) for i in range(len(self.origin))],
+            columns=self.names,
             index=self.names,
         )
-        return {"Origin": origin_df, "Orientation": orientation_df}
+        return origin_df.append(orientation_df).__str__()
 
     def __repr__(self):
         return self.__str__()
@@ -286,7 +317,7 @@ class ReferenceFrame:
             return False
         if len(self.origin) != vector.coordinates.shape[1]:
             return False
-        if np.all([i in vector.names for i in self.names]):
+        if not np.all([np.any(vector.names == i) for i in self.names]):
             return False
         return True
 
@@ -304,24 +335,18 @@ class ReferenceFrame:
 
         Parameters
         ----------
-        vector: Vector, Vector
-            a Vector or Vector object.
+        vector: Vector
+            a Vector object.
 
         Returns
         -------
-        vec: Vector, Vector
-            a rotated Vector/Vector object.
+        vec: Vector
+            a rotated Vector object.
         """
-
-        # ensure vector can be converted
-        assert self._matches(vector), "vector must be a Vector or Vector object."
-
-        # rotate marker's coordinates
-        vec = vector.copy()
-        vec.coordinates -= np.vstack(
-            [np.atleast_2d(self.origin) for i in range(vec.coordinates.shape[0])]
-        )
-        vec.coordinates = vec.coordinates.dot(self.orientation.T)
+        assert self._matches(vector), "vector must be a Vector object."
+        ov = np.vstack([np.atleast_2d(self.origin) for i in range(vector.shape[0])])
+        vec = vector - ov
+        vec.coordinates[:, :] = vec.coordinates.dot(self.orientation.T)
         return vec
 
     def invert(self, vector):
@@ -330,24 +355,18 @@ class ReferenceFrame:
 
         Parameters
         ----------
-        vector: Vector, Vector
-            a Vector or Vector object.
+        vector: Vector
+            a Vector object.
 
         Returns
         -------
-        vec: Vector, Vector
-            a rotated Vector/Vector object.
+        vec: Vector
+            a rotated Vector object.
         """
-
-        # ensure vector can be converted
-        assert self._matches(vector), "vector must be a Vector or Vector object."
-
-        # rotate marker's coordinates
+        assert self._matches(vector), "vector must be a Vector object."
         vec = vector.copy()
-        vec.coordinates = vec.coordinates.dot(self.orientation)
-        vec.coordinates += np.vstack(
-            [np.atleast_2d(self.origin) for i in range(vec.coordinates.shape[0])]
-        )
+        ov = np.vstack([np.atleast_2d(self.origin) for i in range(vector.shape[0])])
+        vec.coordinates[:, :] = vec.coordinates.dot(self.orientation) + ov
         return vec
 
 
@@ -502,9 +521,12 @@ class Vector:
         val:    array-like
             the item required
         """
+        vec = self.copy()
         keys = self._get_selection(item)
-
-        return self.coordinates.__getitem__(np.s_[keys[0]], np.s_[keys[1]])
+        vec.index = vec.index[keys[0]]
+        vec.names = vec.names[keys[1]]
+        vec.coordinates = vec.coordinates[keys]
+        return vec
 
     def __setitem__(self, item, value):
         """
@@ -518,16 +540,32 @@ class Vector:
         value: array-like or int/float
             the value to be set.
         """
-        key = self._get_indices(item)
-        if not isinstance(key, (list, tuple, np.ndarray)):
-            key = [key]
-            value = [value]
-        for i, k in enumerate(key):
-            index = np.argwhere(k == self.names).flatten()
-            if len(index) == 0:
-                self.names = np.append(self.names, [k])
-                index = len(self.names) - 1
-            self.coordinates[:, index] = value[i]
+        keys = self._get_selection(item)
+        if isinstance(value, (int, float)):
+            val = np.vstack([np.tile(value, len(keys[1])) for i in keys[0]])
+            self.coordinates[keys] = val
+        elif isinstance(value, Vector):
+            self.index[keys[0]] = value.index
+            self.names[keys[1]] = value.names
+            self.coordinates[keys] = value.coordinates
+        elif isinstance(value, np.ndarray):
+            shapes = [i == 1 for i in value.shape]
+            if (np.any(shapes) and len(shapes) <= 2) or len(shapes) == 1:
+                self.coordinates[keys] = value.flatten()
+            elif value.ndim == 2:
+                self.coordinates[keys[0]][:, keys[1]] = value
+            else:
+                txt = "only 1D or 2D arrays can be passed to __setitem__."
+                raise NotImplementedError(txt)
+        elif isinstance(value, (pd.DataFrame, pd.Series)):
+            if np.any([i == 1 for i in value.shape]):
+                self.coordinates[keys] = value.values.flatten()
+            else:
+                self.coordinates[keys[0]][:, keys[1]] = value.values
+        else:
+            txt = "the __setitem__ method does not currently support objects "
+            txt += "of instance {}".format(isinstance(value))
+            raise NotImplementedError(txt)
 
     def __getattr__(self, item):
         """
@@ -589,7 +627,7 @@ class Vector:
         """
         return the "average" sampling frequency of the Vector.
         """
-        return float(np.mean(np.diff(self.index)))
+        return float(1 / np.mean(np.diff(self.index)))
 
     def to_df(self):
         """
@@ -600,6 +638,10 @@ class Vector:
             index=self.index,
             columns=[i + " ({})".format(self.unit) for i in self.names],
         )
+
+    @property
+    def shape(self):
+        return (len(self.index), len(self.names))
 
     def _matches(self, vector):
         """
@@ -621,16 +663,16 @@ class Vector:
         if (
             not np.sum(
                 [
-                    np.sum([i, j])
+                    i - j
                     for i, j in zip(vector.coordinates.shape, self.coordinates.shape)
                 ]
             )
             == 0
         ):
             return False
-        if np.all([i in vector.names for i in self.names]):
+        if not np.all([i in vector.names for i in self.names]):
             return False
-        if np.all([i in vector.index for i in self.index]):
+        if not np.all([i in vector.index for i in self.index]):
             return False
         if self.unit != vector.unit:
             return False
@@ -661,7 +703,8 @@ class Vector:
         out: Vector
             self with value being added to the coordinates.
         """
-        return self.copy().__iadd__(value)
+        vec = self.copy()
+        return vec.__iadd__(value)
 
     def __radd__(self, value):
         """
@@ -693,6 +736,7 @@ class Vector:
             self.coordinates += value.coordinates
         else:
             self.coordinates += value
+        return self
 
     def __sub__(self, value):
         """
@@ -708,7 +752,8 @@ class Vector:
         out: Vector
             self with value being removed to the coordinates.
         """
-        return self.copy().__isub__(value)
+        vec = self.copy()
+        return vec.__isub__(value)
 
     def __isub__(self, value):
         """
@@ -721,9 +766,10 @@ class Vector:
         """
         if isinstance(value, Vector):
             assert self._matches(value)
-            self.coordinates -= value.coordinates
+            self.coordinates = self.coordinates - value.coordinates
         else:
-            self.coordinates -= value
+            self.coordinates = self.coordinates - value
+        return self
 
     def __mul__(self, value):
         """
@@ -739,7 +785,8 @@ class Vector:
         out: Vector
             self with value times the coordinates.
         """
-        return self.copy().__imul__(value)
+        vec = self.copy()
+        return vec.__imul__(value)
 
     def __rmul__(self, value):
         """
@@ -771,6 +818,7 @@ class Vector:
             self.coordinates *= value.coordinates
         else:
             self.coordinates *= value
+        return self
 
     def __truediv__(self, value):
         """
@@ -786,7 +834,8 @@ class Vector:
         out: Vector
             self with the coordinates divided by the value.
         """
-        return self.copy().__itruediv__(value)
+        vec = self.copy()
+        return vec.__itruediv__(value)
 
     def __itruediv__(self, value):
         """
@@ -802,6 +851,7 @@ class Vector:
             self.coordinates /= value.coordinates
         else:
             self.coordinates /= value
+        return self
 
     def __neg__(self):
         """
