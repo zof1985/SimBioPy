@@ -796,7 +796,7 @@ def interpolate_cs(y, n=None, x_old=None, x_new=None):
 
 
 def residuals_analysis(
-    y,
+    signal,
     fs,
     f_num=1000,
     f_max=None,
@@ -809,96 +809,90 @@ def residuals_analysis(
     """
     Perform Winter's residual analysis of y.
 
-    Input:
+    Parameters
+    ----------
 
-        x (1D array)
+    signal: 1D array
+        the signal to be investigated
 
-            the signal to be investigated
+    fs: float
+        the sampling frequency of the signal.
 
-        sampling_frequency (float)
+    f_num: int, optional
+        the number of frequencies to be tested within the (0, f_max) range to create the residuals curve of
+        the Winter's residuals analysis approach.
 
-            the sampling frequency of the signal.
+    f_max: float, optional
+        the maximum filter frequency that is tested. If None, it is defined as the frequency covering the 99%
+        of the cumulative signal power.
 
-        f_num (int)
+    segments: int, optional
+        the number of segments that can be used to fit the residuals curve in order to identify the best
+        deflection point.
+        NOTE: values above 3 will greatly increase the computation time.
 
-            the number of frequencies to be tested within the (0, f_max)
-            range to create the residuals curve of the Winter's residuals
-            analysis approach.
+    min_samples: int, optional
+        the minimum number of elements that have to be considered for each segment during the calculation of
+        the best deflection point.
 
-        f_max (float)
+    which_segment: int, optional
+        the segment to be considered as the one allowing the calculation of the optimal cut-off.
+        It must be an int in the [1, segments] range. If None, the segment resulting in the most flat line from
+        those that have been calculated is used.
 
-            the maximum filter frequency that is tested. If None, it is
-            defined as the frequency covering the 99% of the cumulative
-            signal power.
+    filt_fun: function(signal, frequency, **kwargs)
+        the filter to be used for the analysis. If None, a Butterworth, low-pass, 4th order phase-corrected
+        filter is used. If a function is provided, two arguments are mandatory:
 
-        segments (int)
+        - signal, 1D array passed as first argument
+        - frequency, a float (positive) number passed as second argument.
+        - additional keyworded parameters that are directly passed to the function.
 
-            the number of segments that can be used to fit the residuals
-            curve in order to identify the best deflection point.
-            NOTE: values above 3 will greatly increase the computation time.
+        This function must return an array with the same shape of signal being its filtered copy with cut-off
+        frequency equal to "frequency".
 
-        min_samples (int)
+    filt_opt: dict, optional
+        the options for the filter. If not None, a dict containing the key-values combinations to
+        be passed to filt_fun.
 
-            the minimum number of elements that have to be considered for
-            each segment during the calculation of the best deflection point.
+    Returns
+    -------
 
-        which_segment (int or None)
+    cutoff: float
+        the suggested cutoff value
 
-            the segment to be considered as the one allowing the calculation
-            of the optimal cut-off. It must be an int in the [1, segments]
-            range. If None, the segment resulting in the most flat line from
-            those that have been calculated is used.
+    SSEs: pandas.DataFrame
+        a pandas.DataFrame with the selected frequencies as index and the Sum of Squared Residuals as columns.
 
-        filt_fun (function)
+    Notes
+    -----
 
-            the filter to be used for the analysis. If None, a Butterworth,
-            low-pass, 4th order phase-corrected filter is used.
-            If a function is provided, two arguments are mandatory:
+    The signal is filtered over a range of frequencies and the sum of squared residuals (SSE) against the original
+    signal is computer for each tested cut-off frequency. Next, a series of fitting lines are used to estimate the
+    optimal disruption point defining the cut-off frequency optimally discriminating between noise and good quality
+    signal.
 
-              - the data, passed as first argument
-              - the cutoffs, passed as second argument.
+    References
+    ----------
 
-        filt_opt (dict)
+    Winter DA 2009, Biomechanics and Motor Control of Human Movement. Fourth Ed.
+        John Wiley & Sons Inc, Hoboken, New Jersey (US).
 
-            the options for the filter. If not None, a dict containing the
-            key-values combinations to be passed to filt_fun.
-
-    Output:
-
-        cutoff (float)
-
-            the suggested cutoff value
-
-        SSEs (pandas.DataFrame)
-
-            a pandas.DataFrame with the selected frequencies as index and the
-            Sum of Squared Residuals as columns.
-
-    Procedure:
-
-        the signal is filtered over a range of frequencies and the sum of
-        squared residuals (SSE) against the original signal is computer for
-        each tested cut-off frequency. Next, a series of fitting lines are
-        used to estimate the optimal disruption point defining the cut-off
-        frequency optimally discriminating between noise and good quality
-        signal.
-
-    References:
-
-        Winter DA. Biomechanics and Motor Control of Human Movement.
-            Fourth Ed. Hoboken, New Jersey: John Wiley & Sons Inc; 2009.
-
-        Lerman PM. Fitting Segmented Regression Models by Grid Search.
-            Appl Stat. 1980;29(1):77.
+    Lerman PM 1980, Fitting Segmented Regression Models by Grid Search. Appl Stat. 29(1):77.
     """
 
-    # control the inputs
-    assert fs > 0, "'sampling_frequency' must be > 0."
+    # data check
+    txt = "{} must be an object of class {}."
+    assert isinstance(signal, "ndarray"), txt.format("signal", "ndarray")
+    assert signal.ndim == 1, "signal must be a 1D array."
+    assert isinstance(fs, (int, float)), txt.format("fs", "(int, float)")
+    assert isinstance(f_num(int)), txt.format("f_num", "int")
     assert f_num > 1, "'f_num' must be > 1."
     if f_max is None:
-        P, F = psd(y, fs)
+        P, F = psd(signal, fs)
         f_max = np.arghwere(np.cumsum(P) / np.sum(P) >= 0.99).flatten()
         f_max = np.min([fs / 2, F[f_max[0]]])
+
     assert min_samples >= 2, "'min_samples' must be >= 2."
     if which_segment is not None:
         txt = "'which_segment' must be an int in the [1, {}] range."
@@ -942,84 +936,104 @@ def residuals_analysis(
     return opt, D
 
 
-def crossovers(y, segments=2, min_samples=5):
+def crossovers(signal, segments=2, min_samples=5):
     """
-    Detect the position of the crossing over points between K regression
-    lines used to best fit the data.
+    Detect the position of the crossing over points between K regression lines used to best fit the data.
 
-    Input:
+    Parameters
+    ----------
 
-        y (1D array)
+    signal: 1D array
+        the signal to be fitted.
 
-            The data to be fitted.
+    segments: int, optional
+        the number of segments that can be used to fit the residuals curve in order to identify the best
+        deflection point.
+        NOTE: values above 3 will greatly increase the computation time.
 
-        segments (int)
+    min_samples: int, optional
+        the minimum number of elements that have to be considered for each segment during the calculation of the
+        best deflection point.
 
-            the number of segments that can be used to fit the residuals
-            curve in order to identify the best deflection point.
-            NOTE: values above 3 will greatly increase the computation time.
+    Returns
+    -------
 
-        min_samples (int)
+    crossings: 1D array
+        An ordered array of indices containing the samples corresponding to the detected crossing over points.
 
-            the minimum number of elements that have to be considered for
-            each segment during the calculation of the best deflection point.
+    coefs: list
+        A list of tuples containing the slope and intercept of the line describing each fitting segment.
 
-    Output:
+    Notes
+    -----
 
-        C (1D array)
+    the steps involved in the calculations can be summarized as follows:
 
-            An ordered array of indices containing the samples corresponding
-            to the detected crossing over points.
+        1)  Get all the segments combinations made possible by the given number of crossover points.
 
-        F (list)
+        2)  For each combination, calculate the regression lines corresponding to each segment.
 
-            a list of tuples containing the slope and intercept of the line
-            describing each fitting segment.
+        3)  For each segment calculate the residuals between the calculated regression line and the effective data.
 
-    Procedure:
+        5)  Once the sum of the residuals have been calculated for each combination, sort them by residuals amplitude.
 
-        1)  Get all the segments combinations made possible by the given
-            number of crossover points.
+    References
+    ----------
 
-        2)  For each combination, calculate the regression lines corresponding
-            to each segment.
-
-        3)  For each segment calculate the residuals between the calculated
-            regression line and the effective data.
-
-        5)  Once the sum of the residuals have been calculated for each
-            combination, sort them by residuals amplitude.
-
-    References:
-
-        Lerman PM.
-            Fitting Segmented Regression Models by Grid Search.
-            Appl Stat. 1980;29(1):77.
+    Lerman PM 1980, Fitting Segmented Regression Models by Grid Search. Appl Stat. 29(1):77.
     """
 
     # control the inputs
+    txt = "{} must be an object of class {}."
+    assert isinstance(signal, "np.ndarray"), txt.format("signal", "ndarray")
+    assert signal.ndim == 1, "signal must be a 1D array."
+    assert isinstance(segments, int), txt.format("segments", "int")
+    assert isinstance(min_samples, int), txt.format("min_samples", "int")
     assert min_samples >= 2, "'min_samples' must be >= 2."
 
     # get the residuals calculating formula
     def SSEs(x, y, s):
-        # get the coordinates
-        C = [np.arange(s[i], s[i + 1] + 1) for i in np.arange(len(s) - 1)]
+        """
+        method used to calculate the residuals
 
-        # get the fitting parameters for each interval
-        Z = [np.polyfit(x[i], y[i], 1) for i in C]
+        Parameters
+        ----------
 
-        # get the regression lines for each interval
-        V = [np.polyval(v, x[C[i]]) for i, v in enumerate(Z)]
+        x: 1D array
+            the x axis signal
 
-        # get the sum of squared residuals
-        return np.sum([np.sum((y[C[i]] - v) ** 2) for i, v in enumerate(V)])
+        y: 1D array
+            the y axis signal
+
+        s: list
+            the extremes among which the segments have to be fitted
+
+        Returns
+        -------
+
+        sse: float
+            the sum of squared errors corresponding to the error obtained fitting the y-x relationship according to
+            the segments provided by s.
+        """
+        c = [
+            np.arange(s[i], s[i + 1] + 1) for i in np.arange(len(s) - 1)
+        ]  # get the coordinates
+        z = [
+            np.polyfit(x[i], y[i], 1) for i in c
+        ]  # get the fitting parameters for each interval
+        v = [
+            np.polyval(v, x[c[i]]) for i, v in enumerate(z)
+        ]  # get the regression lines for each interval
+        return np.sum(
+            [np.sum((y[c[i]] - v) ** 2) for i, v in enumerate(v)]
+        )  # get the sum of squared residuals
 
     # get the X axis
-    x = np.arange(len(y))
+    x = np.arange(len(signal))
 
     # get all the possible combinations of segments
     J = [
-        np.arange(min_samples * i, len(y) - min_samples * (segments - i))
+        np.arange(min_samples * i, len(signal) - min_samples * (segments - i))
         for i in np.arange(1, segments)
     ]
     J = [j for j in it.product(*J)]
@@ -1029,11 +1043,15 @@ def crossovers(y, segments=2, min_samples=5):
 
     # generate the crossovers matrix
     J = np.hstack(
-        (np.zeros((len(J), 1)), np.atleast_2d(J), np.ones((len(J), 1)) * len(y) - 1)
+        (
+            np.zeros((len(J), 1)),
+            np.atleast_2d(J),
+            np.ones((len(J), 1)) * len(signal) - 1,
+        )
     ).astype(int)
 
     # calculate the residuals for each combination
-    R = np.array([SSEs(x, y, i) for i in J])
+    R = np.array([SSEs(x, signal, i) for i in J])
 
     # sort the residuals
     T = np.argsort(R)
@@ -1043,111 +1061,110 @@ def crossovers(y, segments=2, min_samples=5):
 
     # get the fitting slopes
     F = [np.arange(i0, i1) for i0, i1 in zip(O[:-1], O[1:])]
-    F = [np.polyfit(i, y[i], 1) for i in F]
+    F = [np.polyfit(i, signal[i], 1) for i in F]
 
     # return the crossovers
     return O[1:-1], F
 
 
-def butt_filt(y, cutoff, fs, order=4, type="lowpass", phase_corrected=True):
+def butt_filt(signal, fc, fs, n=4, type="lowpass", phase_corrected=True):
     """
-    Provides a convenient function to call a Butterworth filter with the
-    specified parameters.
+    Provides a convenient function to call a Butterworth filter with the specified parameters.
 
-    Input:
+    Parameters
+    ----------
 
-        y (1D array)
+    signal: 1D array
+        the signal to be filtered.
 
-            the signal to be filtered.
+    fc: int, float, or 2 elements iterable of int/float values
+        the filter cutoff in Hz.
 
-        cutoff (float, list, ndarray)
+    fs: int, float
+        the sampling frequency of the signal in Hz.
 
-            the filter cutoff in Hz.
+    n: int, optional
+        the order of the filter
 
-        sampling_frequency (float)
+    type: str, optional
+        a string defining the type of the filter ("lowpass", "highpass", "bandpass", "stopband").
 
-            the sampling frequency of the signal in Hz.
+    phase_corrected: bool, optional
+        should the filter be applied twice in opposite directions to correct for phase lag?
 
-        type (str)
+    Returns
+    -------
 
-            a string defining the type of the filter
-            e.g. "low", "high", "bandpass", etc.
-
-        phase_corrected (bool)
-
-            should the filter be applied twice in opposite directions to
-            correct for phase lag?
-
-    Output:
-
-        z (1D array)
-
-            the resulting 1D filtered signal
+    z: 1D array
+        the resulting 1D filtered signal.
     """
 
     # control the inputs
-    if isinstance(cutoff, (np.ndarray, list)):
-        assert len(cutoff) == 2, "'cutoff' length must be 2."
-        txt = "all cutoff values must be float or int"
-        assert np.all([isinstance(i, (float, int)) for i in cutoff]), txt
+    txt = "{} must be an object of class {}."
+    assert isinstance(signal, "np.ndarray"), txt.format("signal", "numpy.ndarray")
+    assert signal.ndim == 1, "signal must be a 1D array."
+    assert isinstance(fs, (int, float)), txt.format("fs", "(int, float)")
+    if isinstance(fc, (np.ndarray, list)):
+        assert (
+            len(fc) == 2
+        ), "'cutoff' length must be a list or numpy array of length 2."
+        assert np.all(
+            [isinstance(i, (int, float)) for i in fc]
+        ), "all elements in fc must be int or float."
+    else:
+        assert isinstance(fc, (int, float)), txt.format("fc", "(int, float)")
+    assert isinstance(type, str), txt.format("type", "str")
+    types = ["lowpass", "highpass", "bandpass", "stopband"]
+    assert np.any([type == i for i in types]), "type must be any of " + str(types)
+    assert isinstance(phase_corrected, bool), txt.format("phase_corrected", "bool")
 
     # get the filter coefficients
-    sos = ss.butter(
-        order, (np.array([cutoff]).flatten() / (0.5 * fs)), type, output="sos"
-    )
+    sos = ss.butter(n, (np.array([fc]).flatten() / (0.5 * fs)), type, output="sos")
 
     # get the filtered data
-    return ss.sosfiltfilt(sos, y) if phase_corrected else ss.sosfilt(sos, y)
+    return ss.sosfiltfilt(sos, signal) if phase_corrected else ss.sosfilt(sos, signal)
 
 
-def psd(y, fs=1, n=None):
+def psd(signal, fs=1):
     """
     compute the power spectrum of y using fft
 
-    Input:
+    Parameters
+    ----------
 
-        y (1D array)
+    signal: 1D array
+        A 1D numpy array
 
-            A 1D numpy array
+    fs: int, float, optional
+        the sampling frequency (in Hz) of the signal. If not provided the power spectrum frequencies are provided
+        as normalized values within the (0, 0.5) range.
 
-        sampling_frequency (float)
+    Returns
+    -------
 
-            the sampling frequency
+    p: 1D array
+        the power of each frequency
 
-        n (None, int)
-
-            the number of samples to be used for FFT.
-            If None, the length of y is used.
-
-    Output:
-
-        P (1D ndarray)
-
-            the power of each frequency
-
-        F (1D ndarray)
-
-            the frequencies.
+    k: 1D array
+        the frequency corresponding to each element of pow.
     """
 
-    # set n
-    if n is None:
-        n = len(y)
+    # check the input
+    txt = "{} must be an object of class {}."
+    assert isinstance(signal, "np.ndarray"), txt.format("signal", "numpy.ndarray")
+    assert signal.ndim == 1, "signal must be a 1D array."
+    assert isinstance(fs, (int, float)), txt.format("fs", "(int, float)")
 
-    # get the FFT and normalize by the length of y
-    f = np.fft.rfft(y - np.mean(y), n) / len(y)
-
-    # get the amplitude of the signal
-    a = abs(f)
-
-    # get the power of the signal
-    P = np.concatenate([[a[0]], 2 * a[1:-1], [a[-1]]]).flatten() ** 2
-
-    # get the frequencies
-    F = np.linspace(0, fs / 2, len(P))
+    # get the psd
+    f = np.fft.rfft(signal - np.mean(signal)) / len(
+        signal
+    )  # normalized frequency spectrum
+    a = abs(f)  # amplitude
+    p = np.concatenate([[a[0]], 2 * a[1:-1], [a[-1]]]).flatten() ** 2  # power spectrum
+    k = np.linspace(0, fs / 2, len(p))  # frequencies
 
     # return the data
-    return P, F
+    return p, k
 
 
 def find_peaks(y, height=None):
