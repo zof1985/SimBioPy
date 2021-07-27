@@ -1,5 +1,6 @@
 # IMPORTS
 
+from _typeshed import NoneType
 import itertools as it
 import numpy as np
 import openpyxl as xl
@@ -886,18 +887,24 @@ def residuals_analysis(
     assert isinstance(signal, "ndarray"), txt.format("signal", "ndarray")
     assert signal.ndim == 1, "signal must be a 1D array."
     assert isinstance(fs, (int, float)), txt.format("fs", "(int, float)")
-    assert isinstance(f_num(int)), txt.format("f_num", "int")
+    assert isinstance(f_num, int), txt.format("f_num", "int")
     assert f_num > 1, "'f_num' must be > 1."
+    assert isinstance(f_max, (int, float, NoneType)), txt.format(
+        "f_max", "(int, float, NoneType)"
+    )
     if f_max is None:
         P, F = psd(signal, fs)
         f_max = np.arghwere(np.cumsum(P) / np.sum(P) >= 0.99).flatten()
         f_max = np.min([fs / 2, F[f_max[0]]])
-
+    assert isinstance(min_samples, int), txt.format("min_samples", "int")
     assert min_samples >= 2, "'min_samples' must be >= 2."
+    assert isinstance(which_segment, (int, NoneType)), txt.format(
+        "which_segment", "(int, NoneType)"
+    )
     if which_segment is not None:
-        txt = "'which_segment' must be an int in the [1, {}] range."
-        txt = txt.format(segments)
-        assert which_segment > 1, txt
+        assert (
+            which_segment > 1
+        ), "'which_segment' must be an int in the [1, {}] range.".format(segments)
     if filt_fun is None:
         filt_fun = butt_filt
     if filt_opt is None:
@@ -912,8 +919,9 @@ def residuals_analysis(
     freqs = np.linspace(0, f_max, f_num + 1)[1:]
 
     # get the SSEs
-    Q = [np.sum((y - filt_fun(y, i, **filt_opt)) ** 2) for i in freqs]
-    Q = np.array(Q)
+    Q = np.array(
+        [np.sum((signal - filt_fun(signal, i, **filt_opt)) ** 2) for i in freqs]
+    )
 
     # reshape the SSE as dataframe
     D = pd.DataFrame(Q, index=freqs, columns=["SSE"])
@@ -931,6 +939,10 @@ def residuals_analysis(
 
     # get the optimal cutoff
     opt = freqs[np.argmin(abs(Q - I))]
+
+    # get the fitting lines for each segment
+    for i, fit in enumerate(F):
+        D.insert(-1, "S{}".format(i + 1), fit[0] * freqs + fit[1])
 
     # return the parameters
     return opt, D
