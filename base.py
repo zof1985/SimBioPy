@@ -860,7 +860,7 @@ def residuals_analysis(
 
     # get the fitting lines for each segment
     for i, fit in enumerate(F):
-        D.insert(-1, "S{}".format(i + 1), fit[0] * freqs + fit[1])
+        D.insert(D.shape[1], "S{}".format(i + 1), fit[1] * freqs + fit[0])
 
     # return the parameters
     return opt, D
