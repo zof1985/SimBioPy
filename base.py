@@ -619,7 +619,7 @@ def mean_filter(y, n=1, offset=0.5):
     assert offset <= 1, txt
 
     # get the window range
-    w = np.unique(np.int(rescale_arr(np.arange(n), 0, 1) - offset * n))
+    w = np.unique(np.int(np.arange(n) / (n - 1)) - offset * n)
 
     # get the indices of the samples
     i = [w + j for j in np.arange(len(y))]
@@ -672,7 +672,7 @@ def median_filter(y, n=1, offset=0.5):
     assert offset <= 1, txt
 
     # get the window range
-    w = np.unique(np.int(rescale_arr(np.arange(n), 0, 1) - offset * n))
+    w = np.unique(np.int(np.arange(n) / (n - 1)) - offset * n)
 
     # get the indices of the samples
     i = [w + j for j in np.arange(len(y))]
