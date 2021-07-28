@@ -1,6 +1,5 @@
 # IMPORTS
 
-from _typeshed import NoneType
 import itertools as it
 import numpy as np
 import openpyxl as xl
@@ -531,76 +530,6 @@ def d2y(y, x=None, dt=1):
     return dy / dx
 
 
-def pad(y, before=0, after=0, value=0):
-    """
-    pad the signal at its ends.
-
-    Input:
-
-        y (1D array)
-
-            the signal to be padded
-
-        before (int)
-
-            the number of padding values to be added before x.
-
-        after (int)
-
-            the number of padding values to be added after x.
-
-        value (float)
-
-            the value to be used for padding.
-
-    Output:
-
-        z (1D array)
-
-            the padded array
-    """
-
-    # get the pads
-    a_pad = np.tile(value, after)
-    b_pad = np.tile(value, before)
-
-    # concatenate the signal
-    return np.concatenate([b_pad, y, a_pad], axis=0).flatten()
-
-
-def rescale_arr(y, vmin=0, vmax=1):
-    """
-    scale the array y to have minimum equal to vmin and maximum equal to vmax.
-
-    Input:
-
-        y (1D array)
-
-            the signal to be scaled
-
-        vmin (float)
-
-            the minimum value allowed by the rescaled signal.
-
-        vmax (int)
-
-            the maximum value allowed by the rescaled signal.
-
-    Output:
-
-        z (1D array)
-
-            the rescaled array
-    """
-
-    # validate the data
-    assert vmin <= vmax, "'vmin' must be <= 'vmax'."
-
-    # rescale
-    z = (y - np.min(y)) / (np.max(y) - np.min(y))
-    return z * (vmax - vmin) + vmin
-
-
 def freedman_diaconis_bins(y):
     """
     return a digitized version of y where each value is linked to a
@@ -884,36 +813,25 @@ def residuals_analysis(
 
     # data check
     txt = "{} must be an object of class {}."
-    assert isinstance(signal, "ndarray"), txt.format("signal", "ndarray")
+    assert isinstance(signal, np.ndarray), txt.format("signal", "ndarray")
     assert signal.ndim == 1, "signal must be a 1D array."
     assert isinstance(fs, (int, float)), txt.format("fs", "(int, float)")
     assert isinstance(f_num, int), txt.format("f_num", "int")
     assert f_num > 1, "'f_num' must be > 1."
-    assert isinstance(f_max, (int, float, NoneType)), txt.format(
-        "f_max", "(int, float, NoneType)"
-    )
     if f_max is None:
         P, F = psd(signal, fs)
-        f_max = np.arghwere(np.cumsum(P) / np.sum(P) >= 0.99).flatten()
+        f_max = np.argwhere(np.cumsum(P) / np.sum(P) >= 0.99).flatten()
         f_max = np.min([fs / 2, F[f_max[0]]])
+    assert isinstance(f_max, (int, float)), txt.format("f_max", "(int, float, None)")
     assert isinstance(min_samples, int), txt.format("min_samples", "int")
     assert min_samples >= 2, "'min_samples' must be >= 2."
-    assert isinstance(which_segment, (int, NoneType)), txt.format(
-        "which_segment", "(int, NoneType)"
-    )
     if which_segment is not None:
-        assert (
-            which_segment > 1
-        ), "'which_segment' must be an int in the [1, {}] range.".format(segments)
+        seg_txt = "'which_segment' must be an int in the [1, {}] range."
+        assert 1 <= which_segment < segments, seg_txt.format(segments)
     if filt_fun is None:
         filt_fun = butt_filt
     if filt_opt is None:
-        filt_opt = {
-            "order": 4,
-            "sampling_frequency": fs,
-            "type": "lowpass",
-            "phase_corrected": True,
-        }
+        filt_opt = {"n": 4, "fs": fs, "type": "lowpass", "phase_corrected": True}
 
     # get the frequency span
     freqs = np.linspace(0, f_max, f_num + 1)[1:]
@@ -997,7 +915,7 @@ def crossovers(signal, segments=2, min_samples=5):
 
     # control the inputs
     txt = "{} must be an object of class {}."
-    assert isinstance(signal, "np.ndarray"), txt.format("signal", "ndarray")
+    assert isinstance(signal, np.ndarray), txt.format("signal", "ndarray")
     assert signal.ndim == 1, "signal must be a 1D array."
     assert isinstance(segments, int), txt.format("segments", "int")
     assert isinstance(min_samples, int), txt.format("min_samples", "int")
@@ -1113,7 +1031,7 @@ def butt_filt(signal, fc, fs, n=4, type="lowpass", phase_corrected=True):
 
     # control the inputs
     txt = "{} must be an object of class {}."
-    assert isinstance(signal, "np.ndarray"), txt.format("signal", "numpy.ndarray")
+    assert isinstance(signal, np.ndarray), txt.format("signal", "numpy.ndarray")
     assert signal.ndim == 1, "signal must be a 1D array."
     assert isinstance(fs, (int, float)), txt.format("fs", "(int, float)")
     if isinstance(fc, (np.ndarray, list)):
@@ -1163,7 +1081,7 @@ def psd(signal, fs=1):
 
     # check the input
     txt = "{} must be an object of class {}."
-    assert isinstance(signal, "np.ndarray"), txt.format("signal", "numpy.ndarray")
+    assert isinstance(signal, np.ndarray), txt.format("signal", "numpy.ndarray")
     assert signal.ndim == 1, "signal must be a 1D array."
     assert isinstance(fs, (int, float)), txt.format("fs", "(int, float)")
 
