@@ -578,109 +578,111 @@ def freedman_diaconis_bins(y):
     return d
 
 
-def mean_filter(y, n=1, offset=0.5):
+def mean_filter(signal, n=1, pad_style="reflect", offset=0.5):
     """
-    mean filter.
+    apply a moving average filter to the signal.
 
-    Input:
+    Parameters
+    ----------
 
-        y (1D array)
+    signal: 1D array
+        the signal to be filtered.
 
-            a 1D array signal to be filtered.
+    n: int
+        the number of samples to be considered as averaging window.
 
-        n (int)
+    pad_style: "reflect"
+        padding style mode. The the numpy.pad function is used. Please refer to the corresponding documentation
+        for a detailed description of the padding modes.
 
-            the order of the filter.
+    offset: float
+        a value within the [0, 1] range defining how the averaging window is obtained. Offset=0, indicate that
+        for each sample, the filtered value will be the mean of the subsequent n-1 values plus the current sample.
+        Offset=1, on the other hand, calculates the filtered value at each sample as the mean of the n-1 preceding
+        values plus the current sample.
+        Offset=0.5, centers the averaging window around the actual sample being evaluated.
 
-        offset (float)
+    Returns
+    -------
 
-            should the window be centered around the current sample?.
-            The offset value should range between -1 and 1 where:
-
-            0   means that at each i-th sample the window of length n
-                over which the mean is calculated has the i-th sample as
-                starting value.
-
-            1   means that for the same i-th sample, n-1 samples
-                behind i will be used to calculate the mean. An offset of
-
-            0.5 will consider i centered within the filtering window.
-
-    Output:
-
-        z (1D array)
-
-            The filtered signal.
+    z: 1D array
+        The filtered signal.
     """
 
-    # control inputs
-    txt = "'offset' must be a float in the [-1, 1] range."
-    assert offset >= -1, txt
-    assert offset <= 1, txt
+    # data check
+    txt = "{} must be an object of class {}."
+    assert isinstance(signal, np.ndarray), txt.format("signal", "ndarray")
+    assert signal.ndim == 1, "signal must be a 1D array."
+    assert isinstance(n, int), txt.format("n", "int")
+    assert isinstance(pad_style, str), txt.format("pad_style", "str")
+    assert isinstance(offset, (int, float)), txt.format("offset", "(int, float)")
+    assert 0 <= offset <= 1, "offset must be a float in the [0, 1] range."
 
     # get the window range
-    w = np.unique(np.int(np.arange(n) / (n - 1)) - offset * n)
+    w = np.unique((np.arange(n) - offset * (n - 1)).astype(int))
 
     # get the indices of the samples
-    i = [w + j for j in np.arange(len(y))]
+    i = [w + n - 1 + j for j in np.arange(len(signal))]
 
-    # validate the indices (i.e. remove negative values and those above len(y))
-    i = [j[np.argwhere((j >= 0) & (j < len(y))).flatten()] for j in i]
+    # padding
+    y = np.pad(signal, n - 1, pad_style)
 
     # get the mean of each window
     return np.array([np.mean(y[j]) for j in i]).flatten()
 
 
-def median_filter(y, n=1, offset=0.5):
+def median_filter(signal, n=1, pad_style="reflect", offset=0.5):
     """
-    median filter.
+    apply a median filter to the signal.
 
-    Input:
+    Parameters
+    ----------
 
-        y (1D array)
+    signal: 1D array
+        the signal to be filtered.
 
-            a 1D array signal to be filtered.
+    n: int
+        the number of samples to be considered as averaging window.
 
-        n (int)
+    pad_style: "reflect"
+        padding style mode. The the numpy.pad function is used. Please refer to the corresponding documentation
+        for a detailed description of the padding modes.
 
-            the order of the filter.
+    offset: float
+        a value within the [0, 1] range defining how the window is obtained. Offset=0, indicate that
+        for each sample, the filtered value will be the median of the subsequent n-1 values plus the current sample.
+        Offset=1, on the other hand, calculates the filtered value at each sample as the median of the n-1 preceding
+        values plus the current sample.
+        Offset=0.5, centers the window around the actual sample being evaluated.
 
-        offset (float)
+    Returns
+    -------
 
-            should the window be centered around the current sample?.
-            The offset value should range between -1 and 1 where:
-
-            0   means that at each i-th sample the window of length n
-                over which the mean is calculated has the i-th sample as
-                starting value.
-
-            1   means that for the same i-th sample, n-1 samples
-                behind i will be used to calculate the mean. An offset of
-
-            0.5 will consider i centered within the filtering window.
-
-    Output:
-
-        z (1D array)
-
-            The filtered signal.
+    z: 1D array
+        The filtered signal.
     """
 
-    # control inputs
-    txt = "'offset' must be a float in the [-1, 1] range."
-    assert offset >= -1, txt
-    assert offset <= 1, txt
+    # data check
+    txt = "{} must be an object of class {}."
+    assert isinstance(signal, np.ndarray), txt.format("signal", "ndarray")
+    assert signal.ndim == 1, "signal must be a 1D array."
+    assert isinstance(n, int), txt.format("n", "int")
+    assert isinstance(pad_style, str), txt.format("pad_style", "str")
+    assert isinstance(offset, (int, float)), txt.format("offset", "(int, float)")
+    assert (
+        0 <= offset <= 1
+    ), "offset must be a numeric values included in the [0, 1] range."
 
     # get the window range
-    w = np.unique(np.int(np.arange(n) / (n - 1)) - offset * n)
+    w = np.unique((np.arange(n) - offset * (n - 1)).astype(int))
 
     # get the indices of the samples
-    i = [w + j for j in np.arange(len(y))]
+    i = [w + n - 1 + j for j in np.arange(len(signal))]
 
-    # validate the indices (i.e. remove negative values and those above len(y))
-    i = [j[np.argwhere((j >= 0) & (j < len(y))).flatten()] for j in i]
+    # padding
+    y = np.pad(signal, n - 1, pad_style)
 
-    # get the median of each window
+    # get the mean of each window
     return np.array([np.median(y[j]) for j in i]).flatten()
 
 
