@@ -443,36 +443,30 @@ def d1y(y, x=None, dt=1):
     """
     return the first derivative of y.
 
-    Input:
+    Parameters
+    ----------
 
-        y (ndarray with shape [n,])
+    y: ndarray with shape [n,]
+        the signal to be derivated
 
-            the signal to be derivated
+    x: ndarray with shape [n,] or None
+        the optional signal from which y has to  be derivated
 
-        x (ndarray with shape [n,] or None)
+    dt: float
+        the difference between samples in y.
+        NOTE: if x is provided, this parameter is ignored
 
-            the optional signal from which y has to  be derivated
+    Returns
+    -------
 
-        dt (float)
+    z: ndarray
+        an array being the second derivative of y
 
-            the difference between samples in y.
-            NOTE: if x is provided, this parameter is ignored
+    References
+    ----------
 
-        axis (int)
-
-            the axis of y along which the derivative has to be calculated.
-
-    Output:
-
-        z (ndarray)
-
-            an array being the first derivative of y
-
-    References:
-
-        Winter DA.
-            Biomechanics and Motor Control of Human Movement. Fourth Ed.
-            Hoboken, New Jersey: John Wiley & Sons Inc; 2009.
+    Winter DA. Biomechanics and Motor Control of Human Movement. Fourth Ed.
+        Hoboken, New Jersey: John Wiley & Sons Inc; 2009.
     """
 
     # get x
@@ -487,41 +481,41 @@ def d2y(y, x=None, dt=1):
     """
     return the second derivative of y.
 
-    Input:
+    Parameters
+    ----------
 
-        y (ndarray with shape [n,])
+    y: ndarray with shape [n,]
+        the signal to be derivated
 
-            the signal to be derivated
+    x: ndarray with shape [n,] or None
+        the optional signal from which y has to  be derivated
 
-        x (ndarray with shape [n,] or None)
+    dt: float
+        the difference between samples in y.
+        NOTE: if x is provided, this parameter is ignored
 
-            the optional signal from which y has to  be derivated
+    Returns
+    -------
 
-        dt (float)
+    z: ndarray
+        an array being the second derivative of y
 
-            the difference between samples in y.
-            NOTE: if x is provided, this parameter is ignored
+    References
+    ----------
 
-        axis (int)
-
-            the axis of y along which the derivative has to be calculated.
-
-    Output:
-
-        z (ndarray)
-
-            an array being the second derivative of y
-
-    References:
-
-        Winter DA.
-            Biomechanics and Motor Control of Human Movement. Fourth Ed.
-            Hoboken, New Jersey: John Wiley & Sons Inc; 2009.
+    Winter DA. Biomechanics and Motor Control of Human Movement. Fourth Ed.
+        Hoboken, New Jersey: John Wiley & Sons Inc; 2009.
     """
 
-    # get x
+    # data check
+    txt = "{} must be an object of class {}."
+    assert isinstance(y, np.ndarray), txt.format("y", "ndarray")
+    assert y.ndim == 1, "y must be a 1D array."
+    assert isinstance(dt, (int, float)), txt.format("dt", "(int, float)")
     if x is None:
         x = np.arange(len(y)) * dt
+    assert isinstance(x, np.ndarray), txt.format("x", "ndarray")
+    assert x.ndim == 1, "x must be a 1D array."
 
     # get the derivative
     dy = (y[2:] - y[1:-1]) / (x[2:] - x[1:-1])
@@ -690,37 +684,43 @@ def interpolate_cs(y, n=None, x_old=None, x_new=None):
     """
     Get the cubic spline interpolation of y.
 
-    Input:
+    Parameters
+    ----------
 
-        y (1D array)
+    y: 1D array
+        the data to be interpolated.
 
-            the data to be interpolated.
+    n: int, None
+        the number of points for the interpolation.
 
-        n (int)
+    x_old: 1D array, None
+        the x coordinates corresponding to y. It is ignored if n is provided.
 
-            the number of points for the interpolation.
+    x_new: 1D array, None
+        the newly (interpolated) x coordinates corresponding to y.
+        It is ignored if n is provided.
 
-        x_old (1D array)
+    Returns
+    -------
 
-            the x coordinates corresponding to y.
-            It is ignored if n is provided.
-
-        x_new (1D array)
-
-            the newly (interpolated) x coordinates corresponding to y.
-            It is ignored if n is provided.
-
-    Output:
-
-        z (1D array)
-
-            the interpolated y axis
+    z: 1D array
+        the interpolated y axis
     """
 
     # control of the inputs
+    txt = "{} must be an object of class {}."
+    assert isinstance(y, np.ndarray), txt.format("y", "ndarray")
+    assert y.ndim == 1, "y must be a 1D array."
     if n is not None:
+        assert isinstance(n, int), txt.format("n", "int")
         x_old = np.arange(len(y))
         x_new = np.linspace(np.min(x_old), np.max(x_old), n)
+    else:
+        assert isinstance(x_old, np.ndarray), txt.format("x_old", "ndarray")
+        assert x_old.ndim == 1, "x_old must be a 1D array."
+        assert len(y) == len(x_old), "x_old and y must have the same len."
+        assert isinstance(x_new, np.ndarray), txt.format("x_new", "ndarray")
+        assert x_new.ndim == 1, "x_new must be a 1D array."
 
     # get the cubic-spline interpolated y
     cs = si.CubicSpline(x_old, y)
@@ -1037,12 +1037,10 @@ def butt_filt(signal, fc, fs, n=4, type="lowpass", phase_corrected=True):
     assert signal.ndim == 1, "signal must be a 1D array."
     assert isinstance(fs, (int, float)), txt.format("fs", "(int, float)")
     if isinstance(fc, (np.ndarray, list)):
-        assert (
-            len(fc) == 2
-        ), "'cutoff' length must be a list or numpy array of length 2."
-        assert np.all(
-            [isinstance(i, (int, float)) for i in fc]
-        ), "all elements in fc must be int or float."
+        txt2 = "'cutoff' length must be a list or numpy array of length 2."
+        assert len(fc) == 2, txt2
+        txt3 = "all elements in fc must be int or float."
+        assert np.all([isinstance(i, (int, float)) for i in fc]), txt3
     else:
         assert isinstance(fc, (int, float)), txt.format("fc", "(int, float)")
     assert isinstance(type, str), txt.format("type", "str")
@@ -1103,26 +1101,30 @@ def find_peaks(y, height=None):
     """
     detect the location (in sample units) of the peaks within y.
 
-    Input:
+    Parameters
+    ----------
 
-        y (1D array)
+    y: 1D array
+        a 1D signal
 
-            a 1D signal
+    height: float, None
+        a scalar defining the minimum height to be considered for a valid peak.
+        If None, all peaks are returned.
 
-        height (float, None)
+    Returns
+    -------
 
-            a scalar defining the minimum height to be considered
-            for a valid peak. If None, all peaks are returned.
-
-    Output:
-
-        p (1D array)
-
-            the indices of the peaks (in sample units) in y.
+    p: 1D array
+        the indices of the peaks (in sample units) in y.
     """
+
     # control the inputs
+    txt = "{} must be an object of class {}."
+    assert isinstance(y, np.ndarray), txt.format("y", "ndarray")
+    assert y.ndim == 1, "y must be a 1D array."
     if height is None:
         height = np.min(y)
+    assert isinstance(height, (int, float)), txt.format("height", "(int, float)")
 
     # get the first derivative of the signal
     d1 = d1y(y)
