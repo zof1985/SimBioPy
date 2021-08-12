@@ -1,6 +1,7 @@
 # IMPORTS
 
 from .base import *
+import struct
 
 
 # METHODS
@@ -144,13 +145,11 @@ def read_emt(path):
 
     Parameters
     ----------
-
     path: str
         an existing emt path.
 
     Returns
     -------
-
     vectors: dict
         a dict with the imported vectors.
     """
@@ -220,6 +219,342 @@ def read_emt(path):
 
     # return vd
     return vd
+
+
+def read_tdf(path):
+    """
+    Return the readings from a .tdf file as dicts of Vectors objects.
+
+    Parameters
+    ----------
+    path: str
+        an existing emt path.
+
+    Returns
+    -------
+    tracks: dict
+        a dict with the Point 3D tracks vectors.
+
+    forces: dict
+        a dict with the Force 3D tracks vectors.
+
+    muscles: dict
+         a dict with the EMG activity channels as vectors.
+    """
+
+    # check the validity of the entered path
+    assert os.path.exists(path), path + " does not exist."
+    assert path[-4:] == ".tdf", path + ' must be an ".tdf" path.'
+
+    class TDF(object):
+        """TDF protocol constants"""
+
+        tdfSignature = "41604B82CA8411D3ACB60060080C6816"
+        tdfData3DBlockId = 5
+        tdfDataGPBlockId = 14
+
+        """ instance members
+        marker data
+            freqM
+            labelsM
+            markers
+            timeM
+
+        analogue input data
+            freqA
+            labelsA
+            analogue
+            timeA
+        """
+
+        def __init__(self, fileName):
+            try:
+                block3d = TDF.validateFile(fileName)
+                (
+                    self.markers,
+                    self.labelsM,
+                    self.freqM,
+                    nFrames,
+                    startTime,
+                ) = TDF.get3Ddata(fileName, block3d)
+                self.timeM = startTime + np.arange(0, nFrames) / self.freqM
+            except Warning as e:
+                # data missing
+                print(e.args)
+            except IOError as e:
+                print(e.args)
+
+        @staticmethod
+        def validateFile(fileName):
+            with open(fileName, "rb") as fid:
+                fileSign = "".join(
+                    [
+                        "{:08x}".format(b4)
+                        for b4 in struct.unpack("IIII", fid.read(4 * 4))
+                    ]
+                )
+                if fileSign != TDF.tdfSignature.lower():
+                    # print("invalid file")
+                    raise IOError("invalid file")
+
+                version, nEntries = struct.unpack("Ii", fid.read(4 * 2))
+
+                if nEntries <= 0:
+                    # print('The file specified contains no data.')
+                    raise IOError("The file specified contains no data.")
+
+                nextEntryOffset = 40
+                # tdfBlockEntries=[]
+                block3D, blockIn = None, None
+                for i in range(nEntries):
+                    if -1 == fid.seek(nextEntryOffset, 1):
+                        # print('Error: the file specified is corrupted.')
+                        # return None, None
+                        raise IOError("Error: the file specified is corrupted.")
+
+                    blockInfo = struct.unpack("IIii", fid.read(4 * 4))
+                    BI = {
+                        "Type": blockInfo[0],
+                        "Format": blockInfo[1],
+                        "Offset": blockInfo[2],
+                        "Size": blockInfo[3],
+                    }
+
+                    if BI["Type"] == 14:
+                        blockIn = BI
+                    elif BI["Type"] == 5:
+                        block3D = BI
+
+                    # tdfBlockEntries.append(BI)
+                    nextEntryOffset = 16 + 256
+
+                if block3D is None or block3D["Format"] not in [1, 2]:
+                    # print("3D marker data missing")
+                    raise Warning("3D marker data missing")
+
+                return block3D
+
+        @staticmethod
+        def get3Ddata(fileName, blockInfo):
+            with open(fileName, "rb") as fid:
+                fid.seek(blockInfo["Offset"])
+
+                nFrames, freq, startTime, nTracks = struct.unpack(
+                    "iifi", fid.read(4 * 4)
+                )
+
+                # calibration data
+                D = np.array(struct.unpack("3f", fid.read(3 * 4)))
+                R = np.array(struct.unpack("9f", fid.read(9 * 4))).reshape(3, 3).T
+                T = np.array(struct.unpack("3f", fid.read(3 * 4)))
+
+                fid.seek(4, 1)
+
+                if blockInfo["Format"] in [1, 3]:
+                    print("this yes")
+                    (nLinks,) = struct.unpack("i", fid.read(4))
+                    fid.seek(4, 1)
+                    links = np.array(
+                        struct.unpack("%ii" % (2 * nLinks), fid.read(2 * nLinks * 4))
+                    )
+
+                labels = [u""] * nTracks
+                tracks = np.ones((nFrames, 3 * nTracks)) * np.nan
+
+                if blockInfo["Format"] in [1, 2]:
+                    for trk in range(nTracks):
+                        lbl = fid.read(256).decode("mbcs")
+                        labels[trk] = str(lbl)
+                        # print(labels[trk])
+                        # print(fid.read(256))
+                        (nSegments,) = struct.unpack("i", fid.read(4))
+                        # print("nSegments "+str(nSegments))
+                        fid.seek(4, 1)
+                        segments = (
+                            np.array(
+                                struct.unpack(
+                                    "%ii" % (2 * nSegments), fid.read(2 * nSegments * 4)
+                                )
+                            )
+                            .reshape(nSegments, 2)
+                            .T
+                        )
+                        # print(segments)
+                        for s in range(nSegments):
+                            for f in range(
+                                segments[0, s], segments[0, s] + segments[1, s]
+                            ):
+                                tracks[f, 3 * (trk) : 3 * (trk) + 3] = struct.unpack(
+                                    "3f", fid.read(3 * 4)
+                                )
+
+                elif blockInfo["Format"] in [3, 4]:
+                    for trk in range(nTracks):
+                        lbl = fid.read(256).decode("mbcs")
+                        labels[trk] = str(lbl)
+                        # tracks = (fread (fid,[3*nTracks,nFrames],'float32'))';
+                        tracks = (
+                            np.array(
+                                struct.unpack(
+                                    "%if" % 3 * nTracks * nFrames,
+                                    fid.read(3 * nTracks * nFrames * 4),
+                                )
+                            )
+                            .reshape(nFrames, 3 * nTracks)
+                            .T
+                        )
+
+                return tracks, labels, freq, nFrames, startTime
+
+    rd = TDF(path)
+
+    # data extractors
+    def getPoint3D(file, info):
+        """
+        read Point3D tracks data from the provided tdf file.
+
+        Paramters
+        ---------
+        file: str
+            the path to the tdf file
+
+        info: dict
+            a dict extracted from the tdf file reading with the info
+            required to extract Point3D data from it.
+
+        Returns
+        -------
+        points: dict
+            a dict with all the tracks provided as SimbioPy.Vector objects.
+        """
+
+        # read the file
+        fid = open(file, "rb")
+
+        # update the reader
+        fid.seek(info["Offset"])
+
+        # get the basic info
+        base_info = struct.unpack("iifi", fid.read(16))
+        nFrames, freq, startTime, nTracks = base_info
+
+        # calibration data (read but not exported)
+        d = np.array(struct.unpack("3f", fid.read(12)))
+        r = np.array(struct.unpack("9f", fid.read(36))).reshape(3, 3).T
+        t = np.array(struct.unpack("3f", fid.read(12)))
+        fid.seek(4, 1)
+
+        # links (read but not used)
+        if info["Format"] in [1, 3]:
+            (nLinks,) = struct.unpack("i", fid.read(4))
+            fid.seek(4, 1)
+            links = struct.unpack("%ii" % (2 * nLinks), fid.read(8 * nLinks))
+            links = np.array(links)
+
+        # prepare the arrays for the tracks and the labels
+        labels = [u""] * nTracks
+        tracks = np.ones((nFrames, 3 * nTracks)) * np.nan
+
+        # read the data
+        for trk in range(nTracks):
+
+            # get the label
+            lbl = str(fid.read(256).decode("mbcs"))
+            labels[trk] = "".join([i for i in lbl if i != "\x00"])
+
+            # populate the tracks array according to the block format
+            if info["Format"] in [1, 2]:
+
+                (nSeg,) = struct.unpack("i", fid.read(4))
+                fid.seek(4, 1)
+                segments = struct.unpack("%ii" % (2 * nSeg), fid.read(8 * nSeg))
+                segments = np.array(segments).reshape(nSeg, 2).T
+                for s in range(nSeg):
+                    for row in range(segments[0, s], segments[0, s] + segments[1, s]):
+                        cols = np.arange(3) + 3 * trk
+                        tracks[row, cols] = struct.unpack("3f", fid.read(12))
+
+            elif info["Format"] in [3, 4]:
+
+                n = 3 * nTracks * nFrames
+                segments = struct.unpack("%if" % n, fid.read(n * 4))
+                tracks = np.array(segments).reshape(nFrames, 3 * nTracks).T
+
+        # generate the output dict
+        points = {}
+        for trk in range(nTracks):
+            cols = np.arange(3 * trk, 3 * trk + 3)
+            points[labels[trk]] = Vector(
+                coordinates=tracks[:, cols],
+                names=["X", "Y", "Z"],
+                index=np.arange(nFrames) / freq + startTime,
+                unit="m",
+            )
+        return points
+
+    # codes
+    tdf_signature = "41604B82CA8411D3ACB60060080C6816"
+    id_Point3D = 5
+    id_Force3D = -1
+    id_EMG = -1
+
+    # read the file
+    fid = open(path, "rb")
+
+    # check the signature
+    sig = ["{:08x}".format(b) for b in struct.unpack("IIII", fid.read(16))]
+    sig = "".join(sig)
+    if sig != tdf_signature.lower():
+        raise IOError("invalid file")
+
+    # get the number of entries
+    _, nEntries = struct.unpack("Ii", fid.read(8))
+    if nEntries <= 0:
+        raise IOError("The file specified contains no data.")
+
+    # check each entry to find the available blocks
+    nextEntryOffset = 40
+    blocks = {}
+    for _ in range(nEntries):
+
+        # corrupted file
+        if -1 == fid.seek(nextEntryOffset, 1):
+            raise IOError("Error: the file specified is corrupted.")
+
+        # get the data types
+        blockInfo = struct.unpack("IIii", fid.read(16))
+        bi = {
+            "Type": blockInfo[0],
+            "Format": blockInfo[1],
+            "Offset": blockInfo[2],
+            "Size": blockInfo[3],
+        }
+
+        # check the type of block
+        if bi["Type"] == id_Point3D:
+            blocks["Point3D"] = bi
+        elif bi["Type"] == id_Force3D:
+            blocks["Force3D"] = bi
+        elif bi["Type"] == id_EMG:
+            blocks["EMG"] = bi
+
+        # update the offset
+        nextEntryOffset = 272
+
+    # close the file
+    fid.close()
+
+    # read the available data
+    for key, info in blocks.items():
+        if key == "Point3D":
+            blocks[key] = getPoint3D(path, info)
+        elif key == "Force3D":
+            blocks[key] = getForce3D(path, info)
+        elif key == "EMG":
+            blocks[key] = getEMG(path, info)
+
+    # return what has been read
+    return blocks
 
 
 # CLASSES
