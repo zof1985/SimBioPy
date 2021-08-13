@@ -347,8 +347,12 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
         for trk in range(nTracks):
 
             # get the label
-            lbl = str(fid.read(256).decode("mbcs"))
-            labels[trk] = "".join([i for i in lbl if i not in ["\x01", "\x00"]])
+            blbl = fid.read(256)
+            lbl = ""
+            while chr(blbl[0]) != "\x00" and len(blbl) > 0:
+                lbl += chr(blbl[0])
+                blbl = blbl[1:]
+            labels[trk] = lbl
 
             # read by frame
             if by_frame:
