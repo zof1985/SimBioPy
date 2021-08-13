@@ -483,11 +483,11 @@ def read_tdf(path):
         # generate the output dict
         points = {}
         for trk in range(nTracks):
-            cols = np.arange(3 * trk, 3 * trk + 3)
+            cols = np.arange(3 * trk + 3)
             points[labels[trk]] = Vector(
-                coordinates=tracks[:, cols],
+                coordinates=tracks[cols],
                 names=["X", "Y", "Z"],
-                index=np.arange(nFrames) / freq + startTime,
+                index=np.arange(nFrames) * freq + startTime,
                 unit="m",
             )
         return points
