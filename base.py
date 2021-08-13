@@ -1178,7 +1178,7 @@ def crossings(y, value=0.0):
     cr = np.argwhere(abs(sn[1:] - sn[:-1]) == 2).flatten()
 
     # return the crossings
-    return sn[cr], cr
+    return cr, sn[cr]
 
 
 def xcorr(y, biased=False, full=False, *args):
