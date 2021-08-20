@@ -707,6 +707,9 @@ class _BilateralGuidedAggregation(_LayerPipe):
                             kr.layers.UpSampling2D(
                                 size=4, interpolation="bilinear", name="4xUpsampling"
                             ),
+                            kr.layers.Activation(
+                                kr.activations.sigmoid, name="Sigmoid"
+                            ),
                         ],
                         kr.layers.Multiply(name="Multiplication"),
                     ],
@@ -743,6 +746,9 @@ class _BilateralGuidedAggregation(_LayerPipe):
                             kr.layers.BatchNormalization(name="BatchNorm"),
                             kr.layers.UpSampling2D(
                                 size=4, interpolation="bilinear", name="4xUpsampling"
+                            ),
+                            kr.layers.Activation(
+                                kr.activations.sigmoid, name="Sigmoid"
                             ),
                         ],
                         kr.layers.Multiply(name="Multiplication"),
