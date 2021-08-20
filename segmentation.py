@@ -1,8 +1,6 @@
 # IMPORTS
 
 import tensorflow.keras as kr
-from tensorflow.python.keras.layers.convolutional import Conv2D, DepthwiseConv2D
-from tensorflow.python.keras.layers.normalization_v2 import BatchNormalization
 
 
 # CLASSES
