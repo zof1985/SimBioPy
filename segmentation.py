@@ -1,6 +1,230 @@
 # IMPORTS
 
 import tensorflow.keras as kr
+import tensorflow as tf
+
+
+# METHODS
+
+
+def conv2d(
+    kernel_size=3,
+    output_channels=64,
+    stride=1,
+    use_bias=False,
+    padding="same",
+    **kwargs
+):
+    """
+    wrapper of the Keras.layers.Conv2D Layer.
+
+    Parameters
+    ----------
+    kernel_size: int, list, tuple
+        the size of the kernel.
+        If a list or tuple is given, its dimensions will correspond to the Height and Width kernels.
+        If a single integer is provided, it is shared across dimensions.
+
+    output_channels: int
+        the number of output channels of the convolved layer.
+
+    stride: int
+        the stride to be applied to the convolutional layer.
+
+    use_bias: bool
+        should a bias array be added to the weights.
+
+    padding: str
+        the padding style. The available options are "same" (default) or "valid".
+
+    kwargs: any
+        additional parameters passed to the Conv2D keras class.
+
+
+    Returns
+    -------
+    layer: Keras.layer.Conv2D
+        the convolutional layer correpsonding to the input data.
+    """
+
+    # check the entries
+    txt = "'kernel_size must be an int or a list/tuple of int with len = 2."
+    if isinstance(kernel_size, (tuple, list)):
+        assert len(kernel_size) == 2, txt
+        assert all([isinstance(i, int) for i in kernel_size]), txt
+    else:
+        assert isinstance(kernel_size, int), txt
+        kernel_size = [kernel_size, kernel_size]
+    txt = lambda x, y: "{} must be of class {}.".format(x, y)
+    assert isinstance(output_channels, int), txt("output_channels", int)
+    assert isinstance(stride, int), txt("stride", int)
+    assert isinstance(use_bias, bool), txt("use_bias", bool)
+    assert isinstance(padding, str), txt("padding", str)
+    valid_padding = ["same", "valid"]
+    txt = "Available 'padding' values are {}.".format(valid_padding)
+    assert padding in valid_padding, txt
+
+    # check the name property
+    if any([i == "name" for i in kwargs]):
+        name = kwargs.pop("name")
+        name = name.replace(" ", "")
+    else:
+        name = "{}x{}x{}x{}Conv2D"
+        name = name.format(kernel_size[0], kernel_size[1], output_channels, stride)
+    return kr.layers.Conv2D(
+        kernel_size=kernel_size,
+        strides=stride,
+        filters=output_channels,
+        use_bias=use_bias,
+        padding=padding,
+        name=name,
+        **kwargs
+    )
+
+
+def conv2d_bn_relu(
+    kernel_size=3,
+    output_channels=64,
+    stride=1,
+    batch_normalization=True,
+    relu_activation=True,
+    name="",
+    **kwargs
+):
+    """
+    return a _LayerPipe object serializing a convolutional layer optionally followed by batch normalization
+    and ReLU activation.
+
+    Parameters
+    ----------
+    kernel_size: int, list, tuple
+        the size of the kernel.
+        If a list or tuple is given, its dimensions will correspond to the Height and Width kernels.
+        If a single integer is provided, it is shared across dimensions.
+
+    output_channels: int
+        the number of output channels of the convolved layer.
+
+    stride: int
+        the stride to be applied to the convolutional layer.
+
+    batch_normalization: bool
+        should the output of the convolution be batch_normalized?
+
+    relu_activation: bool
+        should the output of the convolution pass through a ReLU operator?
+
+    name: str
+        a name for the Pipe.
+
+    kwargs: any
+        additional parameters passed to the Conv2D keras class.
+
+
+    Returns
+    -------
+    layer: Keras.layer.Conv2D
+        the convolutional layer correpsonding to the input data.
+    """
+
+    # parameters check
+    txt = "'{}' must be True or False."
+    assert isinstance(batch_normalization, bool), txt.format("batch_normalization")
+    assert isinstance(relu_activation, bool), txt.format("relu_activation")
+    assert isinstance(name, str), "'name' must be a string."
+
+    # get the layers
+    layers = [
+        conv2d(
+            kernel_size=kernel_size,
+            output_channels=output_channels,
+            stride=stride,
+            **kwargs
+        )
+    ]
+    if batch_normalization:
+        layers += [kr.layers.BatchNormalization(name="BatchNorm")]
+    if relu_activation:
+        layers += [kr.layers.ReLU(name="ReLU")]
+
+    # make the pipe
+    return _LayerPipe(layers=layers, name=name.replace(" ", ""))
+
+
+def depthwise_conv2_bn(
+    kernel_size=3, stride=1, multiplier=6, use_bias=False, padding="same", **kwargs
+):
+    """
+    return a Depthwise Convolutional 2D layer followed by batch normalization.
+
+    Parameters
+    ----------
+
+    kernel_size: int, list, tuple
+        the size of the kernel.
+        If a list or tuple is given, its dimensions will correspond to the Height and Width kernels.
+        If a single integer is provided, it is shared across dimensions.
+
+    multiplier: int
+        the filter depth multiplier.
+
+    stride: int
+        the stride to be applied to the convolutional layer.
+
+    use_bias: bool
+        should a bias array be added to the weights.
+
+    padding: str
+        the padding style. The available options are "same" (default) or "valid".
+
+    kwargs: any
+        additional parameters passed to the Conv2D keras class.
+
+    Returns
+    -------
+    layer: _LayerPipe
+        the pipe of depthwise convolutional layer followed by batch normalization.
+    """
+
+    # check the entries
+    txt = "'kernel_size must be an int or a list/tuple of int with len = 2."
+    if isinstance(kernel_size, (tuple, list)):
+        assert len(kernel_size) == 2, txt
+        assert all([isinstance(i, int) for i in kernel_size]), txt
+    else:
+        assert isinstance(kernel_size, int), txt
+        kernel_size = [kernel_size, kernel_size]
+    txt = lambda x, y: "{} must be of class {}.".format(x, y)
+    assert isinstance(stride, int), txt("stride", int)
+    assert isinstance(use_bias, bool), txt("use_bias", bool)
+    assert isinstance(padding, str), txt("padding", str)
+    valid_padding = ["same", "valid"]
+    txt = "Available 'padding' values are {}.".format(valid_padding)
+    assert padding in valid_padding, txt
+
+    # check the name property
+    if any([i == "name" for i in kwargs]):
+        name = kwargs.pop("name")
+        name = name.replace(" ", "")
+    else:
+        name = "{}x{}x{}x{}DepthwiseConv2D)"
+        name = name.format(kernel_size[0], kernel_size[1], multiplier, stride)
+
+    return _LayerPipe(
+        layers=[
+            kr.layers.DepthwiseConv2D(
+                kernel_size=kernel_size,
+                strides=stride,
+                depth_multiplier=multiplier,
+                name=name,
+                padding=padding,
+                use_bias=use_bias,
+                **kwargs
+            ),
+            kr.layers.BatchNormalization(name="BatchNorm"),
+        ],
+        name=name,
+    )
 
 
 # CLASSES
@@ -19,9 +243,12 @@ class _Identity(kr.layers.Layer):
     def __init__(self, name):
         assert isinstance(name, str), "'name' must be a str."
         super(_Identity, self).__init__(name=name)
-        self.trainable = False
 
-    def __call__(self, inputs):
+    def build(self, input_shape):  # Create the state of the layer (weights)
+        w_init = tf.ones_initializer()
+        self.w = tf.Variable(initial_value=w_init(shape=input_shape), trainable=False)
+
+    def call(self, inputs):
         """
         handle a call to the class object and return the concatenated layers.
 
@@ -33,23 +260,29 @@ class _Identity(kr.layers.Layer):
         Returns
         -------
         block: Keras.layers.Layer
-            the layer being the concatenation of the 2D convolutions with, optionally, batch normalization
-            and the application of the activation function.
+            passed layer.
         """
-        return inputs
+        return tf.matmul(inputs, self.w)
+
+    @property
+    def trainable(self):
+        """
+        Identity Layer cannot be trained.
+        """
+        return False
 
 
-class _LayerPipe:
+class _LayerPipe(object):
     """
     generate a pipeline of layers to be called sequentially.
 
     Parameters
     ----------
-    name: str
-        the Pipe layer name.
-
     layers: list
         a list of Keras.layers.Layer objects to be called sequentially once the Pipe is called.
+
+    name: str
+        the Pipe layer name.
 
     share_inputs: bool
         True means that the input data are provided to all the entry points of the pipe.
@@ -86,18 +319,25 @@ class _LayerPipe:
         assert is_pipeable(layers), txt
         assert isinstance(share_inputs, bool), "'share_inputs' must be True or False."
 
+        # add the name
+        self._name = name.replace(" ", "")
+
         # add the layers
         def renamer(obj, name):
             """
             add the provided name to the layers name.
             """
-            if isinstance(obj, kr.layers.Layer):
-                obj.name = "{} - {}".format(name, obj.name)
+            if isinstance(obj, (kr.layers.Layer)):
+                obj._name = "{}-{}".format(name, obj._name)
                 return obj
             elif isinstance(obj, (list, tuple)):
                 return [renamer(i, name) for i in obj]
+            elif isinstance(obj, _LayerPipe):
+                for i in range(len(obj.layers)):
+                    obj.layers[i] = renamer(obj.layers[i], name)
+                return obj
 
-        self.layers = renamer(layers)
+        self.layers = renamer(layers, self._name)
 
         # add the sharing options
         self.share_inputs = share_inputs
@@ -118,35 +358,106 @@ class _LayerPipe:
             options.
         """
 
-        def recaller(obj, arg):
-            """
-            recursive function to allow the call of nested layers.
-            """
-            if isinstance(obj, (list, tuple)):
-                return [recaller(inner, arg) for inner in obj]
-            else:
-                return obj(arg)
-
         # check the shape of the inputs
         if self.share_inputs:
-            if isinstance(self.layers[0], kr.layers.Layer):
-                x = [inputs]
-            else:
-                x = [inputs for _ in range(len(self.layers[0]))]
+
+            def share_inputs_fun(inputs, first_layer):
+
+                if isinstance(first_layer, kr.layers.Layer):
+                    return inputs
+
+                elif isinstance(first_layer, _LayerPipe):
+                    return share_inputs_fun(inputs, first_layer.layers[0])
+
+                else:
+                    return [inputs for _ in range(len(first_layer))]
+
+            x = share_inputs_fun(inputs, self.layers[0])
+
         else:
             x = inputs
 
         # resolve the pipe
-
-        for i, layer in enumerate(self.layers):
-            if isinstance(layer, (list, tuple)):
-                if i == 0 and self.share_inputs:
-                    x = [recaller(l, v) for l, v in zip(layer, x)]
+        def recaller(obj, arg, share_args=False):
+            """
+            recursive function to allow the call of nested layers.
+            """
+            if isinstance(obj, (list, tuple)):
+                if share_args:
+                    return [recaller(e, arg, share_args) for e in obj]
                 else:
-                    x = recaller(layer, x)
+                    return [recaller(e, a) for e, a in zip(obj, arg)]
+
+            elif isinstance(obj, _LayerPipe):
+                x = arg
+                for level in obj.layers:
+                    x = recaller(level, x, share_args)
+                return x
+
             else:
-                x = layer(x)
+                return obj(arg)
+
+        # iterate over the layers
+        for i, layer in enumerate(self.layers):
+            if i == 0:
+                x = recaller(layer, x, self.share_inputs)
+            else:
+                x = recaller(layer, x, True)
         return x
+
+
+class _DetailBranch(_LayerPipe):
+    """
+    generate the Detail Branch of the BiSeNet V2 by concatenating a set of convolutional blocks.
+
+    Parameters
+    ----------
+    kernel_size: list or tuple, optional
+        the size of the convolutional kernel for each level of the block.
+
+    channels: int
+        the basic number of channels of each block.
+
+    kwargs: any
+        additional parameters passed to the convolutional layers.
+    """
+
+    def __init__(self, kernel_size, channels, **kwargs):
+
+        # check the entries
+        txt = lambda x, c: "{} must be and object of class {}.".format(x, c)
+        assert isinstance(kernel_size, int), txt("kernel_size", int)
+        assert isinstance(channels, int), txt("channels", int)
+
+        # create the first 2 stages
+        layers = [
+            _LayerPipe(
+                layers=[
+                    conv2d(kernel_size, channels, 2, **kwargs),
+                    conv2d(kernel_size, channels, 1, **kwargs),
+                ],
+                name="Stage1",
+            ),
+            _LayerPipe(
+                layers=[
+                    conv2d(kernel_size, channels, 2, **kwargs),
+                    conv2d(kernel_size, channels, 1, **kwargs),
+                    conv2d(kernel_size, channels, 1, **kwargs),
+                ],
+                name="Stage2",
+            ),
+            _LayerPipe(
+                layers=[
+                    conv2d(kernel_size, channels * 2, 2, **kwargs),
+                    conv2d(kernel_size, channels * 2, 1, **kwargs),
+                    conv2d(kernel_size, channels * 2, 1, **kwargs),
+                ],
+                name="Stage3",
+            ),
+        ]
+
+        # init
+        super(_DetailBranch, self).__init__(layers, "Detail Branch")
 
 
 class _Stem(_LayerPipe):
@@ -161,89 +472,64 @@ class _Stem(_LayerPipe):
     channels: int
         the basic number of channels of each block.
 
-    name: str
-        layer name
+    kwargs: any
+        additional parameters passed to the convolutional layers.
     """
 
-    def __init__(self, kernel_size, channels, name):
+    def __init__(self, kernel_size, channels, **kwargs):
 
         # check the entries
         assert isinstance(kernel_size, int), "'kernel_size' must be an int object."
         assert isinstance(channels, int), "'channels' must be an int object."
-        assert isinstance(name, str), "'name' must be an str object."
 
         # create the blocks
         layers = [
-            _LayerPipe(
-                layers=[
-                    kr.layers.Conv2D(
-                        kernel_size=kernel_size,
-                        filters=channels,
-                        stride=2,
-                        name="{}x{}Conv2D (stride {})".format(
-                            kernel_size, kernel_size, 2
-                        ),
-                        padding="same",
-                    ),
-                    kr.layers.BatchNormalization(name="BatchNorm"),
-                    kr.layersReLU(name="ReLU"),
-                ],
+            conv2d_bn_relu(
+                kernel_size=kernel_size,
+                output_channels=channels,
+                stride=2,
                 name="Layer1",
+                **kwargs
             ),
             [
                 _LayerPipe(
                     layers=[
-                        kr.layers.Conv2D(
+                        conv2d_bn_relu(
                             kernel_size=1,
-                            filters=channels,
+                            output_channels=channels,
                             stride=1,
-                            name="{}x{}Conv2D (stride {})".format(1, 1, 1),
-                            padding="same",
+                            name="Layer1",
+                            **kwargs
                         ),
-                        kr.layers.BatchNormalization(name="BatchNorm"),
-                        kr.layersReLU(name="ReLU"),
-                        kr.layers.Conv2D(
+                        conv2d_bn_relu(
                             kernel_size=kernel_size,
-                            filters=channels,
+                            output_channels=channels,
                             stride=2,
-                            name="{}x{}Conv2D (stride {})".format(
-                                kernel_size, kernel_size, 2
-                            ),
-                            padding="same",
+                            name="Layer2",
+                            **kwargs
                         ),
-                        kr.layers.BatchNormalization(name="BatchNorm"),
-                        kr.layersReLU(name="ReLU"),
                     ],
-                    name="Layer2 - Left Branch",
+                    name="Layer2-LeftBranch",
                 ),
                 kr.layers.MaxPooling2D(
                     pool_size=kernel_size,
                     strides=2,
                     padding="same",
-                    name="Layer2 - Right Branch - MaxPool",
+                    name="Layer2-RightBranch-MaxPool",
                 ),
             ],
-            kr.layers.Concatenate(name="Layer3 - Concatenation"),
-            _LayerPipe(
-                layers=[
-                    kr.layers.Conv2D(
-                        kernel_size=kernel_size,
-                        filters=channels,
-                        stride=1,
-                        name="{}x{}Conv2D (stride {})".format(
-                            kernel_size, kernel_size, 1
-                        ),
-                        padding="same",
-                    ),
-                    kr.layers.BatchNormalization(name="BatchNorm"),
-                    kr.layersReLU(name="ReLU"),
-                ],
+            kr.layers.Concatenate(name="Layer3-Concatenation"),
+            conv2d_bn_relu(
+                kernel_size=kernel_size,
+                output_channels=channels,
+                stride=1,
                 name="Layer4",
+                **kwargs
             ),
         ]
 
         # initialize
-        super(_Stem, self).__init__(layers, name)
+        super(_Stem, self).__init__(layers, "StemBlock")
 
 
 class _GatherExpansion(_LayerPipe):
@@ -261,57 +547,30 @@ class _GatherExpansion(_LayerPipe):
     stride: int
         the strides to be applied. (1 or 2).
 
-    expansion: int
-        the expansion factor to be used during the Depthwise Convolution to vary the number of
-        channels.
-
-    name: str
-        layer name
+    kwargs: any
+        additional parameters passed to the convolutional layers.
     """
 
-    def __init__(self, kernel_size, channels, stride, expansion, name):
+    def __init__(self, kernel_size, channels, stride, **kwargs):
 
         # check the entries
         assert isinstance(kernel_size, int), "'kernel_size' must be an int object."
         assert isinstance(channels, int), "'channels' must be an int object."
         assert isinstance(stride, int), "'stride' must be an int object."
         assert stride in [1, 2], "'stride' can be only 1 or 2."
-        assert isinstance(expansion, int), "'expansion' must be an int object."
-        assert isinstance(name, str), "'name' must be an str object."
 
         # here the layers are put in lists indicating how to
         # process them by the __call__ method.
         left_branch_layers = [
-            _LayerPipe(
-                layers=[
-                    kr.layers.Conv2D(
-                        kernel_size=kernel_size,
-                        filters=channels,
-                        stride=1,
-                        name="{}x{}Conv2D (stride {})".format(
-                            kernel_size, kernel_size, 1
-                        ),
-                        padding="same",
-                    ),
-                    kr.layers.BatchNormalization(name="BatchNorm"),
-                    kr.layersReLU(name="ReLU"),
-                ],
+            conv2d_bn_relu(
+                kernel_size=kernel_size,
+                output_channels=channels,
+                stride=1,
                 name="Layer1",
+                **kwargs
             ),
-            _LayerPipe(
-                layers=[
-                    kr.layers.DepthwiseConv2D(
-                        kernel_size=kernel_size,
-                        stride=stride,
-                        depth_multiplier=expansion,
-                        name="{}x{}DepthwiseConv2D (stride {}, exp {})".format(
-                            kernel_size, kernel_size, stride, expansion
-                        ),
-                        padding="same",
-                    ),
-                    kr.layers.BatchNormalization(name="BatchNorm"),
-                ],
-                name="Layer2",
+            depthwise_conv2_bn(
+                kernel_size=kernel_size, stride=stride, multiplier=6, name="Layer2"
             ),
         ]
         n_left = 2
@@ -319,84 +578,49 @@ class _GatherExpansion(_LayerPipe):
         if stride == 2:
 
             left_branch_layers += [
-                _LayerPipe(
-                    layers=[
-                        kr.layers.DepthwiseConv2D(
-                            kernel_size=kernel_size,
-                            stride=1,
-                            depth_multiplier=expansion,
-                            name="{}x{}DepthwiseConv2D (stride {}, exp {})".format(
-                                kernel_size, kernel_size, 1, expansion
-                            ),
-                            padding="same",
-                        ),
-                        kr.layers.BatchNormalization(name="BatchNorm"),
-                    ],
-                    name="Layer3",
-                )
+                depthwise_conv2_bn(
+                    kernel_size=kernel_size, stride=stride, multiplier=6, name="Layer3"
+                ),
             ]
             n_left += 1
             right_branch_layers = [
-                _LayerPipe(
-                    layers=[
-                        kr.layers.DepthwiseConv2D(
-                            kernel_size=kernel_size,
-                            stride=stride,
-                            depth_multiplier=expansion,
-                            name="{}x{}DepthwiseConv2D (stride {}, exp {})".format(
-                                kernel_size, kernel_size, stride, expansion
-                            ),
-                            padding="same",
-                        ),
-                        kr.layers.BatchNormalization(name="BatchNorm"),
-                    ],
-                    name="Layer1",
+                depthwise_conv2_bn(
+                    kernel_size=kernel_size, stride=stride, multiplier=6, name="Layer1"
                 ),
-                _LayerPipe(
-                    layers=[
-                        kr.layers.Conv2D(
-                            kernel_size=1,
-                            stride=1,
-                            filters=channels,
-                            name="{}x{}Conv2D (stride {})".format(1, 1, 1),
-                            padding="same",
-                        ),
-                        kr.layers.BatchNormalization(name="BatchNorm"),
-                    ],
+                conv2d_bn_relu(
+                    kernel_size=1,
+                    output_channels=channels,
+                    stride=1,
                     name="Layer2",
+                    **kwargs
                 ),
             ]
         else:
 
-            right_branch_layers = [_Identity(name="Layer1 - Identity")]
+            right_branch_layers = [_Identity(name="Layer1-Identity")]
 
         left_branch_layers += [
-            _LayerPipe(
-                layers=[
-                    kr.layers.Conv2D(
-                        kernel_size=1,
-                        stride=1,
-                        filters=channels,
-                        name="{}x{}Conv2D (stride {})".format(1, 1, 1),
-                        padding="same",
-                    ),
-                    kr.layers.BatchNormalization(name="BatchNorm"),
-                ],
-                name="Layer{}".format(n_left + 1),
-            )
+            conv2d_bn_relu(
+                kernel_size=kernel_size,
+                output_channels=channels,
+                stride=1,
+                relu_activation=False,
+                name="Layer{}".format(n_left),
+                **kwargs
+            ),
         ]
 
         layers = [
             [
-                _LayerPipe(left_branch_layers, "Left Branch"),
-                _LayerPipe(right_branch_layers, "Right Branch"),
+                _LayerPipe(left_branch_layers, "LeftBranch"),
+                _LayerPipe(right_branch_layers, "RightBranch"),
             ],
             kr.layers.Add(name="Sum"),
-            kr.layersReLU(name="ReLU"),
+            kr.layers.ReLU(name="ReLU"),
         ]
 
         # initialization
-        super(_GatherExpansion, self).__init__(layers, name)
+        super(_GatherExpansion, self).__init__(layers, "GatherExpansionBlock")
 
 
 class _ContextEmbedding(_LayerPipe):
@@ -411,16 +635,15 @@ class _ContextEmbedding(_LayerPipe):
     channels: int
         the basic number of channels of each block.
 
-    name: str
-        the name of the layer
+    kwargs: any
+        additional parameters passed to the convolutional layers.
     """
 
-    def __init__(self, kernel_size, channels, name):
+    def __init__(self, kernel_size, channels, **kwargs):
 
         # check the entries
         assert isinstance(kernel_size, int), "'kernel_size' must be an int object."
         assert isinstance(channels, int), "'channels' must be an int object."
-        assert isinstance(name, str), "'name' must be an str object."
 
         # create the blocks
         layers = [
@@ -434,158 +657,33 @@ class _ContextEmbedding(_LayerPipe):
                             ],
                             name="Layer1",
                         ),
-                        _LayerPipe(
-                            layers=[
-                                kr.layers.Conv2D(
-                                    kernel_size=1,
-                                    stride=1,
-                                    filters=channels,
-                                    name="{}x{}Conv2D (stride {})".format(1, 1, 1),
-                                    padding="same",
-                                ),
-                                kr.layers.BatchNormalization(name="BatchNorm"),
-                                kr.layers.ReLU(name="ReLU"),
-                            ],
+                        conv2d_bn_relu(
+                            kernel_size=1,
+                            output_channels=channels,
+                            stride=1,
+                            relu_activation=False,
                             name="Layer2",
+                            **kwargs
                         ),
                     ],
-                    name="Left Branch",
+                    name="LeftBranch",
                 ),
-                _Identity(name="Right Branch - Layer1 - Identity"),
+                _Identity(name="RightBranch-Layer1-Identity"),
             ],
-            kr.layers.Add(name="Layer3 - Add"),
-            kr.layers.Conv2D(
+            kr.layers.Add(name="Layer3-Add"),
+            conv2d_bn_relu(
                 kernel_size=kernel_size,
+                output_channels=channels,
                 stride=1,
-                filters=channels,
-                name="Layer4 - {}x{}Conv2D (stride {})".format(
-                    kernel_size, kernel_size, 1
-                ),
-                padding="same",
+                relu_activation=False,
+                batch_normalization=False,
+                name="Layer4",
+                **kwargs
             ),
         ]
 
         # init
-        super(_ContextEmbedding, self).__init__(layers, name)
-
-
-class _DetailBranch(_LayerPipe):
-    """
-    generate the Detail Branch of the BiSeNet V2 by concatenating a set of convolutional blocks.
-
-    Parameters
-    ----------
-    kernel_size: list or tuple, optional
-        the size of the convolutional kernel for each level of the block.
-
-    channels: int
-        the basic number of channels of each block.
-
-    Notes
-    -----
-    All the passed parameters should be lists or tuple having len equal to the number of desired
-    convolutional layers to be included.
-    """
-
-    def __init__(self, kernel_size, channels):
-
-        # check the entries
-        assert isinstance(kernel_size, int), "'kernel_size' must be an int object."
-        assert isinstance(channels, int), "'channels' must be an int object."
-
-        # create the layers
-        layers = [
-            _LayerPipe(
-                layers=[
-                    kr.layers.Conv2D(
-                        kernel_size=kernel_size,
-                        stride=2,
-                        filters=channels,
-                        name="{}x{}Conv2D (stride {})".format(
-                            kernel_size, kernel_size, 2
-                        ),
-                        padding="same",
-                    ),
-                    kr.layers.Conv2D(
-                        kernel_size=kernel_size,
-                        stride=1,
-                        filters=channels,
-                        name="{}x{}Conv2D (stride {})".format(
-                            kernel_size, kernel_size, 1
-                        ),
-                        padding="same",
-                    ),
-                ],
-                name="Stage1",
-            ),
-            _LayerPipe(
-                layers=[
-                    kr.layers.Conv2D(
-                        kernel_size=kernel_size,
-                        stride=2,
-                        filters=channels,
-                        name="{}x{}Conv2D (stride {})".format(
-                            kernel_size, kernel_size, 2
-                        ),
-                        padding="same",
-                    ),
-                    kr.layers.Conv2D(
-                        kernel_size=kernel_size,
-                        stride=1,
-                        filters=channels,
-                        name="{}x{}Conv2D (stride {})".format(
-                            kernel_size, kernel_size, 1
-                        ),
-                        padding="same",
-                    ),
-                    kr.layers.Conv2D(
-                        kernel_size=kernel_size,
-                        stride=1,
-                        filters=channels,
-                        name="{}x{}Conv2D (stride {})".format(
-                            kernel_size, kernel_size, 1
-                        ),
-                        padding="same",
-                    ),
-                ],
-                name="Stage2",
-            ),
-            _LayerPipe(
-                layers=[
-                    kr.layers.Conv2D(
-                        kernel_size=kernel_size,
-                        stride=2,
-                        filters=channels * 2,
-                        name="{}x{}Conv2D (stride {})".format(
-                            kernel_size, kernel_size, 2
-                        ),
-                        padding="same",
-                    ),
-                    kr.layers.Conv2D(
-                        kernel_size=kernel_size,
-                        stride=1,
-                        filters=channels * 2,
-                        name="{}x{}Conv2D (stride {})".format(
-                            kernel_size, kernel_size, 1
-                        ),
-                        padding="same",
-                    ),
-                    kr.layers.Conv2D(
-                        kernel_size=kernel_size,
-                        stride=1,
-                        filters=channels * 2,
-                        name="{}x{}Conv2D (stride {})".format(
-                            kernel_size, kernel_size, 1
-                        ),
-                        padding="same",
-                    ),
-                ],
-                name="Stage3",
-            ),
-        ]
-
-        # init
-        super(_DetailBranch, self).__init__(layers, "Detail Branch")
+        super(_ContextEmbedding, self).__init__(layers, "ContextEmbedding")
 
 
 class _SemanticBranch(_LayerPipe):
@@ -600,52 +698,55 @@ class _SemanticBranch(_LayerPipe):
     channels: int
         the basic number of channels of each block.
 
-    Notes
-    -----
-    All the passed parameters should be lists or tuple having len equal to the number of desired
-    convolutional layers to be included.
+    kwargs: any
+        additional parameters passed to the convolutional layers.
     """
 
-    def __init__(self, kernel_size, channels):
+    def __init__(self, kernel_size, channels, **kwargs):
 
         # check the entries
-        assert isinstance(kernel_size, int), "'kernel_size' must be an int object."
-        assert isinstance(channels, int), "'channels' must be an int object."
+        txt = lambda x, c: "{} must be and object of class {}.".format(x, c)
+        assert isinstance(kernel_size, int), txt("kernel_size", int)
+        assert isinstance(channels, int), txt("channels", int)
 
         # create the blocks
         layers = [
-            _Stem(kernel_size, int(channels / 4), "Stage 1&2 - Stem"),
+            _LayerPipe(
+                layers=[_Stem(kernel_size, int(channels / 4), **kwargs)],
+                name="Stages1-2",
+            ),
             _LayerPipe(
                 layers=[
-                    _GatherExpansion(kernel_size, int(channels / 2), 2, 6, "GE1"),
-                    _GatherExpansion(kernel_size, int(channels / 2), 1, 6, "GE2"),
+                    _GatherExpansion(kernel_size, int(channels / 2), 2),
+                    _GatherExpansion(kernel_size, int(channels / 2), 1),
                 ],
                 name="Stage3",
             ),
             _LayerPipe(
                 layers=[
-                    _GatherExpansion(kernel_size, channels, 2, 6, "GE3"),
-                    _GatherExpansion(kernel_size, channels, 1, 6, "GE4"),
+                    _GatherExpansion(kernel_size, channels, 2),
+                    _GatherExpansion(kernel_size, channels, 1),
                 ],
                 name="Stage4",
             ),
             _LayerPipe(
                 layers=[
-                    _GatherExpansion(kernel_size, channels * 2, 2, 6, "GE5"),
-                    _GatherExpansion(kernel_size, channels * 2, 1, 6, "GE6"),
-                    _ContextEmbedding(kernel_size, channels, "CE"),
+                    _GatherExpansion(kernel_size, channels * 2, 2),
+                    _GatherExpansion(kernel_size, channels * 2, 1),
+                    _ContextEmbedding(kernel_size, channels * 2),
                 ],
                 name="Stage5",
             ),
         ]
 
         # initialize
-        super(_SemanticBranch, self).__init__(layers, "Semantic branch")
+        super(_SemanticBranch, self).__init__(layers, "SemanticBranch")
 
 
 class _BilateralGuidedAggregation(_LayerPipe):
     """
-    generate the Semantic Branch of the BiSeNet V2 by concatenating a set of convolutional blocks.
+    generate the Aggregation Branch allowing to join together the Detail and Semantic branches from which
+    the BiSeNet V2 started.
 
     Parameters
     ----------
@@ -654,11 +755,6 @@ class _BilateralGuidedAggregation(_LayerPipe):
 
     channels: int
         the basic number of channels of each block.
-
-    Notes
-    -----
-    All the passed parameters should be lists or tuple having len equal to the number of desired
-    convolutional layers to be included.
     """
 
     def __init__(self, kernel_size, channels):
@@ -671,132 +767,218 @@ class _BilateralGuidedAggregation(_LayerPipe):
         layers = [
             [
                 _LayerPipe(
-                    name="Left Branch",
+                    name="LeftBranch",
                     share_inputs=False,
                     layers=[
                         [  # Detail part
-                            kr.layers.DepthwiseConv2D(
+                            depthwise_conv2_bn(
                                 kernel_size=kernel_size,
                                 stride=1,
-                                depth_multiplier=1,
-                                name="{}x{}DepthwiseConv2D (stride {}, exp {})".format(
-                                    kernel_size, kernel_size, 1, 1
-                                ),
-                                padding="same",
+                                multiplier=1,
+                                name="Layer1",
                             ),
-                            kr.layers.BatchNormalization(name="BatchNorm"),
-                            kr.layers.DepthwiseConv2D(
+                            conv2d(
                                 kernel_size=1,
                                 stride=1,
-                                filters=channels,
-                                name="{}x{}Conv2D (stride {})".format(1, 1, 1),
-                                padding="same",
+                                output_channels=channels,
+                                name="Layer2",
                             ),
                         ],
                         [  # Semantic part
-                            kr.layers.Conv2D(
+                            conv2d_bn_relu(
                                 kernel_size=kernel_size,
                                 stride=1,
-                                filters=channels,
-                                name="{}x{}Conv2D (stride {})".format(
-                                    kernel_size, kernel_size, 1
-                                ),
-                                padding="same",
+                                output_channels=channels,
+                                relu_activation=False,
+                                name="Layer1",
                             ),
-                            kr.layers.BatchNormalization(name="BatchNorm"),
-                            kr.layers.UpSampling2D(
-                                size=4, interpolation="bilinear", name="4xUpsampling"
-                            ),
-                            kr.layers.Activation(
-                                kr.activations.sigmoid, name="Sigmoid"
+                            _LayerPipe(
+                                layers=[
+                                    kr.layers.UpSampling2D(
+                                        size=4,
+                                        interpolation="bilinear",
+                                        name="4x Upsampling",
+                                    ),
+                                    kr.layers.Activation(
+                                        kr.activations.sigmoid, name="Sigmoid"
+                                    ),
+                                ],
+                                name="Layer2",
                             ),
                         ],
-                        kr.layers.Multiply(name="Multiplication"),
+                        kr.layers.Multiply(name="Layer3-LeftBranch-Multiply"),
                     ],
                 ),
                 _LayerPipe(
-                    name="Right Branch",
+                    name="RightBranch",
                     share_inputs=False,
                     layers=[
                         [  # detail part
-                            kr.layers.Conv2D(
+                            conv2d_bn_relu(
                                 kernel_size=kernel_size,
                                 stride=2,
-                                filters=channels,
-                                name="{}x{}Conv2D (stride {})".format(
-                                    kernel_size, kernel_size, 1
-                                ),
-                                padding="same",
+                                output_channels=channels,
+                                relu_activation=False,
+                                name="Layer1",
                             ),
-                            kr.layers.BatchNormalization(name="BatchNorm"),
                             kr.layers.GlobalAvgPool2D(
-                                kernel_size=2, stride=2, name="GAPool"
+                                kernel_size=kernel_size, stride=2
                             ),
                         ],
                         [  # semantic part
-                            kr.layers.Conv2D(
+                            depthwise_conv2_bn(
                                 kernel_size=kernel_size,
                                 stride=1,
-                                filters=channels,
-                                name="{}x{}Conv2D (stride {})".format(
-                                    kernel_size, kernel_size, 1
-                                ),
-                                padding="same",
+                                multiplier=1,
+                                name="Layer1",
                             ),
-                            kr.layers.BatchNormalization(name="BatchNorm"),
-                            kr.layers.UpSampling2D(
-                                size=4, interpolation="bilinear", name="4xUpsampling"
-                            ),
-                            kr.layers.Activation(
-                                kr.activations.sigmoid, name="Sigmoid"
+                            _LayerPipe(
+                                layers=[
+                                    conv2d(
+                                        kernel_size=1,
+                                        stride=1,
+                                        output_channels=channels,
+                                    ),
+                                    kr.layers.Activation(kr.activations.sigmoid),
+                                ],
+                                name="Layer2",
                             ),
                         ],
-                        kr.layers.Multiply(name="Multiplication"),
+                        kr.layers.Multiply(name="Layer3-RightBranch-Multiply"),
                     ],
                 ),
             ],
-            kr.layers.Add(name="Sum"),
-            kr.layers.Conv2D(
+            kr.layers.Add(name="Layer4-Sum"),
+            conv2d_bn_relu(
                 kernel_size=kernel_size,
                 stride=1,
-                filters=channels,
-                name="{}x{}Conv2D (stride {})".format(kernel_size, kernel_size, 1),
-                padding="same",
+                output_channels=channels,
+                relu_activation=False,
+                name="Layer5",
             ),
-            kr.layers.BatchNormalization(name="BatchNorm"),
         ]
 
         # initialize
         super(_BilateralGuidedAggregation, self).__init__(layers, "Guided Aggregation")
 
 
+class _SegmentationHead(_LayerPipe):
+    """
+    generate the Aggregation Branch allowing to join together the Detail and Semantic branches from which
+    the BiSeNet V2 started.
+
+    Parameters
+    ----------
+    kernel_size: list or tuple, optional
+        the size of the convolutional kernel for each level of the block.
+
+    channels: int
+        the basic number of channels of each block.
+
+    upsampling_rate: int
+        decide how much the output image should be expanded/contracted to fit the output image.
+
+    output_channels: int
+        the number of output channels for the image.
+
+    kwargs: any
+        Additional parameters passed to the convolutional layers.
+    """
+
+    def __init__(self, kernel_size, channels, upsampling_rate, output_channels):
+
+        # check the entries
+        assert isinstance(kernel_size, int), "'kernel_size' must be an int object."
+        assert isinstance(channels, int), "'channels' must be an int object."
+        assert isinstance(
+            upsampling_rate, int
+        ), "'upsampling_rate' must be an int object."
+        assert isinstance(
+            output_channels, int
+        ), "'output_channels' must be an int object."
+
+        # get the upsampling factor
+
+        # make the branches
+        layers = [
+            conv2d_bn_relu(
+                kernel_size=kernel_size,
+                output_channels=channels,
+                stride=1,
+                name="Layer1",
+            ),
+            _LayerPipe(
+                layers=[
+                    conv2d(
+                        kernel_size=1,
+                        output_channels=output_channels,
+                        stride=1,
+                    ),
+                    kr.layers.UpSampling2D(
+                        size=upsampling_rate,
+                        interpolation="bilinear",
+                        name="{}x Upsampling".format(upsampling_rate),
+                    ),
+                ],
+                name="Layer2",
+            ),
+        ]
+
+        # initialize
+        super(_SegmentationHead, self).__init__(layers, "Segmentation Head")
+
+
 class BiSeNet2(kr.Model):
-    def __init__(self, kernel_size=3, **kwargs):
-        """
-        generate a BiSeNet (V2) model.
+    """
+    generate a BiSeNet (V2) model.
 
-        Parameters
-        ----------
+    Parameters
+    ----------
 
-        kernel_size: list or tuple, optional
-            the size of the convolutional kernel for each level of the block.
+    kernel_size: int
+        the size of the convolutional kernel for each level of the block.
 
-        kwargs: any
-            additional parameters to be passed to the convolutional layers.
+    channels: int
+        the default number of channels (i.e. convolutional filters).
 
-        Returns
-        -------
-        block: Keras.Model
-            the BiSeNet2 model.
+    semantic_ratio: float
+        the amount of channels to be used for the stem block initializing the semantic branch.
 
-        Notes
-        -----
-        As described in the paper, the kernel size is kept constant across all the blocks and stages.
-        """
+        This value must lie in the (0, 1] range (default is 0.25).
 
-        self._kernel_size = kernel_size
+    width_factor: int
+        determine how much the number of channels should be expanded at each addition of hidden layers.
+
+    depth_factor: int
+        determine how many hidden layers should be provided in the detail and segmentation branches.
+
+        Minimum number of layers is 3.
+
+    expansion_factor: int
+        this parameter controls the representative ability of the Semantic branch.
+
+    Returns
+    -------
+    block: Keras.Model
+        the BiSeNet2 model.
+    """
+
+    def __init__(self, input_shape, kernel_size=3, channels=64):
+
+        # check the entries
+        txt = lambda x, c: "{} must be and object of class {}.".format(x, c)
+        assert isinstance(kernel_size, int), txt("kernel_size", int)
+        assert isinstance(channels, int), txt("channels", int)
+        assert isinstance(input_shape, (tuple, list)), txt("input_shape", (tuple, list))
+        assert len(input_shape) == 3, "'input_shape' must have len = 3."
+        assert all([isinstance(i, int) for i in input_shape]), txt(
+            "input_shape elements", int
+        )
 
         # build the model
-        x = kr.layers.Input(name="Input")  # input
-        detail_block = _DetailBranch(self._kernel_size)(x)  # detail block
-        semantic_block = _SemanticBranch(self._kernel_size)(x)  # semanting block
+        x = kr.layers.Input(name="Input", shape=input_shape)
+        db = _DetailBranch(kernel_size, channels)(x)
+        sb = _SemanticBranch(kernel_size, channels)(x)
+        ba = _BilateralGuidedAggregation(kernel_size, channels)((db, sb))
+        y = _SegmentationHead(kernel_size, channels, 8, 1)(ba)
+        check = 1
