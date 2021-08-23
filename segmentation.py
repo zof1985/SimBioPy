@@ -142,8 +142,10 @@ def conv2d_bn_relu(
             **kwargs
         )
     ]
+
     if batch_normalization:
         layers += [kr.layers.BatchNormalization(name="BatchNorm")]
+
     if relu_activation:
         layers += [kr.layers.ReLU(name="ReLU")]
 
@@ -210,6 +212,7 @@ def depthwise_conv2_bn(
         name = "{}x{}x{}x{}DepthwiseConv2D)"
         name = name.format(kernel_size[0], kernel_size[1], multiplier, stride)
 
+    # return the pipe
     return _LayerPipe(
         layers=[
             kr.layers.DepthwiseConv2D(
@@ -244,10 +247,6 @@ class _Identity(kr.layers.Layer):
         assert isinstance(name, str), "'name' must be a str."
         super(_Identity, self).__init__(name=name)
 
-    def build(self, input_shape):  # Create the state of the layer (weights)
-        w_init = tf.ones_initializer()
-        self.w = tf.Variable(initial_value=w_init(shape=input_shape), trainable=False)
-
     def call(self, inputs):
         """
         handle a call to the class object and return the concatenated layers.
@@ -262,7 +261,8 @@ class _Identity(kr.layers.Layer):
         block: Keras.layers.Layer
             passed layer.
         """
-        return tf.matmul(inputs, self.w)
+        val = tf.multiply(inputs, 0.5)
+        return kr.layers.Add(name=self._name)([val, val])
 
     @property
     def trainable(self):
@@ -342,7 +342,7 @@ class _LayerPipe(object):
         # add the sharing options
         self.share_inputs = share_inputs
 
-    def __call__(self, inputs):
+    def __call__(self, inputs, training=False):
         """
         handle a call to the class object and return the concatenated layers.
 
@@ -350,6 +350,9 @@ class _LayerPipe(object):
         ----------
         inputs: kr.layers.Layer or list or tuple
             the Keras layer to be used as input.
+
+        training: bool
+            is the call due to a training purpose or a prediction purpose?
 
         Returns
         -------
@@ -378,20 +381,20 @@ class _LayerPipe(object):
             x = inputs
 
         # resolve the pipe
-        def recaller(obj, arg, share_args=False):
+        def recaller(obj, arg, share_args=False, training=False):
             """
             recursive function to allow the call of nested layers.
             """
             if isinstance(obj, (list, tuple)):
                 if share_args:
-                    return [recaller(e, arg, share_args) for e in obj]
+                    return [recaller(e, arg, share_args, training) for e in obj]
                 else:
-                    return [recaller(e, a) for e, a in zip(obj, arg)]
+                    return [recaller(e, a, False, training) for e, a in zip(obj, arg)]
 
             elif isinstance(obj, _LayerPipe):
                 x = arg
                 for level in obj.layers:
-                    x = recaller(level, x, share_args)
+                    x = recaller(level, x, share_args, training)
                 return x
 
             else:
@@ -400,9 +403,9 @@ class _LayerPipe(object):
         # iterate over the layers
         for i, layer in enumerate(self.layers):
             if i == 0:
-                x = recaller(layer, x, self.share_inputs)
+                x = recaller(layer, x, self.share_inputs, training)
             else:
-                x = recaller(layer, x, True)
+                x = recaller(layer, x, True, training)
         return x
 
 
@@ -579,7 +582,7 @@ class _GatherExpansion(_LayerPipe):
 
             left_branch_layers += [
                 depthwise_conv2_bn(
-                    kernel_size=kernel_size, stride=stride, multiplier=6, name="Layer3"
+                    kernel_size=kernel_size, stride=1, multiplier=6, name="Layer3"
                 ),
             ]
             n_left += 1
@@ -639,20 +642,31 @@ class _ContextEmbedding(_LayerPipe):
         additional parameters passed to the convolutional layers.
     """
 
-    def __init__(self, kernel_size, channels, **kwargs):
+    def __init__(self, kernel_size, channels, input_shape, **kwargs):
 
         # check the entries
         assert isinstance(kernel_size, int), "'kernel_size' must be an int object."
         assert isinstance(channels, int), "'channels' must be an int object."
+        txt = "'input_shape' must be a list or tuple."
+        assert isinstance(input_shape, (tuple, list)), txt
+        assert len(input_shape) == 2, "'input_shape' must have len=2."
+        txt = "'input_shape' elements must be int."
+        assert all([isinstance(i, (int)) for i in input_shape]), txt
 
         # create the blocks
         layers = [
             [
+                _Identity(name="RightBranch-Layer1-Identity"),
                 _LayerPipe(
                     layers=[
                         _LayerPipe(
                             layers=[
-                                kr.layers.GlobalAvgPool2D(name="GAPool"),
+                                kr.layers.Lambda(
+                                    lambda t4d: tf.math.reduce_mean(
+                                        t4d, axis=(1, 2), keepdims=True
+                                    ),
+                                    name="GlobalAveragePooling2D",
+                                ),
                                 kr.layers.BatchNormalization(name="BatchNorm"),
                             ],
                             name="Layer1",
@@ -668,7 +682,6 @@ class _ContextEmbedding(_LayerPipe):
                     ],
                     name="LeftBranch",
                 ),
-                _Identity(name="RightBranch-Layer1-Identity"),
             ],
             kr.layers.Add(name="Layer3-Add"),
             conv2d_bn_relu(
@@ -702,7 +715,7 @@ class _SemanticBranch(_LayerPipe):
         additional parameters passed to the convolutional layers.
     """
 
-    def __init__(self, kernel_size, channels, **kwargs):
+    def __init__(self, kernel_size, channels, input_shape, **kwargs):
 
         # check the entries
         txt = lambda x, c: "{} must be and object of class {}.".format(x, c)
@@ -710,6 +723,7 @@ class _SemanticBranch(_LayerPipe):
         assert isinstance(channels, int), txt("channels", int)
 
         # create the blocks
+        context_shape = [int(round(i / 32)) for i in input_shape]
         layers = [
             _LayerPipe(
                 layers=[_Stem(kernel_size, int(channels / 4), **kwargs)],
@@ -733,7 +747,7 @@ class _SemanticBranch(_LayerPipe):
                 layers=[
                     _GatherExpansion(kernel_size, channels * 2, 2),
                     _GatherExpansion(kernel_size, channels * 2, 1),
-                    _ContextEmbedding(kernel_size, channels * 2),
+                    _ContextEmbedding(kernel_size, channels * 2, context_shape),
                 ],
                 name="Stage5",
             ),
@@ -770,40 +784,48 @@ class _BilateralGuidedAggregation(_LayerPipe):
                     name="LeftBranch",
                     share_inputs=False,
                     layers=[
-                        [  # Detail part
-                            depthwise_conv2_bn(
-                                kernel_size=kernel_size,
-                                stride=1,
-                                multiplier=1,
-                                name="Layer1",
-                            ),
-                            conv2d(
-                                kernel_size=1,
-                                stride=1,
-                                output_channels=channels,
-                                name="Layer2",
-                            ),
-                        ],
-                        [  # Semantic part
-                            conv2d_bn_relu(
-                                kernel_size=kernel_size,
-                                stride=1,
-                                output_channels=channels,
-                                relu_activation=False,
-                                name="Layer1",
-                            ),
+                        [
                             _LayerPipe(
+                                name="DetailInput",
                                 layers=[
-                                    kr.layers.UpSampling2D(
-                                        size=4,
-                                        interpolation="bilinear",
-                                        name="4x Upsampling",
+                                    depthwise_conv2_bn(
+                                        kernel_size=kernel_size,
+                                        stride=1,
+                                        multiplier=1,
+                                        name="Layer1",
                                     ),
-                                    kr.layers.Activation(
-                                        kr.activations.sigmoid, name="Sigmoid"
+                                    conv2d(
+                                        kernel_size=1,
+                                        stride=1,
+                                        output_channels=channels,
+                                        name="Layer2",
                                     ),
                                 ],
-                                name="Layer2",
+                            ),
+                            _LayerPipe(
+                                name="SemanticInput",
+                                layers=[
+                                    conv2d_bn_relu(
+                                        kernel_size=kernel_size,
+                                        stride=1,
+                                        output_channels=channels,
+                                        relu_activation=False,
+                                        name="Layer1",
+                                    ),
+                                    _LayerPipe(
+                                        layers=[
+                                            kr.layers.UpSampling2D(
+                                                size=4,
+                                                interpolation="bilinear",
+                                                name="4xUpsampling",
+                                            ),
+                                            kr.layers.Activation(
+                                                kr.activations.sigmoid, name="Sigmoid"
+                                            ),
+                                        ],
+                                        name="Layer2",
+                                    ),
+                                ],
                             ),
                         ],
                         kr.layers.Multiply(name="Layer3-LeftBranch-Multiply"),
@@ -813,38 +835,55 @@ class _BilateralGuidedAggregation(_LayerPipe):
                     name="RightBranch",
                     share_inputs=False,
                     layers=[
-                        [  # detail part
-                            conv2d_bn_relu(
-                                kernel_size=kernel_size,
-                                stride=2,
-                                output_channels=channels,
-                                relu_activation=False,
-                                name="Layer1",
-                            ),
-                            kr.layers.GlobalAvgPool2D(
-                                kernel_size=kernel_size, stride=2
-                            ),
-                        ],
-                        [  # semantic part
-                            depthwise_conv2_bn(
-                                kernel_size=kernel_size,
-                                stride=1,
-                                multiplier=1,
-                                name="Layer1",
+                        [
+                            _LayerPipe(
+                                name="DetailInput",
+                                layers=[
+                                    conv2d_bn_relu(
+                                        kernel_size=kernel_size,
+                                        stride=2,
+                                        output_channels=channels,
+                                        relu_activation=False,
+                                        name="Layer1",
+                                    ),
+                                    kr.layers.AveragePooling2D(
+                                        pool_size=kernel_size,
+                                        strides=2,
+                                        padding="same",
+                                    ),
+                                ],
                             ),
                             _LayerPipe(
+                                name="SemanticInput",
                                 layers=[
-                                    conv2d(
-                                        kernel_size=1,
+                                    depthwise_conv2_bn(
+                                        kernel_size=kernel_size,
                                         stride=1,
-                                        output_channels=channels,
+                                        multiplier=1,
+                                        name="Layer1",
                                     ),
-                                    kr.layers.Activation(kr.activations.sigmoid),
+                                    _LayerPipe(
+                                        layers=[
+                                            conv2d(
+                                                kernel_size=1,
+                                                stride=1,
+                                                output_channels=channels,
+                                            ),
+                                            kr.layers.Activation(
+                                                kr.activations.sigmoid
+                                            ),
+                                        ],
+                                        name="Layer2",
+                                    ),
                                 ],
-                                name="Layer2",
                             ),
                         ],
                         kr.layers.Multiply(name="Layer3-RightBranch-Multiply"),
+                        kr.layers.UpSampling2D(
+                            size=4,
+                            interpolation="bilinear",
+                            name="4xUpsampling",
+                        ),
                     ],
                 ),
             ],
@@ -859,7 +898,9 @@ class _BilateralGuidedAggregation(_LayerPipe):
         ]
 
         # initialize
-        super(_BilateralGuidedAggregation, self).__init__(layers, "Guided Aggregation")
+        super(_BilateralGuidedAggregation, self).__init__(
+            layers, "Guided Aggregation", False
+        )
 
 
 class _SegmentationHead(_LayerPipe):
@@ -888,14 +929,11 @@ class _SegmentationHead(_LayerPipe):
     def __init__(self, kernel_size, channels, upsampling_rate, output_channels):
 
         # check the entries
-        assert isinstance(kernel_size, int), "'kernel_size' must be an int object."
-        assert isinstance(channels, int), "'channels' must be an int object."
-        assert isinstance(
-            upsampling_rate, int
-        ), "'upsampling_rate' must be an int object."
-        assert isinstance(
-            output_channels, int
-        ), "'output_channels' must be an int object."
+        txt = lambda x, y: "'{}' must be an {} object.".format(x, y)
+        assert isinstance(kernel_size, int), txt("kernel_size", int)
+        assert isinstance(channels, int), txt("channels", int)
+        assert isinstance(upsampling_rate, int), txt("upsampling_rate", int)
+        assert isinstance(output_channels, int), txt("output_channels", int)
 
         # get the upsampling factor
 
@@ -917,7 +955,7 @@ class _SegmentationHead(_LayerPipe):
                     kr.layers.UpSampling2D(
                         size=upsampling_rate,
                         interpolation="bilinear",
-                        name="{}x Upsampling".format(upsampling_rate),
+                        name="{}xUpsampling".format(upsampling_rate),
                     ),
                 ],
                 name="Layer2",
@@ -941,22 +979,6 @@ class BiSeNet2(kr.Model):
     channels: int
         the default number of channels (i.e. convolutional filters).
 
-    semantic_ratio: float
-        the amount of channels to be used for the stem block initializing the semantic branch.
-
-        This value must lie in the (0, 1] range (default is 0.25).
-
-    width_factor: int
-        determine how much the number of channels should be expanded at each addition of hidden layers.
-
-    depth_factor: int
-        determine how many hidden layers should be provided in the detail and segmentation branches.
-
-        Minimum number of layers is 3.
-
-    expansion_factor: int
-        this parameter controls the representative ability of the Semantic branch.
-
     Returns
     -------
     block: Keras.Model
@@ -966,19 +988,80 @@ class BiSeNet2(kr.Model):
     def __init__(self, input_shape, kernel_size=3, channels=64):
 
         # check the entries
-        txt = lambda x, c: "{} must be and object of class {}.".format(x, c)
-        assert isinstance(kernel_size, int), txt("kernel_size", int)
-        assert isinstance(channels, int), txt("channels", int)
-        assert isinstance(input_shape, (tuple, list)), txt("input_shape", (tuple, list))
-        assert len(input_shape) == 3, "'input_shape' must have len = 3."
-        assert all([isinstance(i, int) for i in input_shape]), txt(
-            "input_shape elements", int
+        assert isinstance(kernel_size, int), self._message("kernel_size", int)
+        assert isinstance(channels, int), self._message("channels", int)
+        assert isinstance(input_shape, (tuple, list)), self._message(
+            "input_shape", (tuple, list)
         )
+        assert len(input_shape) == 3, "'input_shape' must have len = 3."
+        for i in input_shape:
+            assert isinstance(i, int), self._message("input_shape elements", int)
+        for i in input_shape[:-1]:
+            assert self._is_pow_of(i, 2), "input shape dimensions must be a power of 2."
 
         # build the model
-        x = kr.layers.Input(name="Input", shape=input_shape)
-        db = _DetailBranch(kernel_size, channels)(x)
-        sb = _SemanticBranch(kernel_size, channels)(x)
-        ba = _BilateralGuidedAggregation(kernel_size, channels)((db, sb))
-        y = _SegmentationHead(kernel_size, channels, 8, 1)(ba)
-        check = 1
+        super(kr.models.Model, self).__init__(name="BiSeNet2")
+        self._channels = channels
+        self._kernel_size = kernel_size
+        self._expected_input_shape = input_shape
+        self._detail_branch = _DetailBranch(
+            kernel_size=self._kernel_size, channels=self._channels
+        )
+        self._semantic_branch = _SemanticBranch(
+            kernel_size=self._kernel_size,
+            channels=self._channels,
+            input_shape=self._expected_input_shape[:-1],
+        )
+        self._bilateral_aggregation = _BilateralGuidedAggregation(
+            kernel_size=self._kernel_size, channels=self._channels
+        )
+        self._segmentation_head = _SegmentationHead(
+            kernel_size=self._kernel_size,
+            channels=self._channels,
+            upsampling_rate=8,
+            output_channels=self._expected_input_shape[-1],
+        )
+
+    def call(self, inputs, training=False):
+
+        # check the entries
+        for i in inputs.shape[:-1]:
+            assert self._is_pow_of(i, 2), "input shape dimensions must be a power of 2."
+        assert isinstance(training, bool), self._message("training", bool)
+
+        # build the model
+        db = self._detail_branch(inputs, training)
+        sb = self._semantic_branch(inputs, training)
+        ba = self._BilateralGuidedAggregation(((db, sb), (db, sb)), training)
+        return self._SegmentationHead(ba, training)
+
+    def _message(self, who, what):
+        """
+        return an error message.
+        """
+        return "{} must be and object of class {}.".format(who, what)
+
+    def _is_pow_of(self, x, p):
+        """
+        check if x is a power of p.
+
+        Parameters
+        ----------
+        x: int, float
+            the number to test
+
+        p: int, float
+            the power to check.
+
+        Returns
+        -------
+        check: bool
+            True if x is a power of p, False otherwise.
+        """
+        assert isinstance(x, (int, float)), self._message("x", (int, float))
+        assert isinstance(p, (int, float)), self._message("p", (int, float))
+        assert x > 0, "'x' must be > 0."
+        n = 0
+        while p ** n < x:
+            n += 1
+        return p ** n == x
