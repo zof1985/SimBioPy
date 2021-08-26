@@ -7,6 +7,102 @@ import tensorflow as tf
 # METHODS
 
 
+def bisenet2(input_shape, kernel_size=3, channels=64):
+    """
+    generate a BiSeNet (V2) model.
+
+    Parameters
+    ----------
+
+    kernel_size: int
+        the size of the convolutional kernel for each level of the block.
+
+    channels: int
+        the default number of channels (i.e. convolutional filters).
+
+    Returns
+    -------
+    block: Keras.Model
+        the BiSeNet2 model.
+    """
+
+    def _message(who, what, cls):
+        """
+        return an error message.
+        """
+        txt = "{} must be and object of class {}, while if was found to be {}."
+        return txt.format(who, what, cls)
+
+    def _is_pow_of(x, p):
+        """
+        check if x is a power of p.
+
+        Parameters
+        ----------
+        x: int, float
+            the number to test
+
+        p: int, float
+            the power to check.
+
+        Returns
+        -------
+        check: bool
+            True if x is a power of p, False otherwise.
+        """
+        assert isinstance(x, (int, float)), _message("x", (int, float), x.__class__)
+        assert isinstance(p, (int, float)), _message("p", (int, float), p.__class__)
+        assert x > 0, "'x' must be > 0."
+        n = 0
+        while p ** n < x:
+            n += 1
+        return p ** n == x
+
+    # check the entries
+    assert isinstance(kernel_size, int), _message(
+        "kernel_size", int, kernel_size.__class__.__name__
+    )
+    assert isinstance(channels, int), _message(
+        "channels", int, channels.__class__.__name__
+    )
+    assert isinstance(input_shape, (tuple, list)), _message(
+        "input_shape", (tuple, list), input_shape.__class__.__name__
+    )
+    assert len(input_shape) == 3, "'input_shape' must have len = 3."
+    for i in input_shape:
+        assert isinstance(i, int), _message(
+            "input_shape elements", int, i.__class__.__name__
+        )
+    for i in input_shape[:-1]:
+        assert _is_pow_of(i, 2), "input shape dimensions must be a power of 2."
+
+    # build the model
+    x = kr.layers.Input(input_shape)
+    db = DetailBranch(
+        kernel_size=kernel_size,
+        channels=channels,
+    )
+    sb = SemanticBranch(
+        kernel_size=kernel_size,
+        channels=channels,
+        input_shape=input_shape[:-1],
+    )
+    ba = BilateralGuidedAggregation(
+        kernel_size=kernel_size,
+        channels=channels,
+    )
+    sh = SegmentationHead(
+        kernel_size=kernel_size,
+        channels=channels,
+        upsampling_rate=8,
+        output_channels=input_shape[-1],
+    )
+    dbx = db(x)
+    sbx = sb(x)
+    y = sh(ba(((dbx, sbx), (dbx, sbx))))
+    return kr.models.Model(inputs=x, outputs=y)
+
+
 def conv2d(
     kernel_size=3,
     output_channels=64,
@@ -409,7 +505,7 @@ class _LayerPipe(object):
         return x
 
 
-class _DetailBranch(_LayerPipe):
+class DetailBranch(_LayerPipe):
     """
     generate the Detail Branch of the BiSeNet V2 by concatenating a set of convolutional blocks.
 
@@ -436,31 +532,31 @@ class _DetailBranch(_LayerPipe):
         layers = [
             _LayerPipe(
                 layers=[
-                    conv2d(kernel_size, channels, 2, **kwargs),
-                    conv2d(kernel_size, channels, 1, **kwargs),
+                    conv2d(kernel_size, channels, 2, name="lvl1", **kwargs),
+                    conv2d(kernel_size, channels, 1, name="lvl2", **kwargs),
                 ],
                 name="Stage1",
             ),
             _LayerPipe(
                 layers=[
-                    conv2d(kernel_size, channels, 2, **kwargs),
-                    conv2d(kernel_size, channels, 1, **kwargs),
-                    conv2d(kernel_size, channels, 1, **kwargs),
+                    conv2d(kernel_size, channels, 2, name="lvl1", **kwargs),
+                    conv2d(kernel_size, channels, 1, name="lvl2", **kwargs),
+                    conv2d(kernel_size, channels, 1, name="lvl3", **kwargs),
                 ],
                 name="Stage2",
             ),
             _LayerPipe(
                 layers=[
-                    conv2d(kernel_size, channels * 2, 2, **kwargs),
-                    conv2d(kernel_size, channels * 2, 1, **kwargs),
-                    conv2d(kernel_size, channels * 2, 1, **kwargs),
+                    conv2d(kernel_size, channels * 2, 2, name="lvl1", **kwargs),
+                    conv2d(kernel_size, channels * 2, 1, name="lvl2", **kwargs),
+                    conv2d(kernel_size, channels * 2, 1, name="lvl3", **kwargs),
                 ],
                 name="Stage3",
             ),
         ]
 
         # init
-        super(_DetailBranch, self).__init__(layers, "Detail Branch")
+        super(DetailBranch, self).__init__(layers, "Detail Branch")
 
 
 class _Stem(_LayerPipe):
@@ -561,6 +657,11 @@ class _GatherExpansion(_LayerPipe):
         assert isinstance(channels, int), "'channels' must be an int object."
         assert isinstance(stride, int), "'stride' must be an int object."
         assert stride in [1, 2], "'stride' can be only 1 or 2."
+        if any([i == "name" for i in kwargs]):
+            name = kwargs["name"]
+            kwargs.pop("name")
+        else:
+            name = ""
 
         # here the layers are put in lists indicating how to
         # process them by the __call__ method.
@@ -569,11 +670,14 @@ class _GatherExpansion(_LayerPipe):
                 kernel_size=kernel_size,
                 output_channels=channels,
                 stride=1,
-                name="Layer1",
+                name="Layer1" if name == "" else "{}-Layer1".format(name),
                 **kwargs
             ),
             depthwise_conv2_bn(
-                kernel_size=kernel_size, stride=stride, multiplier=6, name="Layer2"
+                kernel_size=kernel_size,
+                stride=stride,
+                multiplier=6,
+                name="Layer2" if name == "" else "{}-Layer2".format(name),
             ),
         ]
         n_left = 2
@@ -582,19 +686,25 @@ class _GatherExpansion(_LayerPipe):
 
             left_branch_layers += [
                 depthwise_conv2_bn(
-                    kernel_size=kernel_size, stride=1, multiplier=6, name="Layer3"
+                    kernel_size=kernel_size,
+                    stride=1,
+                    multiplier=6,
+                    name="Layer3" if name == "" else "{}-Layer3".format(name),
                 ),
             ]
             n_left += 1
             right_branch_layers = [
                 depthwise_conv2_bn(
-                    kernel_size=kernel_size, stride=stride, multiplier=6, name="Layer1"
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    multiplier=6,
+                    name="Layer1" if name == "" else "{}-Layer1".format(name),
                 ),
                 conv2d_bn_relu(
                     kernel_size=1,
                     output_channels=channels,
                     stride=1,
-                    name="Layer2",
+                    name="Layer2" if name == "" else "{}-Layer2".format(name),
                     **kwargs
                 ),
             ]
@@ -618,8 +728,8 @@ class _GatherExpansion(_LayerPipe):
                 _LayerPipe(left_branch_layers, "LeftBranch"),
                 _LayerPipe(right_branch_layers, "RightBranch"),
             ],
-            kr.layers.Add(name="Sum"),
-            kr.layers.ReLU(name="ReLU"),
+            kr.layers.Add(name="Sum" if name == "" else "{}-Sum".format(name)),
+            kr.layers.ReLU(name="ReLU" if name == "" else "{}-ReLU".format(name)),
         ]
 
         # initialization
@@ -699,7 +809,7 @@ class _ContextEmbedding(_LayerPipe):
         super(_ContextEmbedding, self).__init__(layers, "ContextEmbedding")
 
 
-class _SemanticBranch(_LayerPipe):
+class SemanticBranch(_LayerPipe):
     """
     generate the Semantic Branch of the BiSeNet V2 by concatenating a set of convolutional blocks.
 
@@ -731,22 +841,22 @@ class _SemanticBranch(_LayerPipe):
             ),
             _LayerPipe(
                 layers=[
-                    _GatherExpansion(kernel_size, int(channels / 2), 2),
-                    _GatherExpansion(kernel_size, int(channels / 2), 1),
+                    _GatherExpansion(kernel_size, int(channels / 2), 2, name="GE1"),
+                    _GatherExpansion(kernel_size, int(channels / 2), 1, name="GE2"),
                 ],
                 name="Stage3",
             ),
             _LayerPipe(
                 layers=[
-                    _GatherExpansion(kernel_size, channels, 2),
-                    _GatherExpansion(kernel_size, channels, 1),
+                    _GatherExpansion(kernel_size, channels, 2, name="GE1"),
+                    _GatherExpansion(kernel_size, channels, 1, name="GE2"),
                 ],
                 name="Stage4",
             ),
             _LayerPipe(
                 layers=[
-                    _GatherExpansion(kernel_size, channels * 2, 2),
-                    _GatherExpansion(kernel_size, channels * 2, 1),
+                    _GatherExpansion(kernel_size, channels * 2, 2, name="GE1"),
+                    _GatherExpansion(kernel_size, channels * 2, 1, name="GE2"),
                     _ContextEmbedding(kernel_size, channels * 2, context_shape),
                 ],
                 name="Stage5",
@@ -754,10 +864,10 @@ class _SemanticBranch(_LayerPipe):
         ]
 
         # initialize
-        super(_SemanticBranch, self).__init__(layers, "SemanticBranch")
+        super(SemanticBranch, self).__init__(layers, "SemanticBranch")
 
 
-class _BilateralGuidedAggregation(_LayerPipe):
+class BilateralGuidedAggregation(_LayerPipe):
     """
     generate the Aggregation Branch allowing to join together the Detail and Semantic branches from which
     the BiSeNet V2 started.
@@ -898,12 +1008,12 @@ class _BilateralGuidedAggregation(_LayerPipe):
         ]
 
         # initialize
-        super(_BilateralGuidedAggregation, self).__init__(
+        super(BilateralGuidedAggregation, self).__init__(
             layers, "Guided Aggregation", False
         )
 
 
-class _SegmentationHead(_LayerPipe):
+class SegmentationHead(_LayerPipe):
     """
     generate the Aggregation Branch allowing to join together the Detail and Semantic branches from which
     the BiSeNet V2 started.
@@ -963,105 +1073,4 @@ class _SegmentationHead(_LayerPipe):
         ]
 
         # initialize
-        super(_SegmentationHead, self).__init__(layers, "Segmentation Head")
-
-
-class BiSeNet2(kr.Model):
-    """
-    generate a BiSeNet (V2) model.
-
-    Parameters
-    ----------
-
-    kernel_size: int
-        the size of the convolutional kernel for each level of the block.
-
-    channels: int
-        the default number of channels (i.e. convolutional filters).
-
-    Returns
-    -------
-    block: Keras.Model
-        the BiSeNet2 model.
-    """
-
-    def __init__(self, input_shape, kernel_size=3, channels=64):
-
-        # check the entries
-        assert isinstance(kernel_size, int), self._message("kernel_size", int)
-        assert isinstance(channels, int), self._message("channels", int)
-        assert isinstance(input_shape, (tuple, list)), self._message(
-            "input_shape", (tuple, list)
-        )
-        assert len(input_shape) == 3, "'input_shape' must have len = 3."
-        for i in input_shape:
-            assert isinstance(i, int), self._message("input_shape elements", int)
-        for i in input_shape[:-1]:
-            assert self._is_pow_of(i, 2), "input shape dimensions must be a power of 2."
-
-        # build the model
-        super(kr.models.Model, self).__init__(name="BiSeNet2")
-        self._channels = channels
-        self._kernel_size = kernel_size
-        self._expected_input_shape = input_shape
-        self._detail_branch = _DetailBranch(
-            kernel_size=self._kernel_size, channels=self._channels
-        )
-        self._semantic_branch = _SemanticBranch(
-            kernel_size=self._kernel_size,
-            channels=self._channels,
-            input_shape=self._expected_input_shape[:-1],
-        )
-        self._bilateral_aggregation = _BilateralGuidedAggregation(
-            kernel_size=self._kernel_size, channels=self._channels
-        )
-        self._segmentation_head = _SegmentationHead(
-            kernel_size=self._kernel_size,
-            channels=self._channels,
-            upsampling_rate=8,
-            output_channels=self._expected_input_shape[-1],
-        )
-
-    def call(self, inputs, training=False):
-
-        # check the entries
-        for i in inputs.shape[:-1]:
-            assert self._is_pow_of(i, 2), "input shape dimensions must be a power of 2."
-        assert isinstance(training, bool), self._message("training", bool)
-
-        # build the model
-        db = self._detail_branch(inputs, training)
-        sb = self._semantic_branch(inputs, training)
-        ba = self._BilateralGuidedAggregation(((db, sb), (db, sb)), training)
-        return self._SegmentationHead(ba, training)
-
-    def _message(self, who, what):
-        """
-        return an error message.
-        """
-        return "{} must be and object of class {}.".format(who, what)
-
-    def _is_pow_of(self, x, p):
-        """
-        check if x is a power of p.
-
-        Parameters
-        ----------
-        x: int, float
-            the number to test
-
-        p: int, float
-            the power to check.
-
-        Returns
-        -------
-        check: bool
-            True if x is a power of p, False otherwise.
-        """
-        assert isinstance(x, (int, float)), self._message("x", (int, float))
-        assert isinstance(p, (int, float)), self._message("p", (int, float))
-        assert x > 0, "'x' must be > 0."
-        n = 0
-        while p ** n < x:
-            n += 1
-        return p ** n == x
+        super(SegmentationHead, self).__init__(layers, "Segmentation Head")
