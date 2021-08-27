@@ -342,6 +342,7 @@ class _Identity(kr.layers.Layer):
     def __init__(self, name):
         assert isinstance(name, str), "'name' must be a str."
         super(_Identity, self).__init__(name=name)
+        self.mul = 0.5
 
     def call(self, inputs):
         """
@@ -357,12 +358,12 @@ class _Identity(kr.layers.Layer):
         block: Keras.layers.Layer
             passed layer.
         """
-        val = tf.multiply(inputs, 0.5)
+        val = tf.multiply(inputs, self.mul)
         return kr.layers.Add(name=self._name)([val, val])
 
     def get_config(self):
-        cfg = super().get_config()
-        cfg["config"] = self.config.to_dict()
+        cfg = super(_Identity, self).get_config()
+        cfg.update({"mul": self.mul})
         return cfg
 
     @property
