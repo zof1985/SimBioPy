@@ -99,7 +99,9 @@ def bisenet2(input_shape, kernel_size=3, channels=64):
     )
     dbx = db(x)
     sbx = sb(x)
-    y = sh(ba(((dbx, sbx), (dbx, sbx))))
+    bax = ba(((dbx, sbx), (dbx, sbx)))
+    shx = sh(bax)
+    y = kr.layers.Softmax()(shx)
     return kr.models.Model(inputs=x, outputs=y)
 
 
