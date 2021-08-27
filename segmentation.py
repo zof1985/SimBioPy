@@ -101,13 +101,11 @@ def bisenet2(input_shape, kernel_size=3, channels=64):
     sbx = sb(x)
     bax = ba(((dbx, sbx), (dbx, sbx)))
     shx = sh(bax)
-    out = (
-        conv2d(
-            kernel_size=1,
-            output_channels=input_shape[-1],
-            stride=1,
-            activation="sigmoid",
-        ),
+    out = conv2d(
+        kernel_size=1,
+        output_channels=input_shape[-1],
+        stride=1,
+        activation="sigmoid",
     )
     y = out(shx)
     return kr.models.Model(inputs=x, outputs=y)
