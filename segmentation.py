@@ -101,6 +101,14 @@ def bisenet2(input_shape, kernel_size=3, channels=64):
     sbx = sb(x)
     bax = ba(((dbx, sbx), (dbx, sbx)))
     shx = sh(bax)
+    y = (
+        conv2d(
+            kernel_size=1,
+            output_channels=input_shape[-1],
+            stride=1,
+            activation="sigmoid",
+        ),
+    )
     y = kr.layers.Softmax()(shx)
     return kr.models.Model(inputs=x, outputs=y)
 
@@ -1062,7 +1070,7 @@ class SegmentationHead(_LayerPipe):
                 layers=[
                     conv2d(
                         kernel_size=1,
-                        output_channels=output_channels,
+                        output_channels=channels,
                         stride=1,
                     ),
                     kr.layers.UpSampling2D(
