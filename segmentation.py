@@ -109,7 +109,6 @@ def bisenet2(input_shape, kernel_size=3, channels=64):
             activation="sigmoid",
         ),
     )
-    y = kr.layers.Softmax()(shx)
     return kr.models.Model(inputs=x, outputs=y)
 
 
