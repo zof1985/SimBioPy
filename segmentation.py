@@ -101,10 +101,10 @@ def bisenet2(input_shape, kernel_size=3, channels=64):
     sbx = sb(x)
     bax = ba(((dbx, sbx), (dbx, sbx)))
     shx = sh(bax)
-    out = conv2d(
+    out = kr.layers.Conv2D(
         kernel_size=1,
-        output_channels=input_shape[-1],
-        stride=1,
+        filters=input_shape[-1],
+        strides=1,
         activation="sigmoid",
     )
     y = out(shx)
@@ -112,12 +112,7 @@ def bisenet2(input_shape, kernel_size=3, channels=64):
 
 
 def conv2d(
-    kernel_size=3,
-    output_channels=64,
-    stride=1,
-    use_bias=False,
-    padding="same",
-    **kwargs
+    kernel_size=3, output_channels=64, stride=1, use_bias=True, padding="same", **kwargs
 ):
     """
     wrapper of the Keras.layers.Conv2D Layer.
