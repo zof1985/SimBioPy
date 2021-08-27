@@ -360,6 +360,11 @@ class _Identity(kr.layers.Layer):
         val = tf.multiply(inputs, 0.5)
         return kr.layers.Add(name=self._name)([val, val])
 
+    def get_config(self):
+        cfg = super().get_config()
+        cfg["config"] = self.config.to_dict()
+        return cfg
+
     @property
     def trainable(self):
         """
