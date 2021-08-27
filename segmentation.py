@@ -363,11 +363,6 @@ class _Identity(kr.layers.Layer):
         val = tf.multiply(inputs, self.mul)
         return kr.layers.Add(name=self._name)([val, val])
 
-    def get_config(self):
-        cfg = super(_Identity, self).get_config()
-        cfg.update({"mul": self.mul})
-        return cfg
-
     @property
     def trainable(self):
         """
