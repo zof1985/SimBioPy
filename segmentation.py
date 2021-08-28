@@ -95,7 +95,7 @@ def bisenet2(input_shape, kernel_size=3, channels=64):
         kernel_size=kernel_size,
         channels=channels,
         upsampling_rate=8,
-        output_channels=input_shape[-1],
+        output_channels=channels,
     )
     dbx = db(x)
     sbx = sb(x)
