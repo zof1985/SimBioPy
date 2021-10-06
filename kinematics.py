@@ -174,18 +174,18 @@ def read_emt(path):
     unit = lines[3][1]
 
     # get an array with all the variables
-    vars = np.array([i for i in lines[10] if i != ""]).flatten()
+    vrs = np.array([i for i in lines[10] if i != ""]).flatten()
 
     # get the data names
-    names = np.unique([i.split(".")[0] for i in vars[2:] if len(i) > 0])
+    names = np.unique([i.split(".")[0] for i in vrs[2:] if len(i) > 0])
 
     # get the data values
-    values = np.vstack([np.atleast_2d(i[: len(vars)]) for i in lines[11:-2]]).astype(
+    values = np.vstack([np.atleast_2d(i[: len(vrs)]) for i in lines[11:-2]]).astype(
         float
     )
 
     # get the columns of interest
-    cols = np.arange(np.argwhere(vars == "Time").flatten()[0] + 1, len(vars))
+    cols = np.arange(np.argwhere(vrs == "Time").flatten()[0] + 1, len(vrs))
 
     # get the rows in the data to be extracted
     rows = np.argwhere(np.any(~np.isnan(values[:, cols]), 1)).flatten()
@@ -198,7 +198,7 @@ def read_emt(path):
     for v in names:
 
         # get the dimensions
-        D = [i.split(".")[-1] for i in vars if i.split(".")[0] == v]
+        D = [i.split(".")[-1] for i in vrs if i.split(".")[0] == v]
         D = [""] if len(D) == 1 else D
 
         # get the data for each dimension
@@ -206,7 +206,7 @@ def read_emt(path):
         coordinates = []
         for i in D:
             nn += [i if i != "" else v]
-            cols = np.argwhere(vars == v + (("." + i) if i != "" else ""))
+            cols = np.argwhere(vrs == v + (("." + i) if i != "" else ""))
             coordinates += [values[rows, cols.flatten()]]
 
         # setup the output variable
@@ -379,6 +379,7 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
         idx = np.arange(nFrames) / freq + time
 
         # return the tracks
+        fid.close()
         return tracks, labels, idx
 
     # camera tracks
@@ -504,6 +505,7 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
                 index=index,
                 unit=moment_unit,
             )
+        fid.close()
         return points, forces, moments
 
     # read EMG data
