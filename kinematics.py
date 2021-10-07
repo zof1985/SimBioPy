@@ -2,7 +2,6 @@
 
 import os
 import struct
-import base
 import numpy as np
 import pandas as pd
 
@@ -39,112 +38,6 @@ def gram_schmidt(vectors):
 
     # normalize
     return np.vstack([norm(u) for u in W])
-
-
-def to_vector(df):
-    """
-    Try to convert a standard pandas DataFrame into a Vector.
-
-    Parameters
-    ----------
-
-    df: pd.DataFrame
-        the dataframe to be converted.
-        It must have columns as "X (Y)" where 'X' is the dimension name and 'Y' is the unit
-        of measurement.
-
-    Returns
-    -------
-
-    vec: Vector
-        a Vector object with the reported data.
-    """
-    data_unit = df.columns[0].split(" ")[-1][1:-1]
-    index_unit = df.index[0].split(" ")[-1][1:-1]
-    columns = [i.split(" ")[0] for i in df.columns.to_numpy()]
-    index = [float(i.split(" ")[0]) for i in df.index.to_numpy()]
-    return Vector(
-        data=df.values,
-        columns=columns,
-        index=index,
-        data_unit=data_unit,
-        index_unit=index_unit,
-    )
-
-
-def read_csv(path):
-    """
-    Create a "Vector" from a "csv" path.
-
-    Parameters
-    ----------
-
-    path: (str)
-        an existing ".csv" or "txt" path or a folder containing csv files.
-        The files must contain the index in the first column and the others must be stored
-        "X (Y)" where 'X' is the dimension name and 'Y' is the unit of measurement.
-
-    Returns
-    -------
-
-    vec: Vector
-        a Vector object with the reported data.
-    """
-
-    # check the validity of the entered path
-    assert os.path.exists(path), path + " does not exist."
-    assert path[-4:] == ".csv" or path[-4:] == ".txt", (
-        path + ' must be a ".csv" or ".txt" file.'
-    )
-
-    # return the data
-    return to_vector(pd.read_csv(path, index_col=0))
-
-
-def read_excel(path, sheets=None, exclude_errors=True):
-    """
-    Create a dict of Vector objects from an excel path.
-
-    Parameters
-    ----------
-
-    path: str
-        an existing excel path.
-        The sheets must contain the index in the first column and the others must be stored
-        "X (Y)" where 'X' is the dimension name and 'Y' is the unit of measurement.
-
-    sheets: str
-        the sheets to be imported. In None, all sheets are imported.
-
-    exclude_errors: bool
-        If a sheet generates an error during the import would you like to skip it and import
-        the others?
-
-    Returns
-    -------
-
-    vectors: dict
-        a dict with the imported vectors.
-    """
-
-    # check the validity of the entered path
-    assert os.path.exists(path), path + " does not exist."
-    assert path[-5:] == ".xlsx" or path[-4:] == ".xls", (
-        path + ' must be a ".xlsx" or ".xls" file.'
-    )
-
-    # get the sheets
-    dfs = base.from_excel(path, sheets)
-
-    # import the sheets
-    vd = {}
-    for i in dfs:
-        try:
-            vd[i] = to_vector(dfs[i])
-        except Exception:
-            if not exclude_errors:
-                break
-    return vd
 
 
 def read_emt(path):
@@ -217,12 +110,10 @@ def read_emt(path):
             coordinates += [values[rows, cols.flatten()]]
 
         # setup the output variable
-        vd[v] = Vector(
+        vd[v] = pd.DataFrame(
             data=np.vstack(np.atleast_2d(coordinates)).T,
             index=time,
             columns=nn,
-            data_unit=unit,
-            index_unit="s",
         )
 
     return vd
@@ -438,12 +329,10 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
         points = {}
         for trk in range(n_tracks):
             cols = np.arange(3 * trk, 3 * trk + 3)
-            points[labels[trk]] = Vector(
+            points[labels[trk]] = pd.DataFrame(
                 data=tracks[:, cols],
                 columns=["X", "Y", "Z"],
                 index=index,
-                data_unit=point_unit,
-                index_unit="s",
             )
         return points
 
@@ -508,12 +397,10 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
                 index_unit="s",
             )
             moment_cols = np.arange(3 * (trk + 2), 3 * (trk + 2) + 3)
-            moments[labels[trk]] = Vector(
+            moments[labels[trk]] = pd.DataFrame(
                 data=tracks[:, moment_cols],
                 coordinates=["X", "Y", "Z"],
                 index=index,
-                data_unit=moment_unit,
-                index_unit="s",
             )
         fid.close()
         return points, forces, moments
@@ -557,12 +444,10 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
         # generate the output dict
         channels = {}
         for trk, lbl in zip(tracks.T, labels):
-            channels[lbl] = Vector(
+            channels[lbl] = pd.DataFrame(
                 data=np.atleast_2d(trk).T,
                 columns=[lbl],
                 index=index,
-                data_unit=emg_unit,
-                index_unit="s",
             )
         return channels
 
@@ -731,11 +616,11 @@ class ReferenceFrame:
             True if vector can be part of self. False, otherwise.
         """
 
-        if not isinstance(vector, Vector):
+        if not isinstance(vector, pd.DataFrame):
             return False
-        if len(self.origin) != vector.coordinates.shape[1]:
+        if len(self.origin) != vector.shape[1]:
             return False
-        if not np.all([np.any(vector.names == i) for i in self.names]):
+        if not np.all([np.any(vector.columns == i) for i in self.names]):
             return False
         return True
 
@@ -763,9 +648,7 @@ class ReferenceFrame:
         """
         assert self._matches(vector), "vector must be a Vector object."
         ov = np.vstack([np.atleast_2d(self.origin) for _ in range(vector.shape[0])])
-        vec = vector - ov
-        vec.coordinates[:, :] = vec.coordinates.dot(self.orientation.T)
-        return vec
+        return (vector - ov).dot(self.orientation.T)
 
     def invert(self, vector):
         """
@@ -782,151 +665,28 @@ class ReferenceFrame:
             a rotated Vector object.
         """
         assert self._matches(vector), "vector must be a Vector object."
-        vec = vector.copy()
         ov = np.vstack([np.atleast_2d(self.origin) for _ in range(vector.shape[0])])
-        vec.coordinates[:, :] = vec.coordinates.dot(self.orientation) + ov
-        return vec
+        return vector.dot(self.orientation) + ov
 
 
 @pd.api.extensions.register_dataframe_accessor("vector")
 class Vector:
-    def __init__(self, pandas_obj, data_unit, index_unit):
+    def __init__(self, pandas_obj):
         self._obj = pandas_obj
-        self.data_unit = data_unit
-        self.index_unit = index_unit
-
-    def copy(self):
-        return Vector(
-            data=self.values,
-            columns=self.columns,
-            index=self.index,
-            data_unit=self.data_unit,
-            index_unit=self.index_unit,
-        )
-
-    def to_df(self):
-        return pd.DataFrame(
-            data=self.values,
-            columns=pd.Index(
-                [i + " ({})".format(self.data_unit) for i in self.columns]
-            ),
-            index=pd.Index(
-                [str(i) + " ({})".format(self.index_unit) for i in self.index]
-            ),
-        )
-
-    def __str__(self):
-        """
-        printing function
-        """
-        self.to_df().__str__()
-
-    def __repr__(self):
-        """
-        representation function
-        """
-        return self.__str__()
 
     @property
     def sampling_frequency(self):
         """
         return the "average" sampling frequency of the Vector.
         """
-        return float(1 / np.mean(np.diff(self.index.to_numpy())))
-
-    def rotate(self, ref):
-        """
-        rotate the current marker to the provided reference frame
-
-        Parameters
-        ----------
-        ref: ReferenceFrame
-            the target reference frame.
-
-        Returns
-        -------
-        rot: Vector
-            self rotated into ref.
-        """
-        assert isinstance(ref, ReferenceFrame), "ref must be a ReferenceFrame object."
-        return ref.rotate(self)
-
-    def invert(self, ref):
-        """
-        invert the rotation generated by the provided reference frame
-
-        Parameters
-        ----------
-        ref: ReferenceFrame
-            the target reference frame.
-
-        Returns
-        -------
-        rot: Vector
-            self rotated from ref.
-        """
-        assert isinstance(ref, ReferenceFrame), "ref must be a ReferenceFrame object."
-        return ref.invert(self)
-
-    def cross(self, value):
-        """
-        get the cross product between 3D Vectors.
-
-        Parameters
-        ----------
-        value: Vector
-            a 3D Vector to be used for the cross product operation
-
-        Returns
-        -------
-        crossed: Vector
-            the result of the cross product operation.
-        """
-        txt = "cross operator is valid only between 3D Vectors."
-        assert isinstance(value, Vector), txt
-        assert len(self.names) == len(value.names) == 3, txt
-        vec = self.copy()
-        vec.coordinates = np.cross(vec.coordinates, value.coordinates)
-        return vec
+        return float(1 / np.mean(np.diff(self._obj.index.to_numpy())))
 
     def norm(self):
         """
         get the norm of the vector.
         """
-        return Vector(
-            data=np.sqrt(np.sum(self.values ** 2, axis=1)),
-            columns="||{}||".format("+".join(self.names)),
-            index=self.index,
-            data_unit=self.data_unit,
-            index_unit=self.index_unit,
-        )
-
-    def to_csv(self, path):
-        """
-        Store the current Vector data as csv path.
-
-        Parameters
-        ----------
-        path: str
-            the path where to store the data.
-        """
-        self.to_df().to_csv(path)
-
-    def to_excel(self, path, sheet, new_file=False):
-        """
-        Store the current Vector data as csv path.
-
-        Parameters
-        ----------
-        path: str
-            the path where to store the data.
-
-        sheet: str
-            the name of the excel sheet where to store the data
-
-        new_file: bool
-            should the saving overwrite exising excel path?
-        """
-        base.to_excel(
-            path=path, df=self.to_df(), sheet=sheet, keep_index=True, new_file=new_file
+        return pd.DataFrame(
+            data=np.sqrt(np.sum(self._obj.values ** 2, axis=1)),
+            columns="||{}||".format("+".join(self._obj.columns.to_numpy())),
+            index=self._obj.index,
         )
