@@ -41,7 +41,7 @@ def gram_schmidt(vectors):
     return np.vstack([norm(u) for u in W])
 
 
-def df2vector(df):
+def to_vector(df):
     """
     Try to convert a standard pandas DataFrame into a Vector.
 
@@ -50,7 +50,8 @@ def df2vector(df):
 
     df: pd.DataFrame
         the dataframe to be converted.
-        It must have columns as "X (Y)" where 'X' is the dimension name and 'Y' is the unit of measurement.
+        It must have columns as "X (Y)" where 'X' is the dimension name and 'Y' is the unit
+        of measurement.
 
     Returns
     -------
@@ -58,12 +59,17 @@ def df2vector(df):
     vec: Vector
         a Vector object with the reported data.
     """
-
-    unit = np.unique([i.split("(")[-1].split(")")[0] for i in df.columns.to_numpy()])[0]
-    index = df.index.to_numpy()
-    names = [i.split(" (")[0] for i in df.columns.to_numpy()]
-    coordinates = df.values
-    return Vector(coordinates=coordinates, names=names, index=index, unit=unit)
+    data_unit = df.columns[0].split(" ")[-1][1:-1]
+    index_unit = df.index[0].split(" ")[-1][1:-1]
+    columns = [i.split(" ")[0] for i in df.columns.to_numpy()]
+    index = [float(i.split(" ")[0]) for i in df.index.to_numpy()]
+    return Vector(
+        data=df.values,
+        columns=columns,
+        index=index,
+        data_unit=data_unit,
+        index_unit=index_unit,
+    )
 
 
 def read_csv(path):
@@ -92,7 +98,7 @@ def read_csv(path):
     )
 
     # return the data
-    return df2vector(pd.read_csv(path, index_col=0))
+    return to_vector(pd.read_csv(path, index_col=0))
 
 
 def read_excel(path, sheets=None, exclude_errors=True):
@@ -134,7 +140,7 @@ def read_excel(path, sheets=None, exclude_errors=True):
     vd = {}
     for i in dfs:
         try:
-            vd[i] = df2vector(dfs[i])
+            vd[i] = to_vector(dfs[i])
         except Exception:
             if not exclude_errors:
                 break
@@ -212,10 +218,11 @@ def read_emt(path):
 
         # setup the output variable
         vd[v] = Vector(
-            coordinates=np.vstack(np.atleast_2d(coordinates)).T,
+            data=np.vstack(np.atleast_2d(coordinates)).T,
             index=time,
-            names=nn,
-            unit=unit,
+            columns=nn,
+            data_unit=unit,
+            index_unit="s",
         )
 
     return vd
@@ -432,10 +439,11 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
         for trk in range(n_tracks):
             cols = np.arange(3 * trk, 3 * trk + 3)
             points[labels[trk]] = Vector(
-                coordinates=tracks[:, cols],
-                names=["X", "Y", "Z"],
+                data=tracks[:, cols],
+                columns=["X", "Y", "Z"],
                 index=index,
-                unit=point_unit,
+                data_unit=point_unit,
+                index_unit="s",
             )
         return points
 
@@ -485,24 +493,27 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
         for trk in range(n_tracks):
             point_cols = np.arange(3 * trk, 3 * trk + 3)
             points[labels[trk]] = Vector(
-                coordinates=tracks[:, point_cols],
-                names=["X", "Y", "Z"],
+                data=tracks[:, point_cols],
+                columns=["X", "Y", "Z"],
                 index=index,
-                unit=point_unit,
+                data_unit=point_unit,
+                index_unit="s",
             )
             force_cols = np.arange(3 * (trk + 1), 3 * (trk + 1) + 3)
             forces[labels[trk]] = Vector(
-                coordinates=tracks[:, force_cols],
-                names=["X", "Y", "Z"],
+                data=tracks[:, force_cols],
+                columns=["X", "Y", "Z"],
                 index=index,
-                unit=force_unit,
+                data_unit=force_unit,
+                index_unit="s",
             )
             moment_cols = np.arange(3 * (trk + 2), 3 * (trk + 2) + 3)
             moments[labels[trk]] = Vector(
-                coordinates=tracks[:, moment_cols],
-                names=["X", "Y", "Z"],
+                data=tracks[:, moment_cols],
+                coordinates=["X", "Y", "Z"],
                 index=index,
-                unit=moment_unit,
+                data_unit=moment_unit,
+                index_unit="s",
             )
         fid.close()
         return points, forces, moments
@@ -547,10 +558,11 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
         channels = {}
         for trk, lbl in zip(tracks.T, labels):
             channels[lbl] = Vector(
-                coordinates=np.atleast_2d(trk).T,
-                names=[lbl],
+                data=np.atleast_2d(trk).T,
+                columns=[lbl],
                 index=index,
-                unit=emg_unit,
+                data_unit=emg_unit,
+                index_unit="s",
             )
         return channels
 
@@ -776,253 +788,38 @@ class ReferenceFrame:
         return vec
 
 
+@pd.api.extensions.register_dataframe_accessor("vector")
 class Vector:
-    """
-    Create a Vector object instance.
-    """
+    def __init__(self, pandas_obj, data_unit, index_unit):
+        self._obj = pandas_obj
+        self.data_unit = data_unit
+        self.index_unit = index_unit
 
-    def __init__(
-        self, coordinates, names=None, index=None, sampling_frequency=1.0, unit=""
-    ):
-        """
-        Create a Vector reference object.
-
-        Parameters
-        ----------
-        coordinates : array-like 2D
-            a MxN matrix where each row is a sample and each column a dimension.
-
-        names : array-like 1D
-            the list of names defining each dimension. If coordinates is a DataFrame object,
-            then names is ignored and the column names of the coordinates dataframe are used.
-
-        index : array-like 1D
-            the list of indices for each row of the coordinates. If coordinates is a
-            DataFrame object, then index is ignored and the index of the coordinates
-            dataframe are used.
-
-        sampling_frequency: float
-            if index is None, and coordinates is not a DataFrame, the sampling frequency
-            is used to generate the coordinates' index.
-
-        unit: str
-            the unit of measurement of the Vector.
-        """
-
-        # check the entries
-        if isinstance(coordinates, pd.DataFrame):
-            names = coordinates.columns.to_numpy()
-            index = coordinates.index.to_numpy()
-            coordinates = coordinates.values
-        elif isinstance(coordinates, (list, np.ndarray)):
-            coordinates = np.atleast_2d(coordinates)
-            if names is None:
-                names = ["X{}".format(i + 1) for i in range(coordinates.shape[1])]
-            assert isinstance(
-                names, (list, np.ndarray)
-            ), "names must be a 1D array-like object."
-            names = np.atleast_1d(names).flatten()
-            if index is None:
-                assert isinstance(
-                    sampling_frequency, (int, float)
-                ), "sampling_frequency must be numeric."
-                index = np.linspace(
-                    0, sampling_frequency * coordinates.shape[0], coordinates.shape[0]
-                )
-            else:
-                txt = "index must be a 1D array-like object of len = {}".format(
-                    coordinates.shape[0]
-                )
-                assert isinstance(index, (list, np.ndarray)), txt
-                index = np.array(index).flatten()
-                assert len(index) == coordinates.shape[0], txt
-        else:
-            raise ValueError(
-                "coordinates must be a 2D numpy array or a pandas DataFrame."
-            )
-
-        # check the unit
-        assert isinstance(unit, str), "unit must be a str object."
-
-        # add the data
-        setattr(self, "coordinates", np.atleast_2d(coordinates))
-        setattr(self, "names", np.array([names]).flatten())
-        setattr(self, "index", np.array([index]).flatten())
-        setattr(self, "unit", unit)
-
-    def _get_selection(self, item):
-        """
-
-        Parameters
-        ----------
-        item: Any
-            the item to be searched in the names and coordinates.
-
-        Returns
-        -------
-            a tuple to be interpreted as item(s) selector
-        """
-        txt = "item must be a tuple of len = 2 with the first element being the rows "
-        txt += "selection and the second element the column selection."
-        assert len(item) == 2, txt
-        rows_item, cols_item = item
-
-        def check_items(items, max_val):
-            out = []
-            for itm in items:
-                if isinstance(itm, slice):
-                    line = np.arange(
-                        itm.start if itm.start is not None else 0,
-                        itm.stop if itm.stop is not None else max_val,
-                        itm.step if itm.step is not None else 1,
-                    )
-                elif isinstance(itm, np.ndarray):
-                    line = itm.flatten().tolist()
-                elif isinstance(itm, (int, float)):
-                    line = [itm]
-                else:
-                    line = list(itm)
-                out += [line]
-            return np.array(out).flatten().tolist()
-
-        # get the rows and cols indices
-        if not isinstance(rows_item, (tuple, list, np.ndarray)):
-            rows_item = [rows_item]
-        rows = check_items(rows_item, self.coordinates.shape[0])
-        if not isinstance(cols_item, (tuple, list, np.ndarray)):
-            cols_item = [cols_item]
-        cols = check_items(cols_item, self.coordinates.shape[1])
-
-        # adjust the cols by the (existing) names attribute
-        for i, v in enumerate(cols):
-            try:
-                cols[i] = np.int(v)
-            except ValueError:
-                ref = np.argwhere(self.names == str(v)).flatten()
-                if len(ref) > 0:
-                    cols[i] = ref[0]
-
-        # get the validity of the selection
-        out_of_range_rows = np.argwhere(
-            rows not in np.arange(self.coordinates.shape[0])
-        ).flatten()
-        assert len(out_of_range_rows) == 0, "rows out of samples: {}".format(
-            out_of_range_rows
+    def copy(self):
+        return Vector(
+            data=self.values,
+            columns=self.columns,
+            index=self.index,
+            data_unit=self.data_unit,
+            index_unit=self.index_unit,
         )
-        out_of_range_cols = [np.isreal(i) for i in cols]
-        assert np.all(out_of_range_cols), "cols out of samples: {}".format(
-            out_of_range_cols
+
+    def to_df(self):
+        return pd.DataFrame(
+            data=self.values,
+            columns=pd.Index(
+                [i + " ({})".format(self.data_unit) for i in self.columns]
+            ),
+            index=pd.Index(
+                [str(i) + " ({})".format(self.index_unit) for i in self.index]
+            ),
         )
-        return rows, cols
-
-    def __getitem__(self, item):
-        """
-        get a coordinate by name
-
-        Parameters
-        ----------
-        item: str
-            the name of the coordinate
-
-        Returns
-        -------
-        val:    array-like
-            the item required
-        """
-        vec = self.copy()
-        keys = self._get_selection(item)
-        vec.index = vec.index[keys[0]]
-        vec.names = vec.names[keys[1]]
-        vec.coordinates = vec.coordinates[keys]
-        return vec
-
-    def __setitem__(self, item, value):
-        """
-        set a new value to an item
-
-        Parameters
-        ----------
-        item: numeric or str and array-like
-            the list or atomic value representing the key(s) of the items to be set.
-
-        value: array-like or int/float
-            the value to be set.
-        """
-        keys = self._get_selection(item)
-        if isinstance(value, (int, float)):
-            val = np.vstack([np.tile(value, len(keys[1])) for i in keys[0]])
-            self.coordinates[keys] = val
-        elif isinstance(value, Vector):
-            self.index[keys[0]] = value.index
-            self.names[keys[1]] = value.names
-            self.coordinates[keys] = value.coordinates
-        elif isinstance(value, np.ndarray):
-            shapes = [i == 1 for i in value.shape]
-            if (np.any(shapes) and len(shapes) <= 2) or len(shapes) == 1:
-                self.coordinates[keys] = value.flatten()
-            elif value.ndim == 2:
-                self.coordinates[keys[0]][:, keys[1]] = value
-            else:
-                txt = "only 1D or 2D arrays can be passed to __setitem__."
-                raise NotImplementedError(txt)
-        elif isinstance(value, (pd.DataFrame, pd.Series)):
-            if np.any([i == 1 for i in value.shape]):
-                self.coordinates[keys] = value.values.flatten()
-            else:
-                self.coordinates[keys[0]][:, keys[1]] = value.values
-        else:
-            txt = "the __setitem__ method does not currently support objects "
-            txt += "of instance {}".format(isinstance(value))
-            raise NotImplementedError(txt)
-
-    def __getattr__(self, item):
-        """
-        get an attribute by name
-
-        Parameters
-        ----------
-        item: str
-            a coordinate dimension
-
-        Returns
-        -------
-        dim: array-like
-            return the coordinate corresponding to the required dimension
-        """
-        if hasattr(self, "names"):
-            if item in self.names:
-                return self.coordinates[:, np.argwhere(item == self.names).flatten()]
-        else:
-            raise AttributeError("{} not found.".format(item))
-
-    def __setattr__(self, key, value):
-        """
-        set an attribute
-
-        Parameters
-        ----------
-        key: str
-            the name of the attribute
-
-        value: Any
-            the value to be set for the given attribute
-        """
-        if key in np.array(["coordinates", "names", "unit", "index"]):
-            self.__dict__[key] = value
-        elif key in self.names:
-            try:
-                self.coordinates[:, np.argwhere(key == self.names).flatten()] = value
-            except Exception:
-                raise ValueError("coordinate {} cannot be set to {}".format(key, value))
-        else:
-            self.names = np.append(self.names, [key])
-            self.coordinates = np.hstack([self.coordinates, np.atleast_2d(value)])
 
     def __str__(self):
         """
         printing function
         """
-        return self.to_df().__str__()
+        self.to_df().__str__()
 
     def __repr__(self):
         """
@@ -1035,301 +832,7 @@ class Vector:
         """
         return the "average" sampling frequency of the Vector.
         """
-        return float(1 / np.mean(np.diff(self.index)))
-
-    def to_df(self):
-        """
-        return a pandas DataFrame representing the object
-        """
-        return pd.DataFrame(
-            data=self.coordinates,
-            index=self.index,
-            columns=[i + " ({})".format(self.unit) for i in self.names],
-        )
-
-    @property
-    def shape(self):
-        return (len(self.index), len(self.names))
-
-    def _matches(self, vector):
-        """
-        Check vector may be part of self.
-
-        Parameters
-        ----------
-        vector: Vector, Vector
-            a Vector or Vector object.
-
-        Returns
-        -------
-        matches: bool
-            True if vector can be part of self. False, otherwise.
-        """
-
-        if not isinstance(vector, Vector):
-            return False
-        if (
-            not np.sum(
-                [
-                    i - j
-                    for i, j in zip(vector.coordinates.shape, self.coordinates.shape)
-                ]
-            )
-            == 0
-        ):
-            return False
-        if not np.all([i in vector.names for i in self.names]):
-            return False
-        if not np.all([i in vector.index for i in self.index]):
-            return False
-        if self.unit != vector.unit:
-            return False
-        return True
-
-    def copy(self):
-        """
-        Return a copy of self.
-        """
-        return Vector(
-            coordinates=self.coordinates,
-            index=self.index,
-            names=self.names,
-            unit=self.unit,
-        )
-
-    def __add__(self, value):
-        """
-        The "self + value" operator.
-
-        Parameters
-        ----------
-        value: Marker, array-like, float, int
-            the value to be added to self.
-
-        Returns
-        -------
-        out: Vector
-            self with value being added to the coordinates.
-        """
-        vec = self.copy()
-        return vec.__iadd__(value)
-
-    def __radd__(self, value):
-        """
-        The "value + self" operator.
-
-        Parameters
-        ----------
-        value: Marker, array-like, float, int
-            the value to be added to self.
-
-        Returns
-        -------
-        out: Vector
-            self with value being added to the coordinates.
-        """
-        return self.__add__(value)
-
-    def __iadd__(self, value):
-        """
-        The "self += value" operator.
-
-        Parameters
-        ----------
-        value: Vector, array-like, float, int
-            the value to be added to self.
-        """
-        if isinstance(value, Vector):
-            assert self._matches(value)
-            self.coordinates += value.coordinates
-        else:
-            self.coordinates += value
-        return self
-
-    def __sub__(self, value):
-        """
-        The "self - value" operator.
-
-        Parameters
-        ----------
-        value: Marker, array-like, float, int
-            the value to be added to self.
-
-        Returns
-        -------
-        out: Vector
-            self with value being removed to the coordinates.
-        """
-        vec = self.copy()
-        return vec.__isub__(value)
-
-    def __isub__(self, value):
-        """
-        The "self -= value" operator.
-
-        Parameters
-        ----------
-        value: Vector, array-like, float, int
-            the value to be subtracted to self.
-        """
-        if isinstance(value, Vector):
-            assert self._matches(value)
-            self.coordinates = self.coordinates - value.coordinates
-        else:
-            self.coordinates = self.coordinates - value
-        return self
-
-    def __mul__(self, value):
-        """
-        The "self * value" operator.
-
-        Parameters
-        ----------
-        value: Marker, array-like, float, int
-            the value to be added to self.
-
-        Returns
-        -------
-        out: Vector
-            self with value times the coordinates.
-        """
-        vec = self.copy()
-        return vec.__imul__(value)
-
-    def __rmul__(self, value):
-        """
-        The "value * self" operator.
-
-        Parameters
-        ----------
-        value: Marker, array-like, float, int
-            the value to be added to self.
-
-        Returns
-        -------
-        out: Vector
-            self with value times the coordinates.
-        """
-        return self.__mul__(value)
-
-    def __imul__(self, value):
-        """
-        The "self *= value" operator.
-
-        Parameters
-        ----------
-        value: Vector, array-like, float, int
-            the value to be multiplied with self.
-        """
-        if isinstance(value, Vector):
-            assert self._matches(value)
-            self.coordinates *= value.coordinates
-        else:
-            self.coordinates *= value
-        return self
-
-    def __truediv__(self, value):
-        """
-        The "self / value" operator.
-
-        Parameters
-        ----------
-        value: Marker, array-like, float, int
-            the value to divide self by.
-
-        Returns
-        -------
-        out: Vector
-            self with the coordinates divided by the value.
-        """
-        vec = self.copy()
-        return vec.__itruediv__(value)
-
-    def __itruediv__(self, value):
-        """
-        The "self /= value" operator.
-
-        Parameters
-        ----------
-        value: Vector, array-like, float, int
-            the value to divide self by.
-        """
-        if isinstance(value, Vector):
-            assert self._matches(value)
-            self.coordinates /= value.coordinates
-        else:
-            self.coordinates /= value
-        return self
-
-    def __neg__(self):
-        """
-        Get the negative of the coordinates.
-        """
-        vec = self.copy()
-        vec.coordinates *= -1
-        return vec
-
-    def __pow__(self, value):
-        """
-        Get the self ** value operation.
-
-        Parameters
-        ----------
-        value: int, float
-            the value be used as exponent for each element of the coordinates.
-
-        Returns
-        -------
-        out: Vector
-            a Marker with each coordinate elevated to value.
-        """
-        txt = "power operator is allowed only for float or int exponents."
-        assert isinstance(value, (float, int)), txt
-        vec = self.copy()
-        vec.coordinates = vec.coordinates ** value
-        return vec
-
-    def __abs__(self):
-        """
-        Take the absolute values of all the coordinates.
-        """
-        vec = self.copy()
-        vec.coordinates = abs(vec.coordinates)
-        return vec
-
-    def __eq__(self, other):
-        """
-        Equality compare.
-
-        Parameters
-        ----------
-        other: Any
-            any object to be compared with
-
-        Returns
-        -------
-        matches: bool
-            the result of the equality comparison
-        """
-        if self._matches(other):
-            return self.to_df() == other.to_df()
-        return False
-
-    def __ne__(self, other):
-        """
-        Disequality compare.
-
-        Parameters
-        ----------
-        other: Any
-            any object to be compared with
-
-        Returns
-        -------
-        matches: bool
-            the result of the equality comparison
-        """
-        return not self.__eq__(other)
+        return float(1 / np.mean(np.diff(self.index.to_numpy())))
 
     def rotate(self, ref):
         """
@@ -1391,10 +894,11 @@ class Vector:
         get the norm of the vector.
         """
         return Vector(
-            coordinates=np.sqrt(np.sum(self.coordinates ** 2, axis=1)),
-            names="||{}||".format("+".join(self.names)),
+            data=np.sqrt(np.sum(self.values ** 2, axis=1)),
+            columns="||{}||".format("+".join(self.names)),
             index=self.index,
-            unit=self.unit,
+            data_unit=self.data_unit,
+            index_unit=self.index_unit,
         )
 
     def to_csv(self, path):
