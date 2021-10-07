@@ -9,37 +9,6 @@ import pandas as pd
 # METHODS
 
 
-def gram_schmidt(vectors):
-    """
-    Return the orthogonal basis defined by a set of vectors using the
-    Gram-Schmidt algorithm.
-
-    Parameters:
-        vectors (np.ndarray): a NxN numpy.ndarray to be orthogonalized (by row).
-
-    Returns:
-        a NxN numpy.ndarray containing the orthogonalized arrays.
-    """
-
-    # internal functions to simplify the calculation
-    def proj(a, b):
-        return (np.inner(a, b) / np.inner(b, b) * b).astype(float)
-
-    def norm(v):
-        return v / np.sqrt(np.sum(v ** 2))
-
-    # calculate the projection points
-    W = []
-    for i, u in enumerate(vectors):
-        w = np.copy(u).astype(float)
-        for j in vectors[:i, :]:
-            w -= proj(u, j)
-        W += [w]
-
-    # normalize
-    return np.vstack([norm(u) for u in W])
-
-
 def read_emt(path):
     """
     Create a dict of Vector objects from an excel path.
@@ -70,9 +39,6 @@ def read_emt(path):
 
     # get the output dict
     vd = {}
-
-    # get the units
-    unit = lines[3][1]
 
     # get an array with all the variables
     vrs = np.array([i for i in lines[10] if i != ""]).flatten()
@@ -119,7 +85,7 @@ def read_emt(path):
     return vd
 
 
-def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="uV"):
+def read_tdf(path):
     """
     Return the readings from a .tdf file as dicts of Vectors objects.
 
@@ -127,9 +93,6 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
     ----------
     path: str
         an existing emt path.
-
-    point_unit, force_unit, moment_unit, emg_unit: str
-        the unit of measurement for the various data types
 
     Returns
     -------
@@ -381,20 +344,16 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
         moments = {}
         for trk in range(n_tracks):
             point_cols = np.arange(3 * trk, 3 * trk + 3)
-            points[labels[trk]] = Vector(
+            points[labels[trk]] = pd.DataFrame(
                 data=tracks[:, point_cols],
                 columns=["X", "Y", "Z"],
                 index=index,
-                data_unit=point_unit,
-                index_unit="s",
             )
             force_cols = np.arange(3 * (trk + 1), 3 * (trk + 1) + 3)
-            forces[labels[trk]] = Vector(
+            forces[labels[trk]] = pd.DataFrame(
                 data=tracks[:, force_cols],
                 columns=["X", "Y", "Z"],
                 index=index,
-                data_unit=force_unit,
-                index_unit="s",
             )
             moment_cols = np.arange(3 * (trk + 2), 3 * (trk + 2) + 3)
             moments[labels[trk]] = pd.DataFrame(
@@ -582,7 +541,7 @@ class ReferenceFrame:
         assert isinstance(
             orientation, (list, np.ndarray)
         ), "orientation must be a list or numpy array."
-        self.orientation = gram_schmidt(orientation)
+        self.orientation = self._gram_schmidt(orientation)
 
     def __str__(self):
         """
@@ -667,6 +626,36 @@ class ReferenceFrame:
         assert self._matches(vector), "vector must be a Vector object."
         ov = np.vstack([np.atleast_2d(self.origin) for _ in range(vector.shape[0])])
         return vector.dot(self.orientation) + ov
+
+    def _gram_schmidt(self, vectors):
+        """
+        Return the orthogonal basis defined by a set of vectors using the
+        Gram-Schmidt algorithm.
+
+        Parameters:
+            vectors (np.ndarray): a NxN numpy.ndarray to be orthogonalized (by row).
+
+        Returns:
+            a NxN numpy.ndarray containing the orthogonalized arrays.
+        """
+
+        # internal functions to simplify the calculation
+        def proj(a, b):
+            return (np.inner(a, b) / np.inner(b, b) * b).astype(float)
+
+        def norm(v):
+            return v / np.sqrt(np.sum(v ** 2))
+
+        # calculate the projection points
+        W = []
+        for i, u in enumerate(vectors):
+            w = np.copy(u).astype(float)
+            for j in vectors[:i, :]:
+                w -= proj(u, j)
+            W += [w]
+
+        # normalize
+        return np.vstack([norm(u) for u in W])
 
 
 @pd.api.extensions.register_dataframe_accessor("vector")
