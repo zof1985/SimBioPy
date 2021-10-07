@@ -65,8 +65,8 @@ class LinearRegression:
         # get the coefficients and intercept
         self._coefficients = pd.DataFrame(
             data=sl.pinv(XX.T.dot(XX)).dot(XX.T).dot(YY),
-            index=self.__IV_labels__,
-            columns=self.__DV_labels__,
+            index=self.__iv_labels__,
+            columns=self.__dv_labels__,
         )
 
         # obtain the symbolic representation of the equation
@@ -94,7 +94,7 @@ class LinearRegression:
         return self.Y - self.predict(self.X)
 
     @property
-    def __IV_labels__(self):
+    def __iv_labels__(self):
         """
         return the labels for the regressors.
         """
@@ -113,7 +113,7 @@ class LinearRegression:
         return out
 
     @property
-    def __DV_labels__(self):
+    def __dv_labels__(self):
         """
         return the labels for the dependent variables.
         """
@@ -189,7 +189,7 @@ class LinearRegression:
             idx = x.index
         else:
             idx = np.arange(X.shape[0])
-        return pd.DataFrame(Z, index=idx, columns=self.__DV_labels__)
+        return pd.DataFrame(Z, index=idx, columns=self.__dv_labels__)
 
     def to_latex(self, digits=None):
         if digits is None:
@@ -205,7 +205,7 @@ class LinearRegression:
         return str(self.symbolic)
 
     @property
-    def sumSq(self):
+    def sum_sq(self):
         """
         calculate the sum of squares of the fitted model.
         """
@@ -214,20 +214,20 @@ class LinearRegression:
         return SS
 
     @property
-    def R2(self):
+    def r_squared(self):
         """
         calculate the R-squared of the fitted model.
         """
         D = ((self.Y.values - self.Y.values.mean(0)) ** 2).sum(0)
-        return 1 - self.sumSq / D
+        return 1 - self.sum_sq / D
 
     @property
-    def R2_adjusted(self):
+    def adj_r_squared(self):
         """
         calculate the Adjusted R-squared of the fitted model.
         """
         n, k = self.X.shape
-        return 1 - ((1 - self.R2) * (n - 1) / (n - k - 1))
+        return 1 - ((1 - self.r_squared) * (n - 1) / (n - k - 1))
 
     @property
     def rmse(self):
@@ -281,17 +281,17 @@ class PowerRegression(LinearRegression):
 
         # get the coefficients and intercept
         self._coefs = pd.DataFrame(
-            data=coefs, index=self.__IV_labels__, columns=self.__DV_labels__
+            data=coefs, index=self.__iv_labels__, columns=self.__dv_labels__
         )
 
         # obtain the symbolic representation of the equation
         self.symbolic = []
         for c, var in enumerate(self.betas):
-            vars = self.X.columns.to_numpy()
+            vrs = self.X.columns.to_numpy()
             a = self.betas[var].values[0]
             bs = self.betas[var].values[1:]
             line = sy.Float(a, digits)
-            for v, b in zip(vars, bs):
+            for v, b in zip(vrs, bs):
                 line = line * sy.symbols(v) ** sy.Float(b, digits)
             self.symbolic += [sy.Eq(sy.symbols(var), line)]
 
@@ -317,10 +317,10 @@ class PowerRegression(LinearRegression):
             idx = x.index
         else:
             idx = pd.Index(np.arange(X.shape[0]))
-        return pd.DataFrame(Z, index=idx, columns=self.__DV_labels__)
+        return pd.DataFrame(Z, index=idx, columns=self.__dv_labels__)
 
     @property
-    def __IV_labels__(self):
+    def __iv_labels__(self):
         """
         return the labels for the regressors.
         """
@@ -377,7 +377,7 @@ class HyperbolicRegression(LinearRegression):
         # b =  slope / intercept
         coefs = [[coefs[1][0] / coefs[0][0]], [-1 / coefs[0][0]]]
         self._coefs = pd.DataFrame(
-            data=coefs, index=self.__IV_labels__, columns=self.__DV_labels__
+            data=coefs, index=self.__iv_labels__, columns=self.__dv_labels__
         )
 
         # obtain the symbolic representation of the equation
@@ -403,10 +403,10 @@ class HyperbolicRegression(LinearRegression):
             idx = x.index
         else:
             idx = pd.Index(np.arange(X.shape[0]))
-        return pd.DataFrame(Z, index=idx, columns=self.__DV_labels__)
+        return pd.DataFrame(Z, index=idx, columns=self.__dv_labels__)
 
     @property
-    def __IV_labels__(self):
+    def __iv_labels__(self):
         """
         return the labels for the regressors.
         """
@@ -430,7 +430,7 @@ class HyperbolicRegression(LinearRegression):
         return txt.format(
             self.betas.columns.to_numpy()[0],
             self.betas.loc["a"].values.flatten()[0],
-            self.__DV_labels__()[0],
+            self.__dv_labels__()[0],
             self.betas.loc["b"].values.flatten()[0],
             np.prod(self.betas.values.flatten()),
         )

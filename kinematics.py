@@ -1,7 +1,10 @@
 # IMPORTS
 
-from .base import *
+import os
 import struct
+import base
+import numpy as np
+import pandas as pd
 
 
 # METHODS
@@ -72,8 +75,8 @@ def read_csv(path):
 
     path: (str)
         an existing ".csv" or "txt" path or a folder containing csv files.
-        The files must contain the index in the first column and the others must be stored "X (Y)" where 'X' is
-        the dimension name and 'Y' is the unit of measurement.
+        The files must contain the index in the first column and the others must be stored
+        "X (Y)" where 'X' is the dimension name and 'Y' is the unit of measurement.
 
     Returns
     -------
@@ -101,14 +104,15 @@ def read_excel(path, sheets=None, exclude_errors=True):
 
     path: str
         an existing excel path.
-        The sheets must contain the index in the first column and the others must be stored "X (Y)" where 'X' is
-        the dimension name and 'Y' is the unit of measurement.
+        The sheets must contain the index in the first column and the others must be stored
+        "X (Y)" where 'X' is the dimension name and 'Y' is the unit of measurement.
 
     sheets: str
         the sheets to be imported. In None, all sheets are imported.
 
     exclude_errors: bool
-        If a sheet generates an error during the import would you like to skip it and import the others?
+        If a sheet generates an error during the import would you like to skip it and import
+        the others?
 
     Returns
     -------
@@ -124,7 +128,7 @@ def read_excel(path, sheets=None, exclude_errors=True):
     )
 
     # get the sheets
-    dfs = from_excel(path, sheets)
+    dfs = base.from_excel(path, sheets)
 
     # import the sheets
     vd = {}
@@ -132,9 +136,7 @@ def read_excel(path, sheets=None, exclude_errors=True):
         try:
             vd[i] = df2vector(dfs[i])
         except Exception:
-            if exclude_errors:
-                pass
-            else:
+            if not exclude_errors:
                 break
     return vd
 
@@ -180,9 +182,8 @@ def read_emt(path):
     names = np.unique([i.split(".")[0] for i in vrs[2:] if len(i) > 0])
 
     # get the data values
-    values = np.vstack([np.atleast_2d(i[: len(vrs)]) for i in lines[11:-2]]).astype(
-        float
-    )
+    values = np.vstack([np.atleast_2d(i[: len(vrs)]) for i in lines[11:-2]])
+    values = values.astype(float)
 
     # get the columns of interest
     cols = np.arange(np.argwhere(vrs == "Time").flatten()[0] + 1, len(vrs))
@@ -217,7 +218,6 @@ def read_emt(path):
             unit=unit,
         )
 
-    # return vd
     return vd
 
 
@@ -294,11 +294,10 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
         base_info = struct.unpack("iifi", fid.read(16))
         rows, freq, time, cols = base_info
 
-        # return all
         return fid, rows, cols, freq, time
 
     # generic track extractor
-    def read_tracks(fid, nFrames, nTracks, freq, time, by_frame, size):
+    def read_tracks(fid, n_frames, n_tracks, freq, time, by_frame, size):
         """
         internal method used to extract 3D tracks from tdf file.
 
@@ -340,11 +339,11 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
         """
 
         # prepare the arrays for the tracks and the labels
-        labels = [u""] * nTracks
-        tracks = np.ones((nFrames, size * nTracks)) * np.nan
+        labels = [u""] * n_tracks
+        tracks = np.ones((n_frames, size * n_tracks)) * np.nan
 
         # read the data
-        for trk in range(nTracks):
+        for trk in range(n_tracks):
 
             # get the label
             blbl = fid.read(256)
@@ -356,27 +355,27 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
 
             # read by frame
             if by_frame:
-                n = size * nTracks * nFrames
+                n = size * n_tracks * n_frames
                 segments = struct.unpack("%if" % n, fid.read(n * 4))
-                tracks = np.array(segments).reshape(nFrames, size * nTracks).T
+                tracks = np.array(segments).reshape(n_frames, size * n_tracks).T
 
             # read by track
             else:
 
-                (nSeg,) = struct.unpack("i", fid.read(4))
+                (n_seg,) = struct.unpack("i", fid.read(4))
                 fid.seek(4, 1)
-                segments = struct.unpack("%ii" % (2 * nSeg), fid.read(8 * nSeg))
-                segments = np.array(segments).reshape(nSeg, 2).T
+                segments = struct.unpack("%ii" % (2 * n_seg), fid.read(8 * n_seg))
+                segments = np.array(segments).reshape(n_seg, 2).T
                 shape = "{}f".format(size)
-                for s in range(nSeg):
+                for s in range(n_seg):
                     for row in range(segments[0, s], segments[0, s] + segments[1, s]):
                         val = struct.unpack(shape, fid.read(4 * size))
-                        if row < nFrames:
+                        if row < n_frames:
                             cols = np.arange(size * trk, size * trk + size)
                             tracks[row, cols] = val
 
         # calculate the index
-        idx = np.arange(nFrames) / freq + time
+        idx = np.arange(n_frames) / freq + time
 
         # return the tracks
         fid.close()
@@ -402,19 +401,19 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
             a dict with all the tracks provided as SimbioPy.Vector objects.
         """
         # get the file read
-        fid, nFrames, nTracks, freq, time = read_file(file, info["Offset"])
+        fid, n_frames, n_tracks, freq, time = read_file(file, info["Offset"])
 
         # calibration data (read but not exported)
-        d = np.array(struct.unpack("3f", fid.read(12)))
-        r = np.array(struct.unpack("9f", fid.read(36))).reshape(3, 3).T
-        t = np.array(struct.unpack("3f", fid.read(12)))
+        _ = np.array(struct.unpack("3f", fid.read(12)))
+        _ = np.array(struct.unpack("9f", fid.read(36))).reshape(3, 3).T
+        _ = np.array(struct.unpack("3f", fid.read(12)))
         fid.seek(4, 1)
 
         # check if links exists
         if info["Format"] in [1, 3]:
-            (nLinks,) = struct.unpack("i", fid.read(4))
+            (n_links,) = struct.unpack("i", fid.read(4))
             fid.seek(4, 1)
-            links = struct.unpack("%ii" % (2 * nLinks), fid.read(8 * nLinks))
+            links = struct.unpack("%ii" % (2 * n_links), fid.read(8 * n_links))
             links = np.array(links)
 
         # check if the file has to be read by frame or by track
@@ -425,12 +424,12 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
 
         # read the data
         tracks, labels, index = read_tracks(
-            fid, nFrames, nTracks, freq, time, by_frame, 3
+            fid, n_frames, n_tracks, freq, time, by_frame, 3
         )
 
         # generate the output dict
         points = {}
-        for trk in range(nTracks):
+        for trk in range(n_tracks):
             cols = np.arange(3 * trk, 3 * trk + 3)
             points[labels[trk]] = Vector(
                 coordinates=tracks[:, cols],
@@ -460,12 +459,12 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
             a dict with all the tracks provided as SimbioPy.Vector objects.
         """
         # get the file read (tracks and frames are inverted)
-        fid, nTracks, nFrames, freq, time = read_file(file, info["Offset"])
+        fid, n_tracks, n_frames, freq, time = read_file(file, info["Offset"])
 
         # calibration data (read but not exported)
-        d = np.array(struct.unpack("3f", fid.read(12)))
-        r = np.array(struct.unpack("9f", fid.read(36))).reshape(3, 3).T
-        t = np.array(struct.unpack("3f", fid.read(12)))
+        _ = np.array(struct.unpack("3f", fid.read(12)))
+        _ = np.array(struct.unpack("9f", fid.read(36))).reshape(3, 3).T
+        _ = np.array(struct.unpack("3f", fid.read(12)))
         fid.seek(4, 1)
 
         # check if the file has to be read by frame or by track
@@ -476,14 +475,14 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
 
         # read the data
         tracks, labels, index = read_tracks(
-            fid, nFrames, nTracks, freq, time, by_frame, 9
+            fid, n_frames, n_tracks, freq, time, by_frame, 9
         )
 
         # generate the output dict
         points = {}
         forces = {}
         moments = {}
-        for trk in range(nTracks):
+        for trk in range(n_tracks):
             point_cols = np.arange(3 * trk, 3 * trk + 3)
             points[labels[trk]] = Vector(
                 coordinates=tracks[:, point_cols],
@@ -528,10 +527,10 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
             a dict with all the EMG channels provided as SimbioPy.Vector objects.
         """
         # get the file read (tracks and frames are inverted here)
-        fid, nTracks, nFrames, freq, time = read_file(file, info["Offset"])
+        fid, n_tracks, n_frames, freq, time = read_file(file, info["Offset"])
 
         # get the EMG channels map (unused its nTracks * int16 element)
-        _ = fid.read(nTracks * 2)
+        _ = fid.read(n_tracks * 2)
 
         # check if the file has to be read by frame or by track
         by_frame = info["Format"] in [2]
@@ -541,7 +540,7 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
 
         # read the data
         tracks, labels, index = read_tracks(
-            fid, nFrames, nTracks, freq, time, by_frame, 1
+            fid, n_frames, n_tracks, freq, time, by_frame, 1
         )
 
         # generate the output dict
@@ -557,9 +556,9 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
 
     # codes
     tdf_signature = "41604B82CA8411D3ACB60060080C6816"
-    id_Point3D = 5
-    id_Force3D = 12
-    id_EMG = 11
+    id_point_3d = 5
+    id_force_3d = 12
+    id_emg = 11
 
     # read the file
     fid = open(path, "rb")
@@ -571,38 +570,38 @@ def read_tdf(path, point_unit="m", force_unit="N", moment_unit="Nm", emg_unit="u
         raise IOError("invalid file")
 
     # get the number of entries
-    _, nEntries = struct.unpack("Ii", fid.read(8))
-    if nEntries <= 0:
+    _, n_entries = struct.unpack("Ii", fid.read(8))
+    if n_entries <= 0:
         raise IOError("The file specified contains no data.")
 
     # check each entry to find the available blocks
-    nextEntryOffset = 40
+    next_entry_offset = 40
     blocks = {}
-    for _ in range(nEntries):
+    for _ in range(n_entries):
 
         # corrupted file
-        if -1 == fid.seek(nextEntryOffset, 1):
+        if -1 == fid.seek(next_entry_offset, 1):
             raise IOError("Error: the file specified is corrupted.")
 
         # get the data types
-        blockInfo = struct.unpack("IIii", fid.read(16))
+        block_info = struct.unpack("IIii", fid.read(16))
         bi = {
-            "Type": blockInfo[0],
-            "Format": blockInfo[1],
-            "Offset": blockInfo[2],
-            "Size": blockInfo[3],
+            "Type": block_info[0],
+            "Format": block_info[1],
+            "Offset": block_info[2],
+            "Size": block_info[3],
         }
 
         # check the type of block
-        if bi["Type"] == id_Point3D:
+        if bi["Type"] == id_point_3d:
             blocks["Point3D"] = bi
-        elif bi["Type"] == id_Force3D:
+        elif bi["Type"] == id_force_3d:
             blocks["Force3D"] = bi
-        elif bi["Type"] == id_EMG:
+        elif bi["Type"] == id_emg:
             blocks["EMG"] = bi
 
         # update the offset
-        nextEntryOffset = 272
+        next_entry_offset = 272
 
     # close the file
     fid.close()
@@ -641,7 +640,8 @@ class ReferenceFrame:
         a 1D list that contains the coordinates of the ReferenceFrame's origin.
 
     orientation: NxN array
-        a 2D square matrix containing on each row the versor corresponding to each dimension of the origin.
+        a 2D square matrix containing on each row the versor corresponding to each
+        dimension of the origin.
 
     names: array-like 1D
         a 1D array with the names of the dimensions.
@@ -658,7 +658,8 @@ class ReferenceFrame:
             a 1D list that contains the coordinates of the ReferenceFrame's origin.
 
         orientation: NxN array
-            a 2D square matrix containing on each row the versor corresponding to each dimension of the origin.
+            a 2D square matrix containing on each row the versor corresponding to each
+            dimension of the origin.
 
         names: array-like 1D
             a 1D array with the names of the dimensions.
@@ -749,7 +750,7 @@ class ReferenceFrame:
             a rotated Vector object.
         """
         assert self._matches(vector), "vector must be a Vector object."
-        ov = np.vstack([np.atleast_2d(self.origin) for i in range(vector.shape[0])])
+        ov = np.vstack([np.atleast_2d(self.origin) for _ in range(vector.shape[0])])
         vec = vector - ov
         vec.coordinates[:, :] = vec.coordinates.dot(self.orientation.T)
         return vec
@@ -770,7 +771,7 @@ class ReferenceFrame:
         """
         assert self._matches(vector), "vector must be a Vector object."
         vec = vector.copy()
-        ov = np.vstack([np.atleast_2d(self.origin) for i in range(vector.shape[0])])
+        ov = np.vstack([np.atleast_2d(self.origin) for _ in range(vector.shape[0])])
         vec.coordinates[:, :] = vec.coordinates.dot(self.orientation) + ov
         return vec
 
@@ -792,23 +793,23 @@ class Vector:
             a MxN matrix where each row is a sample and each column a dimension.
 
         names : array-like 1D
-            the list of names defining each dimension. If coordinates is a DataFrame object, then
-            names is ignored and the column names of the coordinates dataframe are used.
+            the list of names defining each dimension. If coordinates is a DataFrame object,
+            then names is ignored and the column names of the coordinates dataframe are used.
 
         index : array-like 1D
-            the list of indices for each row of the coordinates. If coordinates is a DataFrame object, then
-            index is ignored and the index of the coordinates dataframe are used.
+            the list of indices for each row of the coordinates. If coordinates is a
+            DataFrame object, then index is ignored and the index of the coordinates
+            dataframe are used.
 
         sampling_frequency: float
-            if index is None, and coordinates is not a DataFrame, the sampling frequency is used to generate
-            the coordinates' index.
+            if index is None, and coordinates is not a DataFrame, the sampling frequency
+            is used to generate the coordinates' index.
 
         unit: str
             the unit of measurement of the Vector.
         """
 
         # check the entries
-        txt = "coordinates must be a 2D numpy array or a pandas DataFrame."
         if isinstance(coordinates, pd.DataFrame):
             names = coordinates.columns.to_numpy()
             index = coordinates.index.to_numpy()
@@ -836,7 +837,9 @@ class Vector:
                 index = np.array(index).flatten()
                 assert len(index) == coordinates.shape[0], txt
         else:
-            ValueError("coordinates must be a 2D numpy array or a pandas DataFrame.")
+            raise ValueError(
+                "coordinates must be a 2D numpy array or a pandas DataFrame."
+            )
 
         # check the unit
         assert isinstance(unit, str), "unit must be a str object."
@@ -859,8 +862,8 @@ class Vector:
         -------
             a tuple to be interpreted as item(s) selector
         """
-        txt = "item must be a tuple of len = 2 with the first element being the rows selection and"
-        txt += " the second element the column selection."
+        txt = "item must be a tuple of len = 2 with the first element being the rows "
+        txt += "selection and the second element the column selection."
         assert len(item) == 2, txt
         rows_item, cols_item = item
 
@@ -1420,6 +1423,6 @@ class Vector:
         new_file: bool
             should the saving overwrite exising excel path?
         """
-        to_excel(
+        base.to_excel(
             path=path, df=self.to_df(), sheet=sheet, keep_index=True, new_file=new_file
         )
