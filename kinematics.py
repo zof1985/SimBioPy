@@ -521,26 +521,24 @@ class ReferenceFrame:
             a 1D array with the names of the dimensions.
         """
 
+        def check_input(inp, lbl):
+            txt = "{} must be a list or numpy array."
+            assert isinstance(inp, (list, np.ndarray)), txt.format(lbl)
+
         # handle the origin parameter
-        assert isinstance(
-            origin, (list, np.ndarray)
-        ), "origin must be a list or numpy array."
+        check_input(origin, "origin")
         self.origin = np.atleast_1d(origin).flatten()
 
         # handle the names parameter
         if names is None:
             names = ["X{}".format(i + 1) for i in range(len(self.origin))]
-        assert isinstance(
-            names, (list, np.ndarray)
-        ), "names must be None, list or a numpy array."
-        self.names = np.atleast_1d(names).flatten()
+        check_input(names, "names")
+        self.names = np.squeeze(names).flatten()
 
         # handle the orientation parameter
         if orientation is None:
             orientation = np.eye(len(self.origin))
-        assert isinstance(
-            orientation, (list, np.ndarray)
-        ), "orientation must be a list or numpy array."
+        check_input(orientation, "orientation")
         self.orientation = self._gram_schmidt(orientation)
 
     def __str__(self):
