@@ -482,6 +482,43 @@ def read_tdf(path):
     return points, forces, moments, emgs
 
 
+def three_points_angle(a, b, c, name=None):
+    """
+    return the angle between 3 points using the cosine theorem.
+
+    Parameters
+    ----------
+    a, b, c: Vector
+        the vector objects.
+
+    name: str or None
+        the name of the column in the output dataframe
+
+    Returns
+    -------
+    q: Vector
+        the angle in radiants.
+    """
+
+    # check the data
+    if name is None:
+        name = "Angle"
+    assert isinstance(name, str), "name must be a string"
+    assert a.vector.matches(b), "a does not match b"
+    assert a.vector.matches(c), "a does not match c"
+    assert b.vector.matches(c), "b does not match c"
+
+    # get the segments
+    ab = (b - a).vector.norm
+    bc = (b - c).vector.norm
+    ac = (c - a).vector.norm
+
+    # return the angle
+    q = np.arccos((ac ** 2 - ab ** 2 - bc ** 2) / (-2 * ab * bc))
+    q.columns = pd.Index([name])
+    return q
+
+
 # CLASSES
 
 
@@ -605,7 +642,9 @@ class ReferenceFrame:
         """
         assert self._matches(vector), "vector must be a Vector object."
         ov = np.vstack([np.atleast_2d(self.origin) for _ in range(vector.shape[0])])
-        return (vector - ov).dot(self.orientation.T)
+        out = (vector - ov).dot(self.orientation.T)
+        out.columns = self.names
+        return out
 
     def invert(self, vector):
         """
@@ -623,7 +662,9 @@ class ReferenceFrame:
         """
         assert self._matches(vector), "vector must be a Vector object."
         ov = np.vstack([np.atleast_2d(self.origin) for _ in range(vector.shape[0])])
-        return vector.dot(self.orientation) + ov
+        out = vector.dot(self.orientation)
+        out.columns = self.names
+        return out + ov
 
     def _gram_schmidt(self, vectors):
         """
@@ -637,7 +678,6 @@ class ReferenceFrame:
             a NxN numpy.ndarray containing the orthogonalized arrays.
         """
 
-        # internal functions to simplify the calculation
         def proj(a, b):
             return (np.inner(a, b) / np.inner(b, b) * b).astype(float)
 
@@ -668,12 +708,78 @@ class Vector:
         """
         return float(1 / np.mean(np.diff(self._obj.index.to_numpy())))
 
+    @property
     def norm(self):
         """
         get the norm of the vector.
         """
-        return pd.DataFrame(
-            data=np.sqrt(np.sum(self._obj.values ** 2, axis=1)),
-            columns="||{}||".format("+".join(self._obj.columns.to_numpy())),
-            index=self._obj.index,
-        )
+        dt = np.sqrt(np.sum(self._obj.values ** 2, axis=1))
+        lbls = [str(i) for i in self._obj.columns.to_list()]
+        cols = "|{}|".format("+".join(lbls))
+        idx = self._obj.index
+        return pd.DataFrame(data=dt, columns=[cols], index=idx)
+
+    def get_angle(self, x, y, name=None):
+        """
+        return the angle between dimensions y and x using the arctan function.
+
+        Parameters
+        ----------
+        x, y: str
+            the name of the columns to be used for the angle calculation.
+
+        name: str or None
+            the name of the output dataframe column
+
+        Returns
+        -------
+        q: Vector
+            the angle in radiants.
+        """
+
+        # check the data
+        if name is None:
+            name = "Angle"
+        assert isinstance(name, str), "name must be a string"
+        assert isinstance(x, str), "x must be a string"
+        assert x in self._obj.columns.to_list(), "x not in columns."
+        assert isinstance(y, str), "y must be a string"
+        assert y in self._obj.columns.to_list(), "y not in columns."
+
+        # calculate the angle
+        q = np.arctan2(self._obj[y].values.flatten(), self._obj[x].values.flatten())
+        return pd.DataFrame(q, columns=[name], index=self._obj.index)
+
+    def matches(self, vector):
+        """
+        check if the vector V is comparable to self.
+
+        Parameters
+        ----------
+        vector:  Vector
+            the vector to be compared
+
+        Returns
+        -------
+        Q: bool
+            true if V matches self, False otherwise.
+        """
+        # check the shape
+        s_rows, s_cols = self._obj.shape
+        v_rows, v_cols = vector.shape
+        if s_rows != v_rows or s_cols != v_cols:
+            return False
+
+        # check the column names
+        s_cols = self._obj.columns.to_numpy()
+        v_cols = vector.columns.to_numpy()
+        if not all([i == j for i, j in zip(s_cols, v_cols)]):
+            return False
+
+        # check the index values
+        s_idx = self._obj.index.to_numpy()
+        v_idx = vector.index.to_numpy()
+        if not all([i == j for i, j in zip(s_idx, v_idx)]):
+            return False
+
+        return True
