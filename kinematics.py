@@ -4,6 +4,7 @@ import os
 import struct
 import numpy as np
 import pandas as pd
+from . import base
 
 
 # METHODS
@@ -783,3 +784,38 @@ class Vector:
             return False
 
         return True
+
+    def replace_nans(self, value=None):
+        """
+        replace nans with an appropriate value.
+
+        Parameters
+        ----------
+        value: float, None
+            a constant value to be used as replacement. If None,
+            cubic spline interpolation is used to fill the gaps.
+
+        Returns
+        -------
+        df: pd.DataFrame
+            a dataframe with no nans.
+        """
+
+        # handle the case where value is None
+        if value is not None:
+            assert isinstance(value, (float, int)), "value must be numeric."
+            out = self._obj.copy()
+            nans = self._obj.isna()
+            out.loc[nans.values] = value
+            return out
+
+        # replace values via cubic spline interpolation
+        def interp(y):
+            y_old = y.values.flatten()
+            valid = ~np.isnan(y_old)
+            x_new = self._obj.index.to_numpy()
+            x_old = x_new[valid]
+            y_old = y_old[valid]
+            return base.interpolate_cs(y=y_old, x_old=x_old, x_new=x_new)
+
+        return self._obj.apply(interp)
