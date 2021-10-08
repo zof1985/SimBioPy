@@ -510,12 +510,12 @@ def three_points_angle(a, b, c, name=None):
     assert b.vector.matches(c), "b does not match c"
 
     # get the segments
-    ab = (b - a).vector.norm
-    bc = (b - c).vector.norm
-    ac = (c - a).vector.norm
+    ab = (b - a).vector.norm.values.flatten()
+    bc = (b - c).vector.norm.values.flatten()
+    ac = (c - a).vector.norm.values.flatten()
 
     # return the angle
-    q = np.arccos((ac ** 2 - ab ** 2 - bc ** 2) / (-2 * ab * bc).values)
+    q = np.arccos((ac ** 2 - ab ** 2 - bc ** 2) / (-2 * ab * bc))
     return pd.DataFrame(q, columns=[name], index=a.index)
 
 
