@@ -516,8 +516,7 @@ def three_points_angle(a, b, c, name=None):
 
     # return the angle
     q = np.arccos((ac ** 2 - ab ** 2 - bc ** 2) / (-2 * ab * bc).values)
-    q.columns = pd.Index([name])
-    return q
+    return pd.DataFrame(q, columns=[name], index=a.index)
 
 
 # CLASSES
