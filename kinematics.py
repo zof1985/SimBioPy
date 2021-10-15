@@ -359,7 +359,7 @@ def read_tdf(path):
             moment_cols = np.arange(3 * (trk + 2), 3 * (trk + 2) + 3)
             moments[labels[trk]] = pd.DataFrame(
                 data=tracks[:, moment_cols],
-                coordinates=["X", "Y", "Z"],
+                columns=["X", "Y", "Z"],
                 index=index,
             )
         fid.close()
