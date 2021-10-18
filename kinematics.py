@@ -804,7 +804,7 @@ class Vector:
         if value is not None:
             assert isinstance(value, (float, int)), "value must be numeric."
             out = self._obj.copy()
-            nans = self._obj.isna()
+            nans = self._obj.isna().any(1)
             out.loc[nans.values] = value
             return out
 
