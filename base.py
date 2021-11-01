@@ -1181,56 +1181,54 @@ def crossings(y, value=0.0):
     return cr, sn[cr]
 
 
-def xcorr(y, biased=False, full=False, *args):
+def xcorr(x, y=None, biased=False, full=False):
     """
     set the (multiple) auto/cross correlation of the data in y.
 
-    Input:
+    Parameters
+    ----------
+    x   1D array
+        the signal from which the auto or cross-correlation is provided.
 
-        y (1D array)
+    y   1D array or None
+        the signal from which the auto or cross-correlation is provided.
+        if None. The autocorrelation of x is provided. Otherwise the x-y
+        cross-correlation is returned.
 
-            the signal from which the auto or cross-correlation is provided.
+    biased  bool
+        if True, the biased auto/cross-correlation is provided.
+        Otherwise, the 'unbiased' estimator is returned.
 
-        biased (bool)
+    full (bool)
+        Should the negative lags be reported?
 
-            if True, the biased auto/cross-correlation is provided.
-            Otherwise, the 'unbiased' estimator is returned.
+    Returns
+    -------
+    xcr 1D array
+        the auto/cross-correlation value.
 
-        full (bool)
-
-            Should the negative lags be reported?
-
-        *args
-
-            additional signals to be used for cross-correlation.
-
-    Output:
-
-        x (1D array)
-
-            the auto/cross-correlation value.
-
-        l (1D array)
-
-            the lags in sample units.
+    lag 1D array
+        the lags in sample units.
     """
 
     # take the autocorrelation if only y is provided
-    if len(args) == 0:
-        Y = np.atleast_2d(y)
-        X = np.vstack((Y, Y))
+    if y is None:
+        X = np.atleast_2d(x)
+        Z = np.vstack([X, X])
 
-    # otherwise calculate the cross-correlation
+    # take the cross-correlation (ensure the shortest signal is zero-padded)
     else:
-        Y = np.atleast_2d(y)
-        A = np.vstack([np.atleast_2d(a) for a in args])
-        X = np.vstack([Y, A])
+        X = np.zeros((1, max(len(x), len(y))))
+        Y = np.zeros((1, max(len(x), len(y))))
+        X[:, : len(x)] = x
+        Y[:, : len(y)] = y
+        Z = np.vstack([X, Y])
 
     # get the matrix shape
-    P, N = X.shape
+    P, N = Z.shape
 
     # remove the mean from each dimension
-    V = X - np.atleast_2d(np.mean(X, 1)).T
+    V = Z - np.atleast_2d(np.mean(Z, 1)).T
 
     # take the cross-correlation
     xc = []
