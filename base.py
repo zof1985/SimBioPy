@@ -1033,7 +1033,9 @@ def butt_filt(signal, fc, fs, n=4, type="lowpass", phase_corrected=True):
 
     # control the inputs
     txt = "{} must be an object of class {}."
-    assert isinstance(signal, np.ndarray), txt.format("signal", "numpy.ndarray")
+    assert isinstance(signal, (pd.Series, np.ndarray)), txt.format(
+        "signal", "(pandas.Series, numpy.ndarray)"
+    )
     assert signal.ndim == 1, "signal must be a 1D array."
     assert isinstance(fs, (int, float)), txt.format("fs", "(int, float)")
     if isinstance(fc, (np.ndarray, list)):
