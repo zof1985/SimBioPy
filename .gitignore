@@ -140,3 +140,6 @@ workspace.code-workspace
 Matlab/
 test.py
 /.idea/
+
+# ini files
+*.ini
