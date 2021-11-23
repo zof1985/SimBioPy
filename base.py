@@ -1275,8 +1275,6 @@ def magnitude(y, base=10):
 
             the number required to elevate the base to get the value
     """
-
-    # return the magnitude
     if y == 0 or base == 0:
         return 0
     else:
