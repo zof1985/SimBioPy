@@ -498,7 +498,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
         emgs = resize(ref, True, **emgs)
 
     # return what has been read
-    return points, forces, moments, emgs
+    return {"point": points, "force": forces, "moment": moments, "emg": emgs}
 
 
 def resize(ref: pd.DataFrame, reset_time: bool = True, **kwargs: pd.DataFrame) -> dict:
