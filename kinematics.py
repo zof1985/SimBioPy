@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 from . import base
 
-
 # METHODS
 
 
@@ -86,7 +85,7 @@ def read_emt(path):
     return vd
 
 
-def read_tdf(path):
+def read_tdf(path: str, fit_to_kinematics: bool = False):
     """
     Return the readings from a .tdf file as dicts of Vectors objects.
 
@@ -94,6 +93,11 @@ def read_tdf(path):
     ----------
     path: str
         an existing emt path.
+
+    fit_to_kinematics: bool
+        should the data be resized according to kinematics readings?
+        if True, all data are fit such as the start and end of the
+        data match with the start and end of the kinematic data.
 
     Returns
     -------
@@ -479,8 +483,66 @@ def read_tdf(path):
         elif key == "EMG":
             emgs.update(**getEMG(path, info))
 
+    # resize the data to kinematics
+    if fit_to_kinematics:
+        valid = {i: v.dropna() for i, v in points.items()}
+        start = np.max([np.min(v.index.to_numpy()) for _, v in valid.items()])
+        stop = np.min([np.max(v.index.to_numpy()) for _, v in valid.items()])
+        ref = points[[i for i in points][0]]
+        idx = ref.index.to_numpy()
+        idx = np.where((idx >= start) & (idx <= stop))[0]
+        ref = ref.iloc[idx]
+        points = resize(ref, True, **points)
+        forces = resize(ref, True, **forces)
+        moments = resize(ref, True, **moments)
+        emgs = resize(ref, True, **emgs)
+
     # return what has been read
     return points, forces, moments, emgs
+
+
+def resize(ref: pd.DataFrame, reset_time: bool = True, **kwargs: pd.DataFrame) -> dict:
+    """
+    resize the data contained in kwargs to match the sample range
+    of ref.
+
+    Paramters
+    ---------
+    ref: Vector
+        a vector containing the reference data time.
+
+    reset_time: bool
+        if True the time of all the returned array will start from zero.
+
+    Returns
+    -------
+    resized: dict
+        a dict containing all the dataframes passed as kwargs resized
+        according to ref.
+    """
+
+    # check the entries
+    txt = "{} must be a pandas DataFrame object."
+    assert isinstance(ref, pd.DataFrame), txt.format("'ref'")
+    for key, df in kwargs.items():
+        assert isinstance(df, pd.DataFrame), txt.format(key)
+    assert reset_time or not reset_time, "'reset_time' must be a bool object."
+
+    # get the start and end ref time
+    start = np.min(ref.index.to_numpy())
+    stop = np.max(ref.index.to_numpy())
+
+    # resize all data
+    idx = {i: v.index.to_numpy() for i, v in kwargs.items()}
+    valid = {i: np.where((v >= start) & (v <= stop))[0] for i, v in idx.items()}
+    resized = {i: v.iloc[valid[i]] for i, v in kwargs.items()}
+
+    # check if the time has to be reset
+    if reset_time:
+        for i in resized:
+            resized[i].index = pd.Index(resized[i].index.to_numpy() - start)
+
+    return resized
 
 
 def three_points_angle(a, b, c, name=None):
