@@ -1,4 +1,4 @@
-# simbipy
+# simbiopy
 
 Simple Biomechanics with Python.
 
