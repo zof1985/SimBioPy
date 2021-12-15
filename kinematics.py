@@ -486,8 +486,8 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
     # resize the data to kinematics
     if fit_to_kinematics:
         valid = {i: v.dropna() for i, v in points.items()}
-        start = np.max([np.min(v.index.to_numpy()) for _, v in valid.items()])
-        stop = np.min([np.max(v.index.to_numpy()) for _, v in valid.items()])
+        start = np.min([np.min(v.index.to_numpy()) for _, v in valid.items()])
+        stop = np.max([np.max(v.index.to_numpy()) for _, v in valid.items()])
         ref = points[[i for i in points][0]]
         idx = ref.index.to_numpy()
         idx = np.where((idx >= start) & (idx <= stop))[0]
