@@ -2,8 +2,10 @@
 
 import os
 import struct
+import weakref
 import numpy as np
 import pandas as pd
+from traitlets.traitlets import Any
 from . import base
 
 # METHODS
@@ -498,7 +500,12 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
         emgs = resize(ref, True, **emgs)
 
     # return what has been read
-    return {"point": points, "force": forces, "moment": moments, "emg": emgs}
+    return {
+        "point": {i: Vector(v) for i, v in points.items()},
+        "force": {i: Vector(v) for i, v in forces.items()},
+        "moment": {i: Vector(v) for i, v in moments.items()},
+        "emg": {i: Vector(v) for i, v in emgs.items()},
+    }
 
 
 def resize(ref: pd.DataFrame, reset_time: bool = True, **kwargs: pd.DataFrame) -> dict:
@@ -758,6 +765,7 @@ class ReferenceFrame:
         return np.vstack([norm(u) for u in W])
 
 
+'''
 @pd.api.extensions.register_dataframe_accessor("vector")
 class Vector:
     def __init__(self, pandas_obj):
@@ -845,38 +853,137 @@ class Vector:
             return False
 
         return True
+'''
 
-    def replace_nans(self, value=None):
+
+class Vector(pd.DataFrame):
+
+    # attributes
+    _cacher = ()
+    dtype = np.float64
+
+    def __init__(self, *args, **kwargs):
+        if any([i == "name" for i in kwargs]):
+            args = [pd.Series(*args, **kwargs)]
+            kwargs = {}
+        super(Vector, self).__init__(*args, **kwargs)
+
+    def _set_as_cached(self, item, cacher) -> None:
         """
-        replace nans with an appropriate value.
+        Set the _cacher attribute on the calling object with a weakref to
+        cacher.
+        """
+        self._cacher = (item, weakref.ref(cacher))
+
+    def __repr__(self) -> str:
+        return pd.DataFrame(self).__repr__()
+
+    def __str__(self) -> str:
+        return pd.DataFrame(self).__str__()
+
+    @property
+    def _constructor(self):
+        return Vector
+
+    @property
+    def _constructor_sliced(self):
+        return Vector
+
+    def dropna(self):
+        return Vector(pd.DataFrame(self).dropna(inplace=False))
+
+    def unique(self):
+        val, ix = np.unique(self.values, return_index=True, axis=0)
+        idx = self.index.to_numpy()[ix]
+        col = self.columns.to_numpy()
+        return Vector(val, index=idx, columns=col)
+
+    def plot(self, *args, **kwargs):
+        return pd.DataFrame(self).plot(*args, **kwargs)
+
+    def sampling_frequency(self, digits=3):
+        """
+        return the "average" sampling frequency of the Vector.
 
         Parameters
         ----------
-        value: float, None
-            a constant value to be used as replacement. If None,
-            cubic spline interpolation is used to fill the gaps.
+        digits: int
+            the number of digits for the returing value
+        """
+        return np.round(1.0 / np.mean(np.diff(self.index.to_numpy())), digits)
+
+    @property
+    def norm(self):
+        """
+        get the norm of the vector.
+        """
+        dt = np.sqrt(np.sum(self.values ** 2, axis=1))
+        lbls = [str(i) for i in self.columns.to_list()]
+        cols = "|{}|".format("+".join(lbls))
+        idx = self.index
+        return Vector(data=dt, columns=[cols], index=idx)
+
+    def get_angle(self, x: str, y: str, name: str = None):
+        """
+        return the angle between dimensions y and x using the arctan function.
+
+        Parameters
+        ----------
+        x, y: str
+            the name of the columns to be used for the angle calculation.
+
+        name: str or None
+            the name of the output dataframe column
 
         Returns
         -------
-        df: pd.DataFrame
-            a dataframe with no nans.
+        q: Vector
+            the angle in radiants.
         """
 
-        # handle the case where value is None
-        if value is not None:
-            assert isinstance(value, (float, int)), "value must be numeric."
-            out = self._obj.copy()
-            nans = self._obj.isna().any(1)
-            out.loc[nans.values] = value
-            return out
+        # check the data
+        if name is None:
+            name = "Angle"
+        assert isinstance(name, str), "name must be a string"
+        assert isinstance(x, str), "x must be a string"
+        assert x in self.columns.to_list(), "x not in columns."
+        assert isinstance(y, str), "y must be a string"
+        assert y in self.columns.to_list(), "y not in columns."
 
-        # replace values via cubic spline interpolation
-        def interp(y):
-            y_old = y.values.flatten()
-            valid = ~np.isnan(y_old)
-            x_new = self._obj.index.to_numpy()
-            x_old = x_new[valid]
-            y_old = y_old[valid]
-            return base.interpolate_cs(y=y_old, x_old=x_old, x_new=x_new)
+        # calculate the angle
+        q = np.arctan2(self[y].values.flatten(), self[x].values.flatten())
+        return Vector(q, columns=[name], index=self.index)
 
-        return self._obj.apply(interp)
+    def matches(self, vector: Any) -> bool:
+        """
+        check if the vector V is comparable to self.
+
+        Parameters
+        ----------
+        vector:  Vector
+            the vector to be compared
+
+        Returns
+        -------
+        Q: bool
+            true if V matches self, False otherwise.
+        """
+        # check the shape
+        s_rows, s_cols = self.shape
+        v_rows, v_cols = vector.shape
+        if s_rows != v_rows or s_cols != v_cols:
+            return False
+
+        # check the column names
+        s_cols = self.columns.to_numpy()
+        v_cols = vector.columns.to_numpy()
+        if not all([i == j for i, j in zip(s_cols, v_cols)]):
+            return False
+
+        # check the index values
+        s_idx = self.index.to_numpy()
+        v_idx = vector.index.to_numpy()
+        if not all([i == j for i, j in zip(s_idx, v_idx)]):
+            return False
+
+        return True
