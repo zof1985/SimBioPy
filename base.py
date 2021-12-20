@@ -1,6 +1,7 @@
 # IMPORTS
 
 import itertools as it
+from typing import Union
 import numpy as np
 import openpyxl as xl
 import os
@@ -16,227 +17,160 @@ import time
 
 
 class LinearRegression:
-    def __init__(self, y, x, order=1, fit_intercept=True, digits=5):
-        """
-        Obtain the regression coefficients according to the Ordinary Least
-        Squares approach.
+    """
+    Obtain the regression coefficients according to the Ordinary Least
+    Squares approach.
 
-        Input:
-            y:              (2D column numpy array)
-                            the array containing the dependent variable.
+    Parameters
+    ----------
+    y:  (samples, dimensions) numpy array or pandas.DataFrame
+        the array containing the dependent variable.
 
-            x:              (2D array)
-                            the array containing the indipendent variables.
-                            The number of rows must equal the rows of y, while
-                            each column will be a regressor (i.e. an indipendent
-                            variable).
+    x:  (samples, features) numpy array or pandas.DataFrame
+        the array containing the indipendent variables.
 
-            order:          (int)
-                            the order of the polynomial.
+    fit_intercept: bool
+        Should the intercept be included in the model?
+        Otherwise it will be set to zero.
+    """
 
-            fit_intercept:  (bool)
-                            Should the intercept be included in the model?
-                            Otherwise it will be set to zero.
-
-            digits (int)
-
-                the number of digits used to print the coefficients
-        """
+    def __init__(
+        self,
+        y: Union[np.ndarray, pd.DataFrame],
+        x: Union[np.ndarray, pd.DataFrame],
+        fit_intercept: bool = True,
+    ):
 
         # add the input parameters
         txt = "{} must be a {} object."
-        assert isinstance(digits, int), txt.format("digits", "int")
-        self.digits = digits
         assert isinstance(fit_intercept, bool), txt.format("fit_intercept", "bool")
         self.fit_intercept = fit_intercept
-        assert isinstance(order, int), txt.format("order", "int")
-        self.order = order
 
         # correct the shape of y and x
-        YY = self.__simplify__(y, "Y", None)
-        XX = self.__simplify__(x, "X", self.order)
+        self.Y = self._simplify(y)
+        self.X = self._simplify(x)
         txt = "'X' and 'Y' number of rows must be identical."
-        assert XX.shape[0] == YY.shape[0], txt
+        assert self.X.shape[0] == self.Y.shape[0], txt
 
         # add the ones for the intercept
         if self.fit_intercept:
-            XX = np.hstack([np.ones((XX.shape[0], 1)), XX])
+            xx = self.X.values
+            xx = np.hstack([np.ones((self.X.shape[0], 1)), xx])
 
         # get the coefficients and intercept
-        self._coefficients = pd.DataFrame(
-            data=sl.pinv(XX.T.dot(XX)).dot(XX.T).dot(YY),
-            index=self.__iv_labels__,
-            columns=self.__dv_labels__,
+        self.betas = pd.DataFrame(
+            data=sl.pinv(xx.T.dot(xx)).dot(xx.T).dot(self.Y.values),
+            index=["INTERCEPT"] + self.X.columns.to_numpy().tolist(),
+            columns=self.Y.columns.to_numpy().tolist(),
         )
 
-        # obtain the symbolic representation of the equation
-        self.symbolic = []
-        for c, var in enumerate(self.betas):
-            predictors = XX.columns.to_numpy()
-            bs = self.betas[var].values[1:]
-            line = sy.Float(self.betas[var].values[0], self.digits)
-            for v, b in zip(predictors, bs):
-                line = line + sy.symbols(v) ** sy.Float(b, self.digits)
-            self.symbolic += [sy.Eq(sy.symbols(var), line)]
-
-    @property
-    def betas(self):
-        """
-        vector of the regression coefficients.
-        """
-        return self._coefficients
-
-    @property
-    def residuals(self):
-        """
-        obtain the residuals of the current regression model.
-        """
-        return self.Y - self.predict(self.X)
-
-    @property
-    def __iv_labels__(self):
-        """
-        return the labels for the regressors.
-        """
-        out = []
-        if self.fit_intercept:
-            out += ["Intercept"]
-        if isinstance(self.X, pd.DataFrame):
-            X = self.X.columns.tolist()
-        else:
-            N = np.arange(self.X.shape[1])
-            X = ["X{}".format(i) for i in N]
-        out += X
-        for i in np.arange(2, self.order + 1):
-            for c in X:
-                out += [c + "^{}".format(i)]
-        return out
-
-    @property
-    def __dv_labels__(self):
-        """
-        return the labels for the dependent variables.
-        """
-        if isinstance(self.Y, pd.DataFrame):
-            return self.Y.columns.to_numpy().tolist()
-        return ["Y{}".format(i) for i in np.arange(self.Y.shape[1])]
-
-    def __simplify__(self, v, name, order):
+    def _simplify(self, v):
         """
         internal method to check entries in the constructor.
         """
-        txt = "'{}' must be a pandas.DataFrame, a numpy.ndarray or None."
-        txt = txt.format(name)
+        txt = "the input object must be a pandas.DataFrame, a numpy.ndarray or None."
         if isinstance(v, pd.DataFrame):
-            XX = v.astype(float)
+            xx = v.astype(float)
+        elif isinstance(v, np.ndarray):
+            xx = pd.DataFrame(np.atleast_1d(v).astype(float))
         else:
-            if isinstance(v, np.ndarray):
-                XX = pd.DataFrame(np.atleast_1d(v).astype(float))
-            elif v is None:
-
-                # try to get the shape from the other parameter
-                try:
-                    N = self.Y.shape[0]
-                except Exception:
-                    try:
-                        N = self.X.shape[0]
-                    except Exception:
-                        raise ValueError(txt)
-                XX = np.atleast_2d([[] for i in np.arange(N)])
-
-                # try to convert to the most similar pandas.DataFrame to the other parameter.
-                try:
-                    IX = self.Y.index
-                except Exception:
-                    try:
-                        IX = self.X.index
-                    except Exception:
-                        IX = pd.Index(np.arange(N))
-                N = np.arange(XX.shape[1]) + 1
-                CX = pd.Index(name + "{}".format(i) for i in N)
-                XX = pd.DataFrame(XX, index=IX, columns=CX).astype(float)
-            else:
-                raise NotImplementedError(txt)
-        setattr(self, name, XX)
-        ZZ = XX.values
-        if order is not None:
-            for i in np.arange(2, self.order + 1):
-                for c in np.arange(XX.shape[1]):
-                    K = np.atleast_2d(ZZ[:, c] ** i)
-                    ZZ = np.hstack([ZZ, K.T])
-        return ZZ
-
-    def copy(self):
-        """
-        copy the current instance
-        """
-        return LinearRegression(self.Y, self.X, self.fit_intercept)
+            raise NotImplementedError(txt)
+        return xx
 
     def predict(self, x):
         """
         predict the fitted Y value according to the provided x.
         """
-        X = self.__simplify__(x, "x", self.order)
+        return self._predict(self._simplify(x))
+
+    def _predict(self, xx):
+        """
+        predict the fitted Y value according to the provided x.
+        """
         if self.fit_intercept:
-            n = self.betas.shape[0] - 1
-            assert X.shape[1] == n, "'X' must have {} columns.".format(n)
-            Z = X.dot(self.betas.values[1:]) + self.betas.values[0]
+            b0 = self.betas.iloc[0]
+            bs = self.betas.iloc[1:]
+            zz = xx.dot(bs) + b0
         else:
-            n = self.betas.shape[0]
-            assert X.shape[1] == n, "'X' must have {} columns.".format(n)
-            Z = X.dot(self.betas.values)
-        if isinstance(x, pd.DataFrame):
-            idx = x.index
+            zz = xx.dot(self.betas)
+        return zz
+
+
+class PolynomialRegression(LinearRegression):
+    """
+    Obtain the regression coefficients according to the Ordinary Least
+    Squares approach.
+
+    Parameters
+    ----------
+    y:  (samples, dimensions) numpy array or pandas.DataFrame
+        the array containing the dependent variable.
+
+    x:  (samples, 1) numpy array or pandas.DataFrame
+        the array containing the indipendent variables.
+
+    n: int
+        the order of the polynome.
+
+    fit_intercept: bool
+        Should the intercept be included in the model?
+        Otherwise it will be set to zero.
+    """
+
+    def __init__(
+        self,
+        y: Union[np.ndarray, pd.DataFrame],
+        x: Union[np.ndarray, pd.DataFrame],
+        n: int = 1,
+        fit_intercept: bool = True,
+    ):
+        # add the input parameters
+        txt = "{} must be a {} object."
+        assert isinstance(fit_intercept, bool), txt.format("fit_intercept", "bool")
+        self.fit_intercept = fit_intercept
+        assert isinstance(n, int), txt.format("n", "int")
+        self.n = n
+
+        # correct the shape of y and x
+        self.Y = self._simplify(y)
+        self.X = self._simplify(x, self.n)
+        txt = "'X' and 'Y' number of rows must be identical."
+        assert self.X.shape[0] == self.Y.shape[0], txt
+
+        # add the ones for the intercept
+        if self.fit_intercept:
+            xx = self.X.values
+            xx = np.hstack([np.ones((self.X.shape[0], 1)), xx])
+
+        # get the coefficients and intercept
+        self.betas = pd.DataFrame(
+            data=sl.pinv(xx.T.dot(xx)).dot(xx.T).dot(self.Y.values),
+            index=["INTERCEPT"] + self.X.columns.to_numpy().tolist(),
+            columns=self.Y.columns.to_numpy().tolist(),
+        )
+
+    def _simplify(self, v, n=None):
+        """
+        internal method to check entries in the constructor.
+        """
+        txt = "the input object must be a pandas.DataFrame, a numpy.ndarray or None."
+        if isinstance(v, pd.DataFrame):
+            xx = v.astype(float)
+        elif isinstance(v, np.ndarray):
+            xx = pd.DataFrame(np.atleast_1d(v).astype(float))
         else:
-            idx = np.arange(X.shape[0])
-        return pd.DataFrame(Z, index=idx, columns=self.__dv_labels__)
+            raise NotImplementedError(txt)
+        if n is not None:
+            xx = pd.concat([xx ** (i + 1) for i in range(n)], axis=1)
+            cols = ["C{}".format(i + 1) for i in range(xx.shape[1])]
+            xx.columns = pd.Index(cols)
+        return xx
 
-    def to_latex(self, digits=None):
-        if digits is None:
-            digits = self.digits
-        out = [sy.latex(i, min=digits, max=digits) for i in self.symbolic]
-        out = "\\begin{array}{rcl}" + "\\".join(out) + "\\end{array}"
-        return out
-
-    def __repr__(self):
-        [sy.pprint(i, use_unicode=True) for i in self.symbolic]
-
-    def __str__(self):
-        return str(self.symbolic)
-
-    @property
-    def sum_sq(self):
+    def predict(self, x):
         """
-        calculate the sum of squares of the fitted model.
+        predict the fitted Y value according to the provided x.
         """
-        SS = pd.DataFrame(self.residuals.sum(0) ** 2).T
-        SS.columns = self.Y.columns
-        return SS
-
-    @property
-    def r_squared(self):
-        """
-        calculate the R-squared of the fitted model.
-        """
-        D = ((self.Y.values - self.Y.values.mean(0)) ** 2).sum(0)
-        return 1 - self.sum_sq / D
-
-    @property
-    def adj_r_squared(self):
-        """
-        calculate the Adjusted R-squared of the fitted model.
-        """
-        n, k = self.X.shape
-        return 1 - ((1 - self.r_squared) * (n - 1) / (n - k - 1))
-
-    @property
-    def rmse(self):
-        """
-        Get the Root Mean Squared Error
-        """
-        df = pd.DataFrame(np.sqrt((self.residuals.values ** 2).mean(0))).T
-        df.columns = self.Y.columns
-        return df
+        return self._predict(self._simplify(x, self.n))
 
 
 class PowerRegression(LinearRegression):
