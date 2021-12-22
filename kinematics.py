@@ -574,14 +574,14 @@ def three_points_angle(a, b, c, name=None):
     if name is None:
         name = "Angle"
     assert isinstance(name, str), "name must be a string"
-    assert a.vector.matches(b), "a does not match b"
-    assert a.vector.matches(c), "a does not match c"
-    assert b.vector.matches(c), "b does not match c"
+    assert a.matches(b), "a does not match b"
+    assert a.matches(c), "a does not match c"
+    assert b.matches(c), "b does not match c"
 
     # get the segments
-    ab = (b - a).vector.norm.values.flatten()
-    bc = (b - c).vector.norm.values.flatten()
-    ac = (c - a).vector.norm.values.flatten()
+    ab = (b - a).norm.values.flatten()
+    bc = (b - c).norm.values.flatten()
+    ac = (c - a).norm.values.flatten()
 
     # return the angle
     q = np.arccos((ac ** 2 - ab ** 2 - bc ** 2) / (-2 * ab * bc))
