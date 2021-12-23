@@ -78,7 +78,7 @@ def read_emt(path):
             coordinates += [values[rows, cols.flatten()]]
 
         # setup the output variable
-        vd[v] = pd.DataFrame(
+        vd[v] = Vector(
             data=np.vstack(np.atleast_2d(coordinates)).T,
             index=time,
             columns=nn,
