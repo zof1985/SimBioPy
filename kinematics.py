@@ -1,12 +1,12 @@
 # IMPORTS
 
+from io import BufferedReader
 import os
 import struct
+from typing import Tuple
 import weakref
 import numpy as np
 import pandas as pd
-from traitlets.traitlets import Any
-from . import base
 
 # METHODS
 
@@ -87,7 +87,7 @@ def read_emt(path):
     return vd
 
 
-def read_tdf(path: str, fit_to_kinematics: bool = False):
+def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
     """
     Return the readings from a .tdf file as dicts of Vectors objects.
 
@@ -103,17 +103,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
 
     Returns
     -------
-    points: dict
-        a dict with the Point 3D tracks vectors.
-
-    forces: dict
-        a dict with the Force 3D tracks vectors.
-
-    moments: dict
-        a dict with the Torque 3D tracks vectors.
-
-    emgs: dict
-         a dict with the EMG activity channels as vectors.
+    a dict containing the distinct data properly arranged by type.
     """
 
     # check the validity of the entered path
@@ -121,7 +111,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
     assert path[-4:] == ".tdf", path + ' must be an ".tdf" path.'
 
     # file reader with basic info
-    def read_file(file, offset):
+    def readFile(file: str, offset: int) -> Tuple[BufferedReader, int, int, int, float]:
         """
         read the file and return it after reading with basic info on it.
 
@@ -154,18 +144,21 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
         """
         # read the file
         fid = open(file, "rb")
-
-        # update the reader
         fid.seek(offset)
 
         # get the basic info
-        base_info = struct.unpack("iifi", fid.read(16))
-        rows, freq, time, cols = base_info
-
+        rows, freq, time, cols = struct.unpack("iifi", fid.read(16))
         return fid, rows, cols, freq, time
 
-    # generic track extractor
-    def read_tracks(fid, n_frames, n_tracks, freq, time, by_frame, size):
+    def readTracks(
+        fid: BufferedReader,
+        n_frames: int,
+        n_tracks: int,
+        freq: int,
+        time: float,
+        by_frame: bool,
+        size: int,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         internal method used to extract 3D tracks from tdf file.
 
@@ -221,7 +214,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
                 blbl = blbl[1:]
             labels[trk] = lbl
 
-            # read by frame
+            # read data
             if by_frame:
                 n = size * n_tracks * n_frames
                 segments = struct.unpack("%if" % n, fid.read(n * 4))
@@ -229,7 +222,6 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
 
             # read by track
             else:
-
                 (n_seg,) = struct.unpack("i", fid.read(4))
                 fid.seek(4, 1)
                 segments = struct.unpack("%ii" % (2 * n_seg), fid.read(8 * n_seg))
@@ -249,8 +241,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
         fid.close()
         return tracks, labels, idx
 
-    # camera tracks
-    def getPoint3D(file, info):
+    def getPoint3D(file: str, info: dict) -> dict:
         """
         read Point3D tracks data from the provided tdf file.
 
@@ -269,7 +260,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
             a dict with all the tracks provided as SimbioPy.Vector objects.
         """
         # get the file read
-        fid, n_frames, n_tracks, freq, time = read_file(file, info["Offset"])
+        fid, n_frames, n_tracks, freq, time = readFile(file, info["Offset"])
 
         # calibration data (read but not exported)
         _ = np.array(struct.unpack("3f", fid.read(12)))
@@ -291,7 +282,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
             raise IOError("Invalid 'Format' info {}".format(info["Format"]))
 
         # read the data
-        tracks, labels, index = read_tracks(
+        tracks, labels, index = readTracks(
             fid, n_frames, n_tracks, freq, time, by_frame, 3
         )
 
@@ -299,15 +290,14 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
         points = {}
         for trk in range(n_tracks):
             cols = np.arange(3 * trk, 3 * trk + 3)
-            points[labels[trk]] = pd.DataFrame(
+            points[labels[trk]] = Vector(
                 data=tracks[:, cols],
                 columns=["X", "Y", "Z"],
                 index=index,
             )
         return points
 
-    # force platform data
-    def getForce3D(file, info):
+    def getForce3D(file: str, info: dict) -> Tuple[dict, dict, dict]:
         """
         read Force3D tracks data from the provided tdf file.
 
@@ -326,7 +316,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
             a dict with all the tracks provided as SimbioPy.Vector objects.
         """
         # get the file read (tracks and frames are inverted)
-        fid, n_tracks, n_frames, freq, time = read_file(file, info["Offset"])
+        fid, n_tracks, n_frames, freq, time = readFile(file, info["Offset"])
 
         # calibration data (read but not exported)
         _ = np.array(struct.unpack("3f", fid.read(12)))
@@ -341,7 +331,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
             raise IOError("Invalid 'Format' info {}".format(info["Format"]))
 
         # read the data
-        tracks, labels, index = read_tracks(
+        tracks, labels, index = readTracks(
             fid, n_frames, n_tracks, freq, time, by_frame, 9
         )
 
@@ -351,28 +341,26 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
         moments = {}
         for trk in range(n_tracks):
             point_cols = np.arange(3 * trk, 3 * trk + 3)
-            points[labels[trk]] = pd.DataFrame(
+            points[labels[trk]] = Vector(
                 data=tracks[:, point_cols],
                 columns=["X", "Y", "Z"],
                 index=index,
             )
             force_cols = np.arange(3 * (trk + 1), 3 * (trk + 1) + 3)
-            forces[labels[trk]] = pd.DataFrame(
+            forces[labels[trk]] = Vector(
                 data=tracks[:, force_cols],
                 columns=["X", "Y", "Z"],
                 index=index,
             )
             moment_cols = np.arange(3 * (trk + 2), 3 * (trk + 2) + 3)
-            moments[labels[trk]] = pd.DataFrame(
+            moments[labels[trk]] = Vector(
                 data=tracks[:, moment_cols],
                 columns=["X", "Y", "Z"],
                 index=index,
             )
-        fid.close()
         return points, forces, moments
 
-    # read EMG data
-    def getEMG(file, info):
+    def getEMG(file: str, info: str) -> dict:
         """
         read EMG tracks data from the provided tdf file.
 
@@ -388,13 +376,10 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
         Returns
         -------
         channels: dict
-            a dict with all the EMG channels provided as SimbioPy.Vector objects.
+            a dict with all the EMG channels provided as SimbioPy.Vector.
         """
         # get the file read (tracks and frames are inverted here)
-        fid, n_tracks, n_frames, freq, time = read_file(file, info["Offset"])
-
-        # get the EMG channels map (unused its nTracks * int16 element)
-        _ = fid.read(n_tracks * 2)
+        fid, n_tracks, n_frames, freq, time = readFile(file, info["Offset"])
 
         # check if the file has to be read by frame or by track
         by_frame = info["Format"] in [2]
@@ -403,25 +388,116 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
             raise IOError("Invalid 'Format' info {}".format(info["Format"]))
 
         # read the data
-        tracks, labels, index = read_tracks(
+        fid.read(n_tracks * 2)
+        tracks, labels, index = readTracks(
             fid, n_frames, n_tracks, freq, time, by_frame, 1
         )
 
+        # generate the output
+        channels = Vector(tracks, index=index, columns=labels)
+        return {i: channels[[i]] for i in channels}
+
+    def getIMU(file: str, info: str) -> dict:
+        """
+        read IMU tracks data from the provided tdf file.
+
+        Paramters
+        ---------
+        file: str
+            the path to the tdf file
+
+        info: dict
+            a dict extracted from the tdf file reading with the info
+            required to extract Point3D data from it.
+
+        Returns
+        -------
+        points: dict
+            a dict with all the tracks provided as SimbioPy.Vector objects.
+        """
+        # check if the file has to be read by frame or by track
+        if not info["Format"] in [5]:
+            raise IOError("Invalid 'Format' info {}".format(info["Format"]))
+
+        # get the file read (tracks and frames are inverted)
+        fid, n_tracks, n_frames, freq, time = readFile(file, info["Offset"])
+
+        # read the data
+        fid.seek(2, 1)
+        tracks, _, index = readTracks(fid, n_frames, n_tracks, freq, time, False, 9)
+
         # generate the output dict
-        channels = {}
-        for trk, lbl in zip(tracks.T, labels):
-            channels[lbl] = pd.DataFrame(
-                data=np.atleast_2d(trk).T,
-                columns=[lbl],
-                index=index,
-            )
-        return channels
+        acc = Vector(
+            data=tracks[:, :3],  # m/s^2
+            columns=["X", "Y", "Z"],
+            index=index,
+        )
+        gyr = Vector(
+            data=tracks[:, 3:6] * 180 / np.pi,  # deg/s
+            columns=["X", "Y", "Z"],
+            index=index,
+        )
+        return {"Acceleration3D": acc, "AngularVelocity3D": gyr}
+
+    def resize(
+        ref: pd.DataFrame,
+        reset_time: bool = True,
+        **kwargs: Tuple[Vector, pd.DataFrame]
+    ) -> dict:
+        """
+        resize the data contained in kwargs to match the sample range
+        of ref.
+
+        Paramters
+        ---------
+        ref: Vector
+            a vector containing the reference data time.
+
+        reset_time: bool
+            if True the time of all the returned array will start from zero.
+
+        Returns
+        -------
+        resized: dict
+            a dict containing all the dataframes passed as kwargs resized
+            according to ref.
+        """
+
+        # check the entries
+        txt = "{} must be a pandas DataFrame object."
+        assert isinstance(ref, pd.DataFrame), txt.format("'ref'")
+        for key, df in kwargs.items():
+            assert isinstance(df, pd.DataFrame), txt.format(key)
+        assert reset_time or not reset_time, "'reset_time' must be a bool object."
+
+        # get the start and end ref time
+        start = np.min(ref.index.to_numpy())
+        stop = np.max(ref.index.to_numpy())
+
+        # resize all data
+        idx = {i: v.index.to_numpy() for i, v in kwargs.items()}
+        valid = {i: np.where((v >= start) & (v <= stop))[0] for i, v in idx.items()}
+        resized = {i: v.iloc[valid[i]] for i, v in kwargs.items()}
+
+        # check if the time has to be reset
+        if reset_time:
+            for i in resized:
+                resized[i].index = pd.Index(resized[i].index.to_numpy() - start)
+
+        return resized
+
+    # ----
+    # MAIN
+    # ----
 
     # codes
     tdf_signature = "41604B82CA8411D3ACB60060080C6816"
-    id_point_3d = 5
-    id_force_3d = 12
-    id_emg = 11
+    ids = {
+        5: {"fun": getPoint3D, "label": "Point3D"},
+        12: {"fun": getForce3D, "label": "Force3D"},
+        11: {"fun": getEMG, "label": "EMG"},
+        17: {"fun": getIMU, "label": "IMU"},
+    }
 
     # read the file
     fid = open(path, "rb")
@@ -442,26 +518,19 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
     blocks = {}
     for _ in range(n_entries):
 
-        # corrupted file
         if -1 == fid.seek(next_entry_offset, 1):
             raise IOError("Error: the file specified is corrupted.")
 
         # get the data types
         block_info = struct.unpack("IIii", fid.read(16))
-        bi = {
-            "Type": block_info[0],
-            "Format": block_info[1],
-            "Offset": block_info[2],
-            "Size": block_info[3],
-        }
+        bi = {i: v for i, v in zip(["Type", "Format", "Offset", "Size"], block_info)}
 
-        # check the type of block
-        if bi["Type"] == id_point_3d:
-            blocks["Point3D"] = bi
-        elif bi["Type"] == id_force_3d:
-            blocks["Force3D"] = bi
-        elif bi["Type"] == id_emg:
-            blocks["EMG"] = bi
+        # retain only valid block types
+        if any([i == bi["Type"] for i in ids]):
+            blocks[ids[bi["Type"]]["label"]] = {
+                "fun": ids[bi["Type"]]["fun"],
+                "info": bi,
+            }
 
         # update the offset
         next_entry_offset = 272
@@ -470,86 +539,22 @@ def read_tdf(path: str, fit_to_kinematics: bool = False):
     fid.close()
 
     # read the available data
-    points = {}
-    forces = {}
-    moments = {}
-    emgs = {}
-    for key, info in blocks.items():
-        if key == "Point3D":
-            points.update(**getPoint3D(path, info))
-        elif key == "Force3D":
-            pnt, frz, mnt = getForce3D(path, info)
-            points.update(**pnt)
-            forces.update(**frz)
-            moments.update(**mnt)
-        elif key == "EMG":
-            emgs.update(**getEMG(path, info))
+    out = {l: v["fun"](path, v["info"]) for l, v in blocks.items()}
 
-    # resize the data to kinematics
-    if fit_to_kinematics:
-        valid = {i: v.dropna() for i, v in points.items()}
+    # resize the data to kinematics (where appropriate)
+    has_kinematics = any([i in ["Point3D"] for i in out])
+    if fit_to_kinematics and has_kinematics:
+        valid = {i: v.dropna() for i, v in out["Point3D"].items()}
         start = np.min([np.min(v.index.to_numpy()) for _, v in valid.items()])
         stop = np.max([np.max(v.index.to_numpy()) for _, v in valid.items()])
-        ref = points[[i for i in points][0]]
+        ref = out["Point3D"][[i for i in out["Point3D"]][0]]
         idx = ref.index.to_numpy()
         idx = np.where((idx >= start) & (idx <= stop))[0]
         ref = ref.iloc[idx]
-        points = resize(ref, True, **points)
-        forces = resize(ref, True, **forces)
-        moments = resize(ref, True, **moments)
-        emgs = resize(ref, True, **emgs)
+        out = {l: resize(ref, True, **v) for l, v in out.items()}
 
     # return what has been read
-    return {
-        "point": {i: Vector(v) for i, v in points.items()},
-        "force": {i: Vector(v) for i, v in forces.items()},
-        "moment": {i: Vector(v) for i, v in moments.items()},
-        "emg": {i: Vector(v) for i, v in emgs.items()},
-    }
-
-
-def resize(ref: pd.DataFrame, reset_time: bool = True, **kwargs: pd.DataFrame) -> dict:
-    """
-    resize the data contained in kwargs to match the sample range
-    of ref.
-
-    Paramters
-    ---------
-    ref: Vector
-        a vector containing the reference data time.
-
-    reset_time: bool
-        if True the time of all the returned array will start from zero.
-
-    Returns
-    -------
-    resized: dict
-        a dict containing all the dataframes passed as kwargs resized
-        according to ref.
-    """
-
-    # check the entries
-    txt = "{} must be a pandas DataFrame object."
-    assert isinstance(ref, pd.DataFrame), txt.format("'ref'")
-    for key, df in kwargs.items():
-        assert isinstance(df, pd.DataFrame), txt.format(key)
-    assert reset_time or not reset_time, "'reset_time' must be a bool object."
-
-    # get the start and end ref time
-    start = np.min(ref.index.to_numpy())
-    stop = np.max(ref.index.to_numpy())
-
-    # resize all data
-    idx = {i: v.index.to_numpy() for i, v in kwargs.items()}
-    valid = {i: np.where((v >= start) & (v <= stop))[0] for i, v in idx.items()}
-    resized = {i: v.iloc[valid[i]] for i, v in kwargs.items()}
-
-    # check if the time has to be reset
-    if reset_time:
-        for i in resized:
-            resized[i].index = pd.Index(resized[i].index.to_numpy() - start)
-
-    return resized
+    return out
 
 
 def three_points_angle(a, b, c, name=None):
@@ -954,7 +959,7 @@ class Vector(pd.DataFrame):
         q = np.arctan2(self[y].values.flatten(), self[x].values.flatten())
         return Vector(q, columns=[name], index=self.index)
 
-    def matches(self, vector: Any) -> bool:
+    def matches(self, vector: pd.DataFrame) -> bool:
         """
         check if the vector V is comparable to self.
 
