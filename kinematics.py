@@ -2,8 +2,8 @@
 
 
 from io import BufferedReader
-from base import interpolate_cs
-from typing import Tuple, overload
+from .base import interpolate_cs
+from typing import Tuple
 import os
 import struct
 import weakref
@@ -298,7 +298,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
                 columns=["X", "Y", "Z"],
                 index=index,
             )
-        return points
+        return {"Point3D": points}
 
     def getForce3D(file: str, info: dict) -> Tuple[dict, dict, dict]:
         """
@@ -361,7 +361,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
                 columns=["X", "Y", "Z"],
                 index=index,
             )
-        return points, forces, moments
+        return {"Point3D": points, "Force3D": forces, "Moment3D": moments}
 
     def getEMG(file: str, info: str) -> dict:
         """
@@ -398,7 +398,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
 
         # generate the output
         channels = Vector(tracks, index=index, columns=labels)
-        return {i: channels[[i]] for i in channels}
+        return {"EMG": {i: channels[[i]] for i in channels}}
 
     def getIMU(file: str, info: str) -> dict:
         """
@@ -427,20 +427,28 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
 
         # read the data
         fid.seek(2, 1)
-        tracks, _, index = readTracks(fid, n_frames, n_tracks, freq, time, False, 9)
+        tracks, labels, index = readTracks(
+            fid, n_frames, n_tracks, freq, time, False, 9
+        )
 
         # generate the output dict
-        acc = Vector(
-            data=tracks[:, :3],  # m/s^2
-            columns=["X", "Y", "Z"],
-            index=index,
-        )
-        gyr = Vector(
-            data=tracks[:, 3:6] * 180 / np.pi,  # deg/s
-            columns=["X", "Y", "Z"],
-            index=index,
-        )
-        return {"Acceleration3D": acc, "AngularVelocity3D": gyr}
+        accs = {}
+        gyrs = {}
+        for i, label in enumerate(labels):
+            acc_cols = np.arange(3) + 3 * i
+            accs[label] = Vector(
+                data=tracks[:, acc_cols],  # m/s^2
+                columns=["X", "Y", "Z"],
+                index=index,
+            )
+            gyr_cols = acc_cols + 3
+            gyrs[label] = Vector(
+                data=tracks[:, gyr_cols] * 180 / np.pi,  # deg/s
+                columns=["X", "Y", "Z"],
+                index=index,
+            )
+
+        return {"Acceleration3D": accs, "AngularVelocity3D": gyrs}
 
     def resize(
         ref: pd.DataFrame,
@@ -458,6 +466,9 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
 
         reset_time: bool
             if True the time of all the returned array will start from zero.
+
+        kwargs: key-values vectors
+            a variable number of named vectors to be resized according to ref.
 
         Returns
         -------
@@ -518,7 +529,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
 
     # check each entry to find the available blocks
     next_entry_offset = 40
-    blocks = {}
+    blocks = []
     for _ in range(n_entries):
 
         if -1 == fid.seek(next_entry_offset, 1):
@@ -530,10 +541,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
 
         # retain only valid block types
         if any([i == bi["Type"] for i in ids]):
-            blocks[ids[bi["Type"]]["label"]] = {
-                "fun": ids[bi["Type"]]["fun"],
-                "info": bi,
-            }
+            blocks += [{"fun": ids[bi["Type"]]["fun"], "info": bi}]
 
         # update the offset
         next_entry_offset = 272
@@ -542,7 +550,12 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
     fid.close()
 
     # read the available data
-    out = {l: v["fun"](path, v["info"]) for l, v in blocks.items()}
+    out = {}
+    for b in blocks:
+        for key, value in b["fun"](path, b["info"]).items():
+            if not any([i == key for i in out]):
+                out[key] = {}
+            out[key].update(value)
 
     # resize the data to kinematics (where appropriate)
     has_kinematics = any([i in ["Point3D"] for i in out])
@@ -806,7 +819,6 @@ class Vector(pd.DataFrame):
     def _constructor_sliced(self):
         return Vector
 
-    @overload
     def dropna(self, axis: int = 0):
         """
         return the Vector without missing data.
@@ -823,7 +835,6 @@ class Vector(pd.DataFrame):
         """
         return Vector(pd.DataFrame(self).dropna(axis=axis, inplace=False))
 
-    @overload
     def unique(self, axis: int = 0):
         """
         return the unique rows or columns in the vector.
@@ -849,14 +860,12 @@ class Vector(pd.DataFrame):
             raise ValueError("'axis' must be 0 or 1.")
         return Vector(val, index=idx, columns=col)
 
-    @overload
     def copy(self):
         """
         return a copy of the current vector.
         """
         return Vector(self)
 
-    @overload
     def plot(self, *args, **kwargs):
         """
         generate a matplotlib plot representing the current object.
