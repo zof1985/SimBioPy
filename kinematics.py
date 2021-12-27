@@ -1,14 +1,17 @@
 # IMPORTS
 
+
 from io import BufferedReader
+from base import interpolate_cs
+from typing import Tuple, overload
 import os
 import struct
-from typing import Tuple
 import weakref
 import numpy as np
 import pandas as pd
 
-# METHODS
+
+#! METHODS
 
 
 def read_emt(path):
@@ -593,7 +596,7 @@ def three_points_angle(a, b, c, name=None):
     return pd.DataFrame(q, columns=[name], index=a.index)
 
 
-# CLASSES
+#! CLASSES
 
 
 class ReferenceFrame:
@@ -770,97 +773,6 @@ class ReferenceFrame:
         return np.vstack([norm(u) for u in W])
 
 
-'''
-@pd.api.extensions.register_dataframe_accessor("vector")
-class Vector:
-    def __init__(self, pandas_obj):
-        self._obj = pandas_obj
-
-    @property
-    def sampling_frequency(self):
-        """
-        return the "average" sampling frequency of the Vector.
-        """
-        return float(1 / np.mean(np.diff(self._obj.index.to_numpy())))
-
-    @property
-    def norm(self):
-        """
-        get the norm of the vector.
-        """
-        dt = np.sqrt(np.sum(self._obj.values ** 2, axis=1))
-        lbls = [str(i) for i in self._obj.columns.to_list()]
-        cols = "|{}|".format("+".join(lbls))
-        idx = self._obj.index
-        return pd.DataFrame(data=dt, columns=[cols], index=idx)
-
-    def get_angle(self, x, y, name=None):
-        """
-        return the angle between dimensions y and x using the arctan function.
-
-        Parameters
-        ----------
-        x, y: str
-            the name of the columns to be used for the angle calculation.
-
-        name: str or None
-            the name of the output dataframe column
-
-        Returns
-        -------
-        q: Vector
-            the angle in radiants.
-        """
-
-        # check the data
-        if name is None:
-            name = "Angle"
-        assert isinstance(name, str), "name must be a string"
-        assert isinstance(x, str), "x must be a string"
-        assert x in self._obj.columns.to_list(), "x not in columns."
-        assert isinstance(y, str), "y must be a string"
-        assert y in self._obj.columns.to_list(), "y not in columns."
-
-        # calculate the angle
-        q = np.arctan2(self._obj[y].values.flatten(), self._obj[x].values.flatten())
-        return pd.DataFrame(q, columns=[name], index=self._obj.index)
-
-    def matches(self, vector):
-        """
-        check if the vector V is comparable to self.
-
-        Parameters
-        ----------
-        vector:  Vector
-            the vector to be compared
-
-        Returns
-        -------
-        Q: bool
-            true if V matches self, False otherwise.
-        """
-        # check the shape
-        s_rows, s_cols = self._obj.shape
-        v_rows, v_cols = vector.shape
-        if s_rows != v_rows or s_cols != v_cols:
-            return False
-
-        # check the column names
-        s_cols = self._obj.columns.to_numpy()
-        v_cols = vector.columns.to_numpy()
-        if not all([i == j for i, j in zip(s_cols, v_cols)]):
-            return False
-
-        # check the index values
-        s_idx = self._obj.index.to_numpy()
-        v_idx = vector.index.to_numpy()
-        if not all([i == j for i, j in zip(s_idx, v_idx)]):
-            return False
-
-        return True
-'''
-
-
 class Vector(pd.DataFrame):
 
     # attributes
@@ -894,16 +806,70 @@ class Vector(pd.DataFrame):
     def _constructor_sliced(self):
         return Vector
 
-    def dropna(self):
-        return Vector(pd.DataFrame(self).dropna(inplace=False))
+    @overload
+    def dropna(self, axis: int = 0):
+        """
+        return the Vector without missing data.
 
-    def unique(self):
-        val, ix = np.unique(self.values, return_index=True, axis=0)
-        idx = self.index.to_numpy()[ix]
-        col = self.columns.to_numpy()
+        Parameters
+        ----------
+        axis: int
+            the dimension along with dropna must work.
+
+        Returns
+        -------
+        full: Vector
+            the vector without missing data.
+        """
+        return Vector(pd.DataFrame(self).dropna(axis=axis, inplace=False))
+
+    @overload
+    def unique(self, axis: int = 0):
+        """
+        return the unique rows or columns in the vector.
+
+        Parameters
+        ----------
+        axis: int
+            the dimension along with unique must work.
+
+        Returns
+        -------
+        full: Vector
+            the vector unique occurrences.
+        """
+        val, ix = np.unique(self.values, return_index=True, axis=axis)
+        if axis == 0:
+            idx = self.index.to_numpy()[ix]
+            col = self.columns.to_numpy()
+        elif axis == 1:
+            idx = self.index.to_numpy()
+            col = self.columns.to_numpy()[ix]
+        else:
+            raise ValueError("'axis' must be 0 or 1.")
         return Vector(val, index=idx, columns=col)
 
+    @overload
+    def copy(self):
+        """
+        return a copy of the current vector.
+        """
+        return Vector(self)
+
+    @overload
     def plot(self, *args, **kwargs):
+        """
+        generate a matplotlib plot representing the current object.
+
+        Parameters
+        ----------
+        input parameters as described here:
+        https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.plot.html
+
+        Returns
+        -------
+        a matplotlib.Figure object.
+        """
         return pd.DataFrame(self).plot(*args, **kwargs)
 
     def sampling_frequency(self, digits=3):
@@ -992,3 +958,42 @@ class Vector(pd.DataFrame):
             return False
 
         return True
+
+    def fillna(self, value: float = None):
+        """
+        fill missing values in the vector.
+
+        Parameters
+        ----------
+        value: float or None
+            the value to be used for missing data replacement.
+            if None, cubic spline interpolation is used to extract the
+            missing data.
+
+        Returns
+        -------
+        filled: Vector
+            the vector without missing data.
+        """
+        filled = self.copy()
+        x_new = filled.index.to_numpy()
+
+        # fill by cubic spline interpolation
+        if value is None:
+            df_old = self.dropna()
+            for i in filled.columns:
+                y_new = interpolate_cs(
+                    y=df_old[i].values.flatten(),
+                    x_old=df_old.index.to_numpy(),
+                    x_new=x_new,
+                )
+                filled.loc[x_new, [i]] = np.atleast_2d(y_new).T
+
+        # constant value
+        else:
+            vals = filled.values
+            nans = np.argwhere(np.isnan(vals))
+            vals[nans] = value
+            filled.loc[x_new, filled.columns] = vals
+
+        return filled
