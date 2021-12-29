@@ -2,7 +2,7 @@
 
 
 from io import BufferedReader
-from .base import interpolate_cs
+from .base import *
 from typing import Tuple
 import os
 import struct
@@ -968,7 +968,7 @@ class Vector(pd.DataFrame):
 
         return True
 
-    def fillna(self, value: float = None):
+    def fillna(self, value: float = None, n_predictors: int = 3, predictors: list = []):
         """
         fill missing values in the vector.
 
@@ -978,17 +978,77 @@ class Vector(pd.DataFrame):
             the value to be used for missing data replacement.
             if None, cubic spline interpolation is used to extract the
             missing data.
+            Please note that if predictors is not empty, this parameter is ignored.
+
+        n_predictors: int
+            the number of predictors to be used if predictors is not empty
+
+        predictors: list
+            list of Vectors that can be matched with self and that can be used to obtain
+            missing coordinates via multiple linear regression.
+            If left empty, cubic spline interpolation or constant value substitution is
+            used according to the inputs provided in value.
 
         Returns
         -------
         filled: Vector
             the vector without missing data.
         """
+        # check if missing values exist
+        miss = self.isna().any(1).values.flatten()
         filled = self.copy()
+
+        # otherwise return a copy of the actual vector
+        if not np.any(miss):
+            return filled
+
+        # get the vector index
         x_new = filled.index.to_numpy()
 
+        # multiple linear regression
+        assert isinstance(predictors, list), "'predictors' must be a 'list'."
+        if len(predictors) > 0:
+            assert isinstance(n_predictors, int), "'n_predictors' must be an 'int'."
+
+            def corr(a, b):
+                """
+                get the mean correlation between a and b
+                """
+                cvec = []
+                for d in a.columns:
+                    v = [a[d].values.flatten(), b[d].values.flatten()]
+                    v = np.vstack(np.atleast_2d(v))
+                    valid = v[:, np.all(~np.isnan(v), axis=0)]
+                    if valid.shape[1] > 0:
+                        cvec += [abs(np.corrcoef(valid, rowvar=True)[0, 1])]
+                    else:
+                        cvec += [0]
+                return np.mean(cvec)
+
+            # get mean correlation between self and the predictors
+            y = self.values
+            corrs = []
+            for i in predictors:
+                assert self.matches(i), "{} does not match with self.".format(i)
+                if np.all(i.loc[miss].notna().values):
+                    ix = pd.concat([self, i], axis=1).dropna().index.to_numpy()
+                    if len(ix) >= 2:
+                        corrs += [corr(self.loc[ix], i.loc[ix])]
+
+            # keep the best n_predictors
+            best_preds = np.argsort(corrs)[::-1][:n_predictors]
+            best_preds = [v for i, v in enumerate(predictors) if i in best_preds]
+            x = pd.concat(best_preds, axis=1).values
+
+            # get the predictive equation
+            valid = np.all(~np.isnan(np.concatenate([y, x], axis=1)), axis=1)
+            lr = LinearRegression(y[valid], x[valid], True)
+
+            # replace missing values
+            filled.loc[miss, filled.columns] = lr.predict(x[miss]).values
+
         # fill by cubic spline interpolation
-        if value is None:
+        elif value is None:
             df_old = self.dropna()
             for i in filled.columns:
                 y_new = interpolate_cs(
