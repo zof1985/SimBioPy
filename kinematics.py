@@ -9,6 +9,7 @@ import struct
 import weakref
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as pl
 
 
 #! METHODS
@@ -866,7 +867,7 @@ class Vector(pd.DataFrame):
         """
         return Vector(self)
 
-    def plot(self, *args, **kwargs):
+    def plot(self, show=True, *args, **kwargs):
         """
         generate a matplotlib plot representing the current object.
 
@@ -879,7 +880,11 @@ class Vector(pd.DataFrame):
         -------
         a matplotlib.Figure object.
         """
-        return pd.DataFrame(self).plot(*args, **kwargs)
+        if not show:
+            return pd.DataFrame(self).plot(*args, **kwargs)
+        else:
+            pd.DataFrame(self).plot(*args, **kwargs)
+            pl.show()
 
     def sampling_frequency(self, digits=3):
         """
