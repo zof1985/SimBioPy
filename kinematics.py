@@ -293,7 +293,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         # generate the output dict
         points = {}
         for trk in range(n_tracks):
-            cols = np.arange(3 * trk, 3 * trk + 3)
+            cols = np.arange(3) + 3 * trk
             points[labels[trk]] = Vector(
                 data=tracks[:, cols],
                 columns=["X", "Y", "Z"],
@@ -344,19 +344,19 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         forces = {}
         moments = {}
         for trk in range(n_tracks):
-            point_cols = np.arange(3 * trk, 3 * trk + 3)
+            point_cols = np.arange(3) + 9 * trk
             points[labels[trk]] = Vector(
                 data=tracks[:, point_cols],
                 columns=["X", "Y", "Z"],
                 index=index,
             )
-            force_cols = np.arange(3 * (trk + 1), 3 * (trk + 1) + 3)
+            force_cols = np.arange(3) + 3 + 9 * trk
             forces[labels[trk]] = Vector(
                 data=tracks[:, force_cols],
                 columns=["X", "Y", "Z"],
                 index=index,
             )
-            moment_cols = np.arange(3 * (trk + 2), 3 * (trk + 2) + 3)
+            moment_cols = np.arange(3) + 6 + 9 * trk
             moments[labels[trk]] = Vector(
                 data=tracks[:, moment_cols],
                 columns=["X", "Y", "Z"],
