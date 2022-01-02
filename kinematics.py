@@ -867,6 +867,13 @@ class Vector(pd.DataFrame):
         """
         return Vector(self)
 
+    @property
+    def T(self):
+        """
+        return the transpose of the vector
+        """
+        return Vector(pd.DataFrame(self).T)
+
     def plot(self, show=True, *args, **kwargs):
         """
         generate a matplotlib plot representing the current object.
