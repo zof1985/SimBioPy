@@ -12,6 +12,476 @@ import pandas as pd
 import matplotlib.pyplot as pl
 
 
+#! CLASSES
+
+
+class ReferenceFrame:
+    """
+    Create a ReferenceFrame instance.
+
+    Attributes
+    ----------
+
+    origin: array-like 1D
+        a 1D list that contains the coordinates of the ReferenceFrame's origin.
+
+    orientation: NxN array
+        a 2D square matrix containing on each row the versor corresponding to each
+        dimension of the origin.
+
+    names: array-like 1D
+        a 1D array with the names of the dimensions.
+    """
+
+    def __init__(self, origin, orientation=None, names=None):
+        """
+        Create a ReferenceFrame object.
+
+        Parameters
+        ----------
+
+        origin: array-like 1D
+            a 1D list that contains the coordinates of the ReferenceFrame's origin.
+
+        orientation: NxN array
+            a 2D square matrix containing on each row the versor corresponding to each
+            dimension of the origin.
+
+        names: array-like 1D
+            a 1D array with the names of the dimensions.
+        """
+
+        def check_input(inp, lbl):
+            txt = "{} must be a list or numpy array."
+            assert isinstance(inp, (list, np.ndarray)), txt.format(lbl)
+
+        # handle the origin parameter
+        check_input(origin, "origin")
+        self.origin = np.atleast_1d(origin).flatten()
+
+        # handle the names parameter
+        if names is None:
+            names = ["X{}".format(i + 1) for i in range(len(self.origin))]
+        check_input(names, "names")
+        self.names = np.squeeze(names).flatten()
+
+        # handle the orientation parameter
+        if orientation is None:
+            orientation = np.eye(len(self.origin))
+        check_input(orientation, "orientation")
+        self.orientation = self._gram_schmidt(orientation)
+
+    def __str__(self):
+        """
+        generate a pandas.DataFrame representing the ReferenceFrame.
+        """
+        origin_df = pd.DataFrame(
+            data=np.atleast_2d(self.origin), columns=self.names, index=["Origin"]
+        )
+        orientation_df = pd.DataFrame(
+            data=self.orientation,
+            columns=self.names,
+            index=self.names,
+        )
+        return origin_df.append(orientation_df).__str__()
+
+    def __repr__(self):
+        return self.__str__()
+
+    def _matches(self, vector):
+        """
+        Check vector may be part of self.
+
+        Parameters
+        ----------
+        vector: Vector, Vector
+            a Vector or Vector object.
+
+        Returns
+        -------
+        matches: bool
+            True if vector can be part of self. False, otherwise.
+        """
+
+        if not isinstance(vector, pd.DataFrame):
+            return False
+        if len(self.origin) != vector.shape[1]:
+            return False
+        if not np.all([np.any(vector.columns == i) for i in self.names]):
+            return False
+        return True
+
+    def copy(self):
+        """
+        Return a copy of self.
+        """
+        return ReferenceFrame(
+            origin=self.origin, orientation=self.orientation, names=self.names
+        )
+
+    def rotate(self, vector):
+        """
+        Rotate vector according to the current ReferenceFrame instance.
+
+        Parameters
+        ----------
+        vector: Vector
+            a Vector object.
+
+        Returns
+        -------
+        vec: Vector
+            a rotated Vector object.
+        """
+        assert self._matches(vector), "vector must be a Vector object."
+        ov = np.vstack([np.atleast_2d(self.origin) for _ in range(vector.shape[0])])
+        out = (vector - ov).dot(self.orientation.T)
+        out.columns = self.names
+        return out
+
+    def invert(self, vector):
+        """
+        Rotate vector back from the current Reference Frame to its former one.
+
+        Parameters
+        ----------
+        vector: Vector
+            a Vector object.
+
+        Returns
+        -------
+        vec: Vector
+            a rotated Vector object.
+        """
+        assert self._matches(vector), "vector must be a Vector object."
+        ov = np.vstack([np.atleast_2d(self.origin) for _ in range(vector.shape[0])])
+        out = vector.dot(self.orientation)
+        out.columns = self.names
+        return out + ov
+
+    def _gram_schmidt(self, vectors):
+        """
+        Return the orthogonal basis defined by a set of vectors using the
+        Gram-Schmidt algorithm.
+
+        Parameters:
+            vectors (np.ndarray): a NxN numpy.ndarray to be orthogonalized (by row).
+
+        Returns:
+            a NxN numpy.ndarray containing the orthogonalized arrays.
+        """
+
+        def proj(a, b):
+            return (np.inner(a, b) / np.inner(b, b) * b).astype(float)
+
+        def norm(v):
+            return v / np.sqrt(np.sum(v ** 2))
+
+        # calculate the projection points
+        W = []
+        for i, u in enumerate(vectors):
+            w = np.copy(u).astype(float)
+            for j in vectors[:i, :]:
+                w -= proj(u, j)
+            W += [w]
+
+        # normalize
+        return np.vstack([norm(u) for u in W])
+
+
+class Vector(pd.DataFrame):
+
+    # attributes
+    _cacher = ()
+    dtype = np.float64
+
+    def __init__(self, *args, **kwargs):
+        if any([i == "name" for i in kwargs]):
+            args = [pd.Series(*args, **kwargs)]
+            kwargs = {}
+        super(Vector, self).__init__(*args, **kwargs)
+
+    def _set_as_cached(self, item, cacher) -> None:
+        """
+        Set the _cacher attribute on the calling object with a weakref to
+        cacher.
+        """
+        self._cacher = (item, weakref.ref(cacher))
+
+    def __repr__(self) -> str:
+        return pd.DataFrame(self).__repr__()
+
+    def __str__(self) -> str:
+        return pd.DataFrame(self).__str__()
+
+    @property
+    def _constructor(self):
+        return Vector
+
+    @property
+    def _constructor_sliced(self):
+        return Vector
+
+    def dropna(self, axis: int = 0):
+        """
+        return the Vector without missing data.
+
+        Parameters
+        ----------
+        axis: int
+            the dimension along with dropna must work.
+
+        Returns
+        -------
+        full: Vector
+            the vector without missing data.
+        """
+        return Vector(pd.DataFrame(self).dropna(axis=axis, inplace=False))
+
+    def unique(self, axis: int = 0):
+        """
+        return the unique rows or columns in the vector.
+
+        Parameters
+        ----------
+        axis: int
+            the dimension along with unique must work.
+
+        Returns
+        -------
+        full: Vector
+            the vector unique occurrences.
+        """
+        val, ix = np.unique(self.values, return_index=True, axis=axis)
+        if axis == 0:
+            idx = self.index.to_numpy()[ix]
+            col = self.columns.to_numpy()
+        elif axis == 1:
+            idx = self.index.to_numpy()
+            col = self.columns.to_numpy()[ix]
+        else:
+            raise ValueError("'axis' must be 0 or 1.")
+        return Vector(val, index=idx, columns=col)
+
+    def copy(self):
+        """
+        return a copy of the current vector.
+        """
+        return Vector(self)
+
+    @property
+    def T(self):
+        """
+        return the transpose of the vector
+        """
+        return Vector(pd.DataFrame(self).T)
+
+    def plot(self, show=True, *args, **kwargs):
+        """
+        generate a matplotlib plot representing the current object.
+
+        Parameters
+        ----------
+        input parameters as described here:
+        https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.plot.html
+
+        Returns
+        -------
+        a matplotlib.Figure object.
+        """
+        if not show:
+            return pd.DataFrame(self).plot(*args, **kwargs)
+        else:
+            pd.DataFrame(self).plot(*args, **kwargs)
+            pl.show()
+
+    def sampling_frequency(self, digits=3):
+        """
+        return the "average" sampling frequency of the Vector.
+
+        Parameters
+        ----------
+        digits: int
+            the number of digits for the returing value
+        """
+        return np.round(1.0 / np.mean(np.diff(self.index.to_numpy())), digits)
+
+    @property
+    def norm(self):
+        """
+        get the norm of the vector.
+        """
+        dt = np.sqrt(np.sum(self.values ** 2, axis=1))
+        lbls = [str(i) for i in self.columns.to_list()]
+        cols = "|{}|".format("+".join(lbls))
+        idx = self.index
+        return Vector(data=dt, columns=[cols], index=idx)
+
+    def get_angle(self, x: str, y: str, name: str = None):
+        """
+        return the angle between dimensions y and x using the arctan function.
+
+        Parameters
+        ----------
+        x, y: str
+            the name of the columns to be used for the angle calculation.
+
+        name: str or None
+            the name of the output dataframe column
+
+        Returns
+        -------
+        q: Vector
+            the angle in radiants.
+        """
+
+        # check the data
+        if name is None:
+            name = "Angle"
+        assert isinstance(name, str), "name must be a string"
+        assert isinstance(x, str), "x must be a string"
+        assert x in self.columns.to_list(), "x not in columns."
+        assert isinstance(y, str), "y must be a string"
+        assert y in self.columns.to_list(), "y not in columns."
+
+        # calculate the angle
+        q = np.arctan2(self[y].values.flatten(), self[x].values.flatten())
+        return Vector(q, columns=[name], index=self.index)
+
+    def matches(self, vector: pd.DataFrame) -> bool:
+        """
+        check if the vector V is comparable to self.
+
+        Parameters
+        ----------
+        vector:  Vector
+            the vector to be compared
+
+        Returns
+        -------
+        Q: bool
+            true if V matches self, False otherwise.
+        """
+        # check the shape
+        s_rows, s_cols = self.shape
+        v_rows, v_cols = vector.shape
+        if s_rows != v_rows or s_cols != v_cols:
+            return False
+
+        # check the column names
+        s_cols = self.columns.to_numpy()
+        v_cols = vector.columns.to_numpy()
+        if not all([i == j for i, j in zip(s_cols, v_cols)]):
+            return False
+
+        # check the index values
+        s_idx = self.index.to_numpy()
+        v_idx = vector.index.to_numpy()
+        if not all([i == j for i, j in zip(s_idx, v_idx)]):
+            return False
+
+        return True
+
+    def fillna(self, value: float = None, n_predictors: int = 3, predictors: list = []):
+        """
+        fill missing values in the vector.
+
+        Parameters
+        ----------
+        value: float or None
+            the value to be used for missing data replacement.
+            if None, cubic spline interpolation is used to extract the
+            missing data.
+            Please note that if predictors is not empty, this parameter is ignored.
+
+        n_predictors: int
+            the number of predictors to be used if predictors is not empty
+
+        predictors: list
+            list of Vectors that can be matched with self and that can be used to obtain
+            missing coordinates via multiple linear regression.
+            If left empty, cubic spline interpolation or constant value substitution is
+            used according to the inputs provided in value.
+
+        Returns
+        -------
+        filled: Vector
+            the vector without missing data.
+        """
+        # check if missing values exist
+        miss = self.isna().any(1).values.flatten()
+        filled = self.copy()
+
+        # otherwise return a copy of the actual vector
+        if not np.any(miss):
+            return filled
+
+        # get the vector index
+        x_new = filled.index.to_numpy()
+
+        # multiple linear regression
+        assert isinstance(predictors, list), "'predictors' must be a 'list'."
+        if len(predictors) > 0:
+            assert isinstance(n_predictors, int), "'n_predictors' must be an 'int'."
+
+            def corr(a, b):
+                """
+                get the mean correlation between a and b
+                """
+                cvec = []
+                for d in a.columns:
+                    v = [a[d].values.flatten(), b[d].values.flatten()]
+                    v = np.vstack(np.atleast_2d(v))
+                    valid = v[:, np.all(~np.isnan(v), axis=0)]
+                    if valid.shape[1] > 0:
+                        cvec += [abs(np.corrcoef(valid, rowvar=True)[0, 1])]
+                    else:
+                        cvec += [0]
+                return np.mean(cvec)
+
+            # get mean correlation between self and the predictors
+            y = self.values
+            corrs = []
+            for i in predictors:
+                assert self.matches(i), "{} does not match with self.".format(i)
+                if np.all(i.loc[miss].notna().values):
+                    ix = pd.concat([self, i], axis=1).dropna().index.to_numpy()
+                    if len(ix) >= 2:
+                        corrs += [corr(self.loc[ix], i.loc[ix])]
+
+            # keep the best n_predictors
+            best_preds = np.argsort(corrs)[::-1][:n_predictors]
+            best_preds = [v for i, v in enumerate(predictors) if i in best_preds]
+            x = pd.concat(best_preds, axis=1).values
+
+            # get the predictive equation
+            valid = np.all(~np.isnan(np.concatenate([y, x], axis=1)), axis=1)
+            lr = LinearRegression(y[valid], x[valid], True)
+
+            # replace missing values
+            filled.loc[miss, filled.columns] = lr.predict(x[miss]).values
+
+        # fill by cubic spline interpolation
+        elif value is None:
+            df_old = self.dropna()
+            for i in filled.columns:
+                y_new = interpolate_cs(
+                    y=df_old[i].values.flatten(),
+                    x_old=df_old.index.to_numpy(),
+                    x_new=x_new,
+                )
+                filled.loc[x_new, [i]] = np.atleast_2d(y_new).T
+
+        # constant value
+        else:
+            vals = filled.values
+            nans = np.argwhere(np.isnan(vals))
+            vals[nans] = value
+            filled.loc[x_new, filled.columns] = vals
+
+        return filled
+
+
 #! METHODS
 
 
@@ -574,7 +1044,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
     return out
 
 
-def three_points_angle(a, b, c, name=None):
+def three_points_angle(a: Vector, b: Vector, c: Vector, name: str = None):
     """
     return the angle between 3 points using the cosine theorem.
 
@@ -607,474 +1077,41 @@ def three_points_angle(a, b, c, name=None):
 
     # return the angle
     q = np.arccos((ac ** 2 - ab ** 2 - bc ** 2) / (-2 * ab * bc))
-    return pd.DataFrame(q, columns=[name], index=a.index)
+    return Vector(q, columns=[name], index=a.index)
 
 
-#! CLASSES
-
-
-class ReferenceFrame:
+def point_on_line_projection(A: Vector, B: Vector, C: Vector):
     """
-    Create a ReferenceFrame instance.
+    return the coordinates of O, i.e. the projection of A along the
+    line passing through B and C.
 
-    Attributes
+    Parameters
     ----------
+    A: Vector
+        the point not included on the BC line.
 
-    origin: array-like 1D
-        a 1D list that contains the coordinates of the ReferenceFrame's origin.
+    B: Vector
+        a vector with dimensions and index matchable with A.
 
-    orientation: NxN array
-        a 2D square matrix containing on each row the versor corresponding to each
-        dimension of the origin.
+    C: Vector
+        another vector with dimensions and index matchable with A.
 
-    names: array-like 1D
-        a 1D array with the names of the dimensions.
+    Returns
+    -------
+    O:  Vector
+        the vector being along the BC line and having minimum distance
+        from A.
     """
 
-    def __init__(self, origin, orientation=None, names=None):
-        """
-        Create a ReferenceFrame object.
-
-        Parameters
-        ----------
-
-        origin: array-like 1D
-            a 1D list that contains the coordinates of the ReferenceFrame's origin.
-
-        orientation: NxN array
-            a 2D square matrix containing on each row the versor corresponding to each
-            dimension of the origin.
-
-        names: array-like 1D
-            a 1D array with the names of the dimensions.
-        """
-
-        def check_input(inp, lbl):
-            txt = "{} must be a list or numpy array."
-            assert isinstance(inp, (list, np.ndarray)), txt.format(lbl)
-
-        # handle the origin parameter
-        check_input(origin, "origin")
-        self.origin = np.atleast_1d(origin).flatten()
-
-        # handle the names parameter
-        if names is None:
-            names = ["X{}".format(i + 1) for i in range(len(self.origin))]
-        check_input(names, "names")
-        self.names = np.squeeze(names).flatten()
-
-        # handle the orientation parameter
-        if orientation is None:
-            orientation = np.eye(len(self.origin))
-        check_input(orientation, "orientation")
-        self.orientation = self._gram_schmidt(orientation)
-
-    def __str__(self):
-        """
-        generate a pandas.DataFrame representing the ReferenceFrame.
-        """
-        origin_df = pd.DataFrame(
-            data=np.atleast_2d(self.origin), columns=self.names, index=["Origin"]
-        )
-        orientation_df = pd.DataFrame(
-            data=self.orientation,
-            columns=self.names,
-            index=self.names,
-        )
-        return origin_df.append(orientation_df).__str__()
-
-    def __repr__(self):
-        return self.__str__()
-
-    def _matches(self, vector):
-        """
-        Check vector may be part of self.
-
-        Parameters
-        ----------
-        vector: Vector, Vector
-            a Vector or Vector object.
-
-        Returns
-        -------
-        matches: bool
-            True if vector can be part of self. False, otherwise.
-        """
-
-        if not isinstance(vector, pd.DataFrame):
-            return False
-        if len(self.origin) != vector.shape[1]:
-            return False
-        if not np.all([np.any(vector.columns == i) for i in self.names]):
-            return False
-        return True
-
-    def copy(self):
-        """
-        Return a copy of self.
-        """
-        return ReferenceFrame(
-            origin=self.origin, orientation=self.orientation, names=self.names
-        )
-
-    def rotate(self, vector):
-        """
-        Rotate vector according to the current ReferenceFrame instance.
-
-        Parameters
-        ----------
-        vector: Vector
-            a Vector object.
-
-        Returns
-        -------
-        vec: Vector
-            a rotated Vector object.
-        """
-        assert self._matches(vector), "vector must be a Vector object."
-        ov = np.vstack([np.atleast_2d(self.origin) for _ in range(vector.shape[0])])
-        out = (vector - ov).dot(self.orientation.T)
-        out.columns = self.names
-        return out
-
-    def invert(self, vector):
-        """
-        Rotate vector back from the current Reference Frame to its former one.
-
-        Parameters
-        ----------
-        vector: Vector
-            a Vector object.
-
-        Returns
-        -------
-        vec: Vector
-            a rotated Vector object.
-        """
-        assert self._matches(vector), "vector must be a Vector object."
-        ov = np.vstack([np.atleast_2d(self.origin) for _ in range(vector.shape[0])])
-        out = vector.dot(self.orientation)
-        out.columns = self.names
-        return out + ov
-
-    def _gram_schmidt(self, vectors):
-        """
-        Return the orthogonal basis defined by a set of vectors using the
-        Gram-Schmidt algorithm.
-
-        Parameters:
-            vectors (np.ndarray): a NxN numpy.ndarray to be orthogonalized (by row).
-
-        Returns:
-            a NxN numpy.ndarray containing the orthogonalized arrays.
-        """
-
-        def proj(a, b):
-            return (np.inner(a, b) / np.inner(b, b) * b).astype(float)
-
-        def norm(v):
-            return v / np.sqrt(np.sum(v ** 2))
-
-        # calculate the projection points
-        W = []
-        for i, u in enumerate(vectors):
-            w = np.copy(u).astype(float)
-            for j in vectors[:i, :]:
-                w -= proj(u, j)
-            W += [w]
-
-        # normalize
-        return np.vstack([norm(u) for u in W])
-
-
-class Vector(pd.DataFrame):
-
-    # attributes
-    _cacher = ()
-    dtype = np.float64
-
-    def __init__(self, *args, **kwargs):
-        if any([i == "name" for i in kwargs]):
-            args = [pd.Series(*args, **kwargs)]
-            kwargs = {}
-        super(Vector, self).__init__(*args, **kwargs)
-
-    def _set_as_cached(self, item, cacher) -> None:
-        """
-        Set the _cacher attribute on the calling object with a weakref to
-        cacher.
-        """
-        self._cacher = (item, weakref.ref(cacher))
-
-    def __repr__(self) -> str:
-        return pd.DataFrame(self).__repr__()
-
-    def __str__(self) -> str:
-        return pd.DataFrame(self).__str__()
-
-    @property
-    def _constructor(self):
-        return Vector
-
-    @property
-    def _constructor_sliced(self):
-        return Vector
-
-    def dropna(self, axis: int = 0):
-        """
-        return the Vector without missing data.
-
-        Parameters
-        ----------
-        axis: int
-            the dimension along with dropna must work.
-
-        Returns
-        -------
-        full: Vector
-            the vector without missing data.
-        """
-        return Vector(pd.DataFrame(self).dropna(axis=axis, inplace=False))
-
-    def unique(self, axis: int = 0):
-        """
-        return the unique rows or columns in the vector.
-
-        Parameters
-        ----------
-        axis: int
-            the dimension along with unique must work.
-
-        Returns
-        -------
-        full: Vector
-            the vector unique occurrences.
-        """
-        val, ix = np.unique(self.values, return_index=True, axis=axis)
-        if axis == 0:
-            idx = self.index.to_numpy()[ix]
-            col = self.columns.to_numpy()
-        elif axis == 1:
-            idx = self.index.to_numpy()
-            col = self.columns.to_numpy()[ix]
-        else:
-            raise ValueError("'axis' must be 0 or 1.")
-        return Vector(val, index=idx, columns=col)
-
-    def copy(self):
-        """
-        return a copy of the current vector.
-        """
-        return Vector(self)
-
-    @property
-    def T(self):
-        """
-        return the transpose of the vector
-        """
-        return Vector(pd.DataFrame(self).T)
-
-    def plot(self, show=True, *args, **kwargs):
-        """
-        generate a matplotlib plot representing the current object.
-
-        Parameters
-        ----------
-        input parameters as described here:
-        https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.plot.html
-
-        Returns
-        -------
-        a matplotlib.Figure object.
-        """
-        if not show:
-            return pd.DataFrame(self).plot(*args, **kwargs)
-        else:
-            pd.DataFrame(self).plot(*args, **kwargs)
-            pl.show()
-
-    def sampling_frequency(self, digits=3):
-        """
-        return the "average" sampling frequency of the Vector.
-
-        Parameters
-        ----------
-        digits: int
-            the number of digits for the returing value
-        """
-        return np.round(1.0 / np.mean(np.diff(self.index.to_numpy())), digits)
-
-    @property
-    def norm(self):
-        """
-        get the norm of the vector.
-        """
-        dt = np.sqrt(np.sum(self.values ** 2, axis=1))
-        lbls = [str(i) for i in self.columns.to_list()]
-        cols = "|{}|".format("+".join(lbls))
-        idx = self.index
-        return Vector(data=dt, columns=[cols], index=idx)
-
-    def get_angle(self, x: str, y: str, name: str = None):
-        """
-        return the angle between dimensions y and x using the arctan function.
-
-        Parameters
-        ----------
-        x, y: str
-            the name of the columns to be used for the angle calculation.
-
-        name: str or None
-            the name of the output dataframe column
-
-        Returns
-        -------
-        q: Vector
-            the angle in radiants.
-        """
-
-        # check the data
-        if name is None:
-            name = "Angle"
-        assert isinstance(name, str), "name must be a string"
-        assert isinstance(x, str), "x must be a string"
-        assert x in self.columns.to_list(), "x not in columns."
-        assert isinstance(y, str), "y must be a string"
-        assert y in self.columns.to_list(), "y not in columns."
-
-        # calculate the angle
-        q = np.arctan2(self[y].values.flatten(), self[x].values.flatten())
-        return Vector(q, columns=[name], index=self.index)
-
-    def matches(self, vector: pd.DataFrame) -> bool:
-        """
-        check if the vector V is comparable to self.
-
-        Parameters
-        ----------
-        vector:  Vector
-            the vector to be compared
-
-        Returns
-        -------
-        Q: bool
-            true if V matches self, False otherwise.
-        """
-        # check the shape
-        s_rows, s_cols = self.shape
-        v_rows, v_cols = vector.shape
-        if s_rows != v_rows or s_cols != v_cols:
-            return False
-
-        # check the column names
-        s_cols = self.columns.to_numpy()
-        v_cols = vector.columns.to_numpy()
-        if not all([i == j for i, j in zip(s_cols, v_cols)]):
-            return False
-
-        # check the index values
-        s_idx = self.index.to_numpy()
-        v_idx = vector.index.to_numpy()
-        if not all([i == j for i, j in zip(s_idx, v_idx)]):
-            return False
-
-        return True
-
-    def fillna(self, value: float = None, n_predictors: int = 3, predictors: list = []):
-        """
-        fill missing values in the vector.
-
-        Parameters
-        ----------
-        value: float or None
-            the value to be used for missing data replacement.
-            if None, cubic spline interpolation is used to extract the
-            missing data.
-            Please note that if predictors is not empty, this parameter is ignored.
-
-        n_predictors: int
-            the number of predictors to be used if predictors is not empty
-
-        predictors: list
-            list of Vectors that can be matched with self and that can be used to obtain
-            missing coordinates via multiple linear regression.
-            If left empty, cubic spline interpolation or constant value substitution is
-            used according to the inputs provided in value.
-
-        Returns
-        -------
-        filled: Vector
-            the vector without missing data.
-        """
-        # check if missing values exist
-        miss = self.isna().any(1).values.flatten()
-        filled = self.copy()
-
-        # otherwise return a copy of the actual vector
-        if not np.any(miss):
-            return filled
-
-        # get the vector index
-        x_new = filled.index.to_numpy()
-
-        # multiple linear regression
-        assert isinstance(predictors, list), "'predictors' must be a 'list'."
-        if len(predictors) > 0:
-            assert isinstance(n_predictors, int), "'n_predictors' must be an 'int'."
-
-            def corr(a, b):
-                """
-                get the mean correlation between a and b
-                """
-                cvec = []
-                for d in a.columns:
-                    v = [a[d].values.flatten(), b[d].values.flatten()]
-                    v = np.vstack(np.atleast_2d(v))
-                    valid = v[:, np.all(~np.isnan(v), axis=0)]
-                    if valid.shape[1] > 0:
-                        cvec += [abs(np.corrcoef(valid, rowvar=True)[0, 1])]
-                    else:
-                        cvec += [0]
-                return np.mean(cvec)
-
-            # get mean correlation between self and the predictors
-            y = self.values
-            corrs = []
-            for i in predictors:
-                assert self.matches(i), "{} does not match with self.".format(i)
-                if np.all(i.loc[miss].notna().values):
-                    ix = pd.concat([self, i], axis=1).dropna().index.to_numpy()
-                    if len(ix) >= 2:
-                        corrs += [corr(self.loc[ix], i.loc[ix])]
-
-            # keep the best n_predictors
-            best_preds = np.argsort(corrs)[::-1][:n_predictors]
-            best_preds = [v for i, v in enumerate(predictors) if i in best_preds]
-            x = pd.concat(best_preds, axis=1).values
-
-            # get the predictive equation
-            valid = np.all(~np.isnan(np.concatenate([y, x], axis=1)), axis=1)
-            lr = LinearRegression(y[valid], x[valid], True)
-
-            # replace missing values
-            filled.loc[miss, filled.columns] = lr.predict(x[miss]).values
-
-        # fill by cubic spline interpolation
-        elif value is None:
-            df_old = self.dropna()
-            for i in filled.columns:
-                y_new = interpolate_cs(
-                    y=df_old[i].values.flatten(),
-                    x_old=df_old.index.to_numpy(),
-                    x_new=x_new,
-                )
-                filled.loc[x_new, [i]] = np.atleast_2d(y_new).T
-
-        # constant value
-        else:
-            vals = filled.values
-            nans = np.argwhere(np.isnan(vals))
-            vals[nans] = value
-            filled.loc[x_new, filled.columns] = vals
-
-        return filled
+    # check the entries
+    assert C.matches(A), "A, B and C must be matchable vectors."
+    assert C.matches(B), "A, B and C must be matchable vectors."
+
+    # get the angle ACB and from that calculate the length
+    # distance of O from C
+    alpha = three_points_angle(A, C, B)
+    u = (A - C).norm * np.cos(alpha.values)
+
+    # use the distance u to find O along the CB segment
+    n = np.ones(A.shape)
+    return (B - C) / (n * (B - C).norm.values) * (n * u.values) + C
