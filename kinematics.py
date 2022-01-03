@@ -295,6 +295,12 @@ class Vector(pd.DataFrame):
             pd.DataFrame(self).plot(*args, **kwargs)
             pl.show()
 
+    def describe(self, *args, **kwargs):
+        """
+        provide descriptive statistics about the parameters in df.
+        """
+        return pd.DataFrame(self).describe(*args, **kwargs)
+
     def sampling_frequency(self, digits=3):
         """
         return the "average" sampling frequency of the Vector.
