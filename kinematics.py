@@ -541,11 +541,25 @@ class Segment:
         self.end0 = end0
         self.end1 = end1
 
-    def sampling_frequency(self) -> float:
+    def __len__(self) -> Vector:
         """
-        return the sampling frequency of the segment.
+        get the length of the object.
         """
-        return self.end0.sampling_frequency()
+        return self.length()
+
+    def __str__(self):
+        """
+        print the segment.
+        """
+        a = self.end0.copy()
+        a.columns = pd.Index(["end0_" + i for i in a.columns])
+        b = self.end1.copy()
+        b.columns = pd.Index(["end1_" + i for i in b.columns])
+        c = pd.concat([self.length, a, b], axis=1)
+        return c.__str__()
+
+    def __repr__(self):
+        return self.__str__()
 
     @property
     def length(self) -> Vector:
@@ -556,11 +570,11 @@ class Segment:
         l.columns = pd.Index("Length")
         return l
 
-    def __len__(self) -> Vector:
+    def sampling_frequency(self) -> float:
         """
-        get the length of the object.
+        return the sampling frequency of the segment.
         """
-        return self.length()
+        return self.end0.sampling_frequency()
 
     def pointAt(
         self,
