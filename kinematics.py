@@ -1,4 +1,4 @@
-# IMPORTS
+#! IMPORTS
 
 
 from io import BufferedReader
@@ -190,6 +190,33 @@ class ReferenceFrame:
 
 
 class Vector(pd.DataFrame):
+    """
+    Generate an object reflecting a dimension-less point
+    in a n-dimensional space.
+
+    Parameters
+    ----------
+    data: np.ndarray (structured or homogeneous), Iterable, dict, or DataFrame
+        Dict can contain Series, arrays, constants, dataclass or list-like objects.
+        If data is a dict, column order follows insertion-order.
+        If a dict contains Series which have an index defined, it is aligned by its index.
+
+    index: Index or array-like
+        Index to use for resulting frame. Will default to RangeIndex if no indexing information
+        part of input data and no index provided.
+
+    columns: Index or array-like
+        Column labels to use for resulting frame when data does not have them,
+        defaulting to RangeIndex(0, 1, 2, …, n). If data contains column labels, will
+        perform column selection instead.
+
+    dtype: dtype, default None
+        Data type to force. Only a single dtype is allowed. If None, infer.
+
+    copy: bool or None, default None
+        Copy data from inputs. For dict data, the default of None behaves like copy=True.
+        For DataFrame or 2d ndarray input, the default of None behaves like copy=False.
+    """
 
     # attributes
     _cacher = ()
@@ -203,8 +230,7 @@ class Vector(pd.DataFrame):
 
     def _set_as_cached(self, item, cacher) -> None:
         """
-        Set the _cacher attribute on the calling object with a weakref to
-        cacher.
+        Set the _cacher attribute on the calling object with a weakref to cacher.
         """
         self._cacher = (item, weakref.ref(cacher))
 
@@ -301,7 +327,7 @@ class Vector(pd.DataFrame):
         """
         return pd.DataFrame(self).describe(*args, **kwargs)
 
-    def sampling_frequency(self, digits=3):
+    def sampling_frequency(self, digits: float = 3) -> float:
         """
         return the "average" sampling frequency of the Vector.
 
@@ -486,6 +512,134 @@ class Vector(pd.DataFrame):
             filled.loc[x_new, filled.columns] = vals
 
         return filled
+
+
+class Segment:
+    """
+    generate a dimensionless segment between 2 points in a n-dimensional space.
+
+    Parameters
+    ----------
+    end0:   Vector
+        a vector object to te used as first end of the segment.
+
+    end1: Vector
+        a vector object to te used as second end of the segment.
+    """
+
+    def __init__(self, end0: Vector, end1: Vector):
+        assert isinstance(end0, Vector), "{} must be a Vector object.".format("end0")
+        assert isinstance(end1, Vector), "{} must be a Vector object.".format("end1")
+        col0 = end0.columns.to_numpy()
+        col1 = end1.columns.to_numpy()
+        same_dims = all([i in col0 for i in col1]) & (len(col0) == len(col1))
+        assert same_dims, "'end0' and 'end1' must have the same columns."
+        idx0 = end0.index.to_numpy()
+        idx1 = end1.index.to_numpy()
+        same_idxs = all([i in idx0 for i in idx1]) & (len(idx0) == len(idx1))
+        assert same_idxs, "'idx0' and 'idx1' must have the same index."
+        self.end0 = end0
+        self.end1 = end1
+
+    def sampling_frequency(self) -> float:
+        """
+        return the sampling frequency of the segment.
+        """
+        return self.end0.sampling_frequency()
+
+    @property
+    def length(self) -> Vector:
+        """
+        get the length of the object.
+        """
+        l = (self.end1 - self.end0).norm
+        l.columns = pd.Index("Length")
+        return l
+
+    def __len__(self) -> Vector:
+        """
+        get the length of the object.
+        """
+        return self.length()
+
+    def pointAt(
+        self,
+        distance: Tuple[float, int, np.ndarray],
+        as_percentage: bool = False,
+        from_end0: bool = True,
+    ) -> Vector:
+        """
+        return a dimensionless point along the segment at the provided distance.
+
+        Parameters
+        ----------
+
+        distance: float, int, array_like
+            the distance at which the returned point will be from the defined end.
+
+        as_percentage: bool (default=False)
+            If True, the distance will be considered as percentage value of the Segment length
+            such as [0, 1] will correspond to the two ends of the segment.
+            If False, the distance provided will have the same metrics of the two ends.
+
+        from_end0: bool (default=True)
+            If True, the distance will be defined from "end0". If False, from "end1".
+
+        Returns
+        -------
+
+        p: Vector
+            a Vector object having coordinates such as its distance from the selected end of
+            the segment will be equal to distance.
+        """
+        txt = "'distance' must be a float, int or numpy.ndarray object."
+        assert isinstance(distance, (float, int, np.ndarray)), txt
+        assert isinstance(as_percentage, bool), "'as_percentage' must be True or False."
+        assert isinstance(from_end0, bool), "'from_end0' must be True or False."
+
+        # get the order of the ends
+        if from_end0:
+            a = self.end0
+            b = self.end1
+        else:
+            a = self.end1
+            b = self.end0
+
+        # get the normalization factor
+        n = 1 if as_percentage else self.length.values
+
+        # return the vector
+        return (b - a) / n * distance + a
+
+    def projectionOf(self, p: Vector) -> Vector:
+        """
+        return the coordinates of O, i.e. the projection of A along the
+        line passing through B and C.
+
+        Parameters
+        ----------
+
+        p: Vector
+            the point of which the projection on the segment is required.
+
+        Returns
+        -------
+
+        o:  Vector
+            the vector being along the BC line and having minimum distance
+            from A.
+        """
+
+        # check the entries
+        txt = "p must have same index and columns of the Segment ends."
+        assert self.end0.matches(p), txt
+
+        # get the length of the cathetus joining the projection "o" to "end1"
+        alpha = three_points_angle(p, self.end0, self.end1)
+        u = (p - self.end1).norm * np.cos(alpha.values).values.flatten()
+
+        # use the distance u to find o along the cathetus
+        return self.pointAt(u, from_end0=False)
 
 
 #! METHODS
@@ -1084,40 +1238,3 @@ def three_points_angle(a: Vector, b: Vector, c: Vector, name: str = None):
     # return the angle
     q = np.arccos((ac ** 2 - ab ** 2 - bc ** 2) / (-2 * ab * bc))
     return Vector(q, columns=[name], index=a.index)
-
-
-def point_on_line_projection(A: Vector, B: Vector, C: Vector):
-    """
-    return the coordinates of O, i.e. the projection of A along the
-    line passing through B and C.
-
-    Parameters
-    ----------
-    A: Vector
-        the point not included on the BC line.
-
-    B: Vector
-        a vector with dimensions and index matchable with A.
-
-    C: Vector
-        another vector with dimensions and index matchable with A.
-
-    Returns
-    -------
-    O:  Vector
-        the vector being along the BC line and having minimum distance
-        from A.
-    """
-
-    # check the entries
-    assert C.matches(A), "A, B and C must be matchable vectors."
-    assert C.matches(B), "A, B and C must be matchable vectors."
-
-    # get the angle ACB and from that calculate the length
-    # distance of O from C
-    alpha = three_points_angle(A, C, B)
-    u = (A - C).norm * np.cos(alpha.values)
-
-    # use the distance u to find O along the CB segment
-    n = np.ones(A.shape)
-    return (B - C) / (n * (B - C).norm.values) * (n * u.values) + C
