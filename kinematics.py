@@ -475,7 +475,7 @@ class Vector(pd.DataFrame):
             y = self.values
             corrs = []
             for i in predictors:
-                if self.matches(i) and np.all(i.loc[miss].notna().values):
+                if self.matches(i):
                     ix = pd.concat([self, i], axis=1).dropna().index.to_numpy()
                     if len(ix) >= 2:
                         corrs += [corr(self.loc[ix], i.loc[ix])]
