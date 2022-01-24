@@ -475,13 +475,13 @@ class Vector(pd.DataFrame):
             y = self.values
             corrs = []
             for i in predictors:
-                assert self.matches(i), "{} does not match with self.".format(i)
-                if np.all(i.loc[miss].notna().values):
+                if self.matches(i) and np.all(i.loc[miss].notna().values):
                     ix = pd.concat([self, i], axis=1).dropna().index.to_numpy()
                     if len(ix) >= 2:
                         corrs += [corr(self.loc[ix], i.loc[ix])]
 
             # keep the best n_predictors
+            assert len(corrs) > 0, "no matchable predictors have been found."
             best_preds = np.argsort(corrs)[::-1][:n_predictors]
             best_preds = [v for i, v in enumerate(predictors) if i in best_preds]
             x = pd.concat(best_preds, axis=1).values
