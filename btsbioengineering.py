@@ -5,8 +5,9 @@
 
 
 from io import BufferedReader
-from .kinematics import *
 from typing import Tuple
+from .sensors import *
+from .geometry import Point, _Object
 import os
 import struct
 import numpy as np
@@ -18,7 +19,7 @@ import pandas as pd
 
 def read_emt(path):
     """
-    Create a dict of Point objects from an excel path.
+    Create a dict of 3D objects from an emt file.
 
     Parameters
     ----------
@@ -84,7 +85,7 @@ def read_emt(path):
 
         # setup the output variable
         vd[v] = Point(
-            data=np.vstack(np.atleast_2d(coordinates)).T,
+            coordinates=np.vstack(np.atleast_2d(coordinates)).T,
             index=time,
             columns=nn,
         )
@@ -94,7 +95,7 @@ def read_emt(path):
 
 def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
     """
-    Return the readings from a .tdf file as dicts of Vectors objects.
+    Return the readings from a .tdf file as dicts of 3D objects.
 
     Parameters
     ----------
@@ -116,7 +117,10 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
     assert path[-4:] == ".tdf", path + ' must be an ".tdf" path.'
 
     # file reader with basic info
-    def readFile(file: str, offset: int) -> Tuple[BufferedReader, int, int, int, float]:
+    def readFile(
+        file: str,
+        offset: int,
+    ) -> Tuple[BufferedReader, int, int, int, float]:
         """
         read the file and return it after reading with basic info on it.
 
@@ -205,7 +209,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         """
 
         # prepare the arrays for the tracks and the labels
-        labels = [u""] * n_tracks
+        labels = [""] * n_tracks
         tracks = np.ones((n_frames, size * n_tracks)) * np.nan
 
         # read the data
@@ -246,9 +250,9 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         fid.close()
         return tracks, labels, idx
 
-    def getPoint3D(file: str, info: dict) -> dict:
+    def get_Marker3D(file: str, info: dict) -> dict:
         """
-        read Point3D tracks data from the provided tdf file.
+        read Marker3D tracks data from the provided tdf file.
 
         Paramters
         ---------
@@ -262,7 +266,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         Returns
         -------
         points: dict
-            a dict with all the tracks provided as SimbioPy.Point objects.
+            a dict with all the tracks provided as simbiopy.Marker3D objects.
         """
         # get the file read
         fid, n_frames, n_tracks, freq, time = readFile(file, info["Offset"])
@@ -278,7 +282,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
             (n_links,) = struct.unpack("i", fid.read(4))
             fid.seek(4, 1)
             links = struct.unpack("%ii" % (2 * n_links), fid.read(8 * n_links))
-            links = np.array(links)
+            links = np.reshape(links, (len(links) // 2, 2))
 
         # check if the file has to be read by frame or by track
         by_frame = info["Format"] in [3, 4]
@@ -291,18 +295,29 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
             fid, n_frames, n_tracks, freq, time, by_frame, 3
         )
 
-        # generate the output dict
+        # generate the output markers
         points = {}
         for trk in range(n_tracks):
             cols = np.arange(3) + 3 * trk
-            points[labels[trk]] = Point(
-                data=tracks[:, cols],
-                columns=["X", "Y", "Z"],
+            points[labels[trk]] = Marker3D(
+                coordinates=tracks[:, cols],
                 index=index,
             )
-        return {"Point3D": points}
 
-    def getForce3D(file: str, info: dict) -> Tuple[dict, dict, dict]:
+        # generate the links
+        lnk = {}
+        for link in links:
+            p0 = points[labels[link[0]]].coordinates
+            p1 = points[labels[link[1]]].coordinates
+            lnk["{} -> {}".format(*[labels[i] for i in link])] = Link3D(p0, p1)
+
+        # get the output
+        out = {"Marker3D": points}
+        if len(lnk) > 0:
+            out["Link3D"] = lnk
+        return out
+
+    def get_Force3D(file: str, info: dict) -> Tuple[dict, dict, dict]:
         """
         read Force3D tracks data from the provided tdf file.
 
@@ -318,7 +333,8 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         Returns
         -------
         points: dict
-            a dict with all the tracks provided as SimbioPy.Point objects.
+            a dict with all the tracks provided as simbiopy.ForcePlatform3D
+            objects.
         """
         # get the file read (tracks and frames are inverted)
         fid, n_tracks, n_frames, freq, time = readFile(file, info["Offset"])
@@ -341,29 +357,22 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         )
 
         # generate the output dict
-        points = {}
-        forces = {}
-        moments = {}
+        fp = {}
         for trk in range(n_tracks):
             point_cols = np.arange(3) + 9 * trk
-            points[labels[trk]] = Point(
-                data=tracks[:, point_cols],
-                columns=["X", "Y", "Z"],
-                index=index,
-            )
+            points = tracks[:, point_cols]
             force_cols = np.arange(3) + 3 + 9 * trk
-            forces[labels[trk]] = Point(
-                data=tracks[:, force_cols],
-                columns=["X", "Y", "Z"],
-                index=index,
-            )
+            forces = tracks[:, force_cols]
             moment_cols = np.arange(3) + 6 + 9 * trk
-            moments[labels[trk]] = Point(
-                data=tracks[:, moment_cols],
-                columns=["X", "Y", "Z"],
+            moments = tracks[:, moment_cols]
+            fp[labels[trk]] = ForcePlatform3D(
+                force=forces,
+                moment=moments,
+                origin=points,
                 index=index,
             )
-        return {"Point3D": points, "Force3D": forces, "Moment3D": moments}
+
+        return {"ForcePlatform": fp}
 
     def getEMG(file: str, info: str) -> dict:
         """
@@ -381,7 +390,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         Returns
         -------
         channels: dict
-            a dict with all the EMG channels provided as SimbioPy.Point.
+            a dict with all the EMG channels provided as simbiopy.EmgSensor.
         """
         # get the file read (tracks and frames are inverted here)
         fid, n_tracks, n_frames, freq, time = readFile(file, info["Offset"])
@@ -399,8 +408,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         )
 
         # generate the output
-        channels = Point(tracks, index=index, columns=labels)
-        return {"EMG": {i: channels[[i]] for i in channels}}
+        return {"EMG": {i: EmgSensor(v, index) for i, v in zip(labels, tracks.T)}}
 
     def getIMU(file: str, info: str) -> dict:
         """
@@ -418,7 +426,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         Returns
         -------
         points: dict
-            a dict with all the tracks provided as SimbioPy.Point objects.
+            a dict with all the tracks provided as simbiopy.Imu3D objects.
         """
         # check if the file has to be read by frame or by track
         if not info["Format"] in [5]:
@@ -434,28 +442,20 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         )
 
         # generate the output dict
-        accs = {}
-        gyrs = {}
+        imus = {}
         for i, label in enumerate(labels):
             acc_cols = np.arange(3) + 3 * i
-            accs[label] = Point(
-                data=tracks[:, acc_cols],  # m/s^2
-                columns=["X", "Y", "Z"],
-                index=index,
-            )
-            gyr_cols = acc_cols + 3
-            gyrs[label] = Point(
-                data=tracks[:, gyr_cols] * 180 / np.pi,  # deg/s
-                columns=["X", "Y", "Z"],
-                index=index,
-            )
+            acc = tracks[:, acc_cols]  # m/s^2
+            gyr_cols = acc_cols + 3  # deg/s
+            gyr = tracks[:, gyr_cols] * 180 / np.pi
+            imus[label] = Imu3D(accelerometer=acc, gyroscope=gyr, index=index)
 
-        return {"Acceleration3D": accs, "AngularVelocity3D": gyrs}
+        return {"IMU": imus}
 
     def resize(
         ref: pd.DataFrame,
         reset_time: bool = True,
-        **kwargs: Tuple[Point, pd.DataFrame]
+        **kwargs: Tuple[Point, pd.DataFrame],
     ) -> dict:
         """
         resize the data contained in kwargs to match the sample range
@@ -463,42 +463,45 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
 
         Paramters
         ---------
-        ref: Point
+        ref: _Object
             a point containing the reference data time.
 
         reset_time: bool
             if True the time of all the returned array will start from zero.
 
-        kwargs: key-values vectors
-            a variable number of named vectors to be resized according to ref.
+        kwargs: key-values _Objects
+            a variable number of named objects to be resized according to ref.
 
         Returns
         -------
         resized: dict
-            a dict containing all the dataframes passed as kwargs resized
+            a dict containing all the objects passed as kwargs resized
             according to ref.
         """
 
         # check the entries
-        txt = "{} must be a pandas DataFrame object."
-        assert isinstance(ref, pd.DataFrame), txt.format("'ref'")
-        for key, df in kwargs.items():
-            assert isinstance(df, pd.DataFrame), txt.format(key)
+        txt = "{} must be a simbiopy._Object instance."
+        assert isinstance(ref, _Object), txt.format("'ref'")
+        for key, obj in kwargs.items():
+            assert isinstance(obj, _Object), txt.format(key)
         assert reset_time or not reset_time, "'reset_time' must be a bool object."
 
         # get the start and end ref time
-        start = np.min(ref.index.to_numpy())
-        stop = np.max(ref.index.to_numpy())
+        start = np.min(ref.index)
+        stop = np.max(ref.index)
 
         # resize all data
-        idx = {i: v.index.to_numpy() for i, v in kwargs.items()}
+        idx = {i: v.index for i, v in kwargs.items()}
         valid = {i: np.where((v >= start) & (v <= stop))[0] for i, v in idx.items()}
         resized = {i: v.iloc[valid[i]] for i, v in kwargs.items()}
 
         # check if the time has to be reset
         if reset_time:
-            for i in resized:
-                resized[i].index = pd.Index(resized[i].index.to_numpy() - start)
+            for i, v in resized.items():
+                for attr in v._attributes:
+                    df = getattr(v, attr)
+                    df.index = pd.Index(df.index.to_numpy() - start)
+                    setattr(resized[i], attr, df)
 
         return resized
 
@@ -509,8 +512,12 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
     # codes
     tdf_signature = "41604B82CA8411D3ACB60060080C6816"
     ids = {
-        5: {"fun": getPoint3D, "label": "Point3D"},
-        12: {"fun": getForce3D, "label": "Force3D"},
+        # 0: {"fun": get_Link3D, "label": "Link3D"},
+        # 2: {"fun": get_Link3D, "label": "Link3D"},
+        # 4: {"fun": get_Link3D, "label": "Link3D"},
+        5: {"fun": get_Marker3D, "label": "Marker3D"},
+        # 6: {"fun": get_Link3D, "label": "Link3D"},
+        12: {"fun": get_Force3D, "label": "ForcePlatform3D"},
         11: {"fun": getEMG, "label": "EMG"},
         17: {"fun": getIMU, "label": "IMU"},
     }
@@ -560,13 +567,13 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
             out[key].update(value)
 
     # resize the data to kinematics (where appropriate)
-    has_kinematics = any([i in ["Point3D"] for i in out])
+    has_kinematics = any([i in ["Marker3D"] for i in out])
     if fit_to_kinematics and has_kinematics:
-        valid = {i: v.dropna() for i, v in out["Point3D"].items()}
-        start = np.min([np.min(v.index.to_numpy()) for _, v in valid.items()])
-        stop = np.max([np.max(v.index.to_numpy()) for _, v in valid.items()])
-        ref = out["Point3D"][[i for i in out["Point3D"]][0]]
-        idx = ref.index.to_numpy()
+        valid = {i: v.dropna() for i, v in out["Marker3D"].items()}
+        start = np.min([np.min(v.index) for _, v in valid.items()])
+        stop = np.max([np.max(v.index) for _, v in valid.items()])
+        ref = out["Marker3D"][[i for i in out["Marker3D"]][0]]
+        idx = ref.index
         idx = np.where((idx >= start) & (idx <= stop))[0]
         ref = ref.iloc[idx]
         out = {l: resize(ref, True, **v) for l, v in out.items()}

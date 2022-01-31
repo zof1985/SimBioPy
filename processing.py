@@ -124,7 +124,7 @@ def freedman_diaconis_bins(y):
 
         Freedman D, Diaconis P.
             (1981) On the histogram as a density estimator:L 2 theory.
-            Z. Wahrscheinlichkeitstheorie verw Gebiete 57: 453–476.
+            Z. Wahrscheinlichkeitstheorie verw Gebiete 57: 453-476.
             doi: 10.1007/BF01025868
     """
 
