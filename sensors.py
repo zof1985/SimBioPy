@@ -4,7 +4,7 @@
 #! IMPORTS
 
 
-from .geometry import _Object, _MathObject, _Df, Point, Vector, Segment
+from .geometry import *
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -16,7 +16,7 @@ import warnings
 
 class Sensor:
     """
-    general class containing just methods defining that the _Object is
+    general class containing just methods defining that the GeometricObject is
     also a Sensor.
     """
 
@@ -34,33 +34,50 @@ class Marker3D(Point, Sensor):
         the amplitude of the vector.
 
     index: arraylike
-        the index for both the amplitude and origin of the vector.
+        the index for the samples of the sensor.
+
+    unit: str
+        the unit of measurement of the sensors's coordinates.
     """
 
-    def __init__(self, coordinates, index=None):
-        amp = self._get_data(coordinates, index, ["X", "Y", "Z"])
+    def __init__(self, coordinates, index=None, unit="m"):
+        amp = self._get_data(
+            coordinates=coordinates,
+            index=index,
+            columns=["X", "Y", "Z"],
+            unit=unit,
+        )
         assert amp.ndim == 3, "a 3D dataset must be provided."
-        super(Marker3D, self).__init__(coordinates=amp)
+        super(Marker3D, self).__init__(coordinates=amp, unit=unit)
 
 
-class ForcePlatform3D(_Object, Sensor):
+class ForcePlatform3D(GeometricObject, Sensor):
     """
     generate a 3D object reflecting a force platform whose data have been
     collected over time in a 3D space.
 
     Parameters
     ----------
-    force: Vector, _DF, Point, pandas.DataFrame, numpy.ndarray, list
+    force: Vector, UnitDataFrame, Point, pandas.DataFrame, numpy.ndarray, list
         the amplitude of the force vector.
 
-    moment: Vector, _DF, Point, pandas.DataFrame, numpy.ndarray, list
+    moment: Vector, UnitDataFrame, Point, pandas.DataFrame, numpy.ndarray, list
         the amplitude of the moments vector.
 
-    origin: _DF, Point, pandas.DataFrame, numpy.ndarray, list
+    origin: UnitDataFrame, Point, pandas.DataFrame, numpy.ndarray, list
         the origin of the force and moments vectors.
 
     index: arraylike | None
         the index for the input data.
+
+    force_unit: str
+        the unit of measurement of the force data.
+
+    moment_unit: str
+        the unit of measurement of the moment data.
+
+    origin_unit: str
+        the unit of measurement of the origin data.
     """
 
     @property
@@ -77,12 +94,23 @@ class ForcePlatform3D(_Object, Sensor):
         """
         return Vector(amplitude=self._moment, origin=self._origin)
 
-    def __init__(self, force, moment, origin, index=None):
+    def __init__(
+        self,
+        force,
+        moment,
+        origin,
+        index=None,
+        force_unit="N",
+        moment_unit="Nm",
+        origin_unit="m",
+    ):
         # handle the case force and moment are vectors
         if isinstance(force, Vector) or isinstance(moment, Vector):
-            txt = "force and moment vectors must match and have the same origin."
-            assert isinstance(force, Vector) and isinstance(moment, Vector), txt
-            assert force.matches(moment), txt
+            txt = "force and moment vectors must match and have the same "
+            txt += "origin."
+            assert isinstance(force, Vector), txt
+            assert isinstance(moment, Vector), txt
+            assert force.matches(moment, strict=False), txt
             assert np.sum((force.origin - moment.origin).values) == 0, txt
             frz = force.amplitude
             mnt = moment.amplitude
@@ -97,55 +125,75 @@ class ForcePlatform3D(_Object, Sensor):
         assert frz.ndim == 3, txt
         assert mnt.ndim == 3, txt
         assert ori.ndim == 3, txt
-        frz = self._get_data(frz, index, ["X", "Y", "Z"])
-        mnt = self._get_data(mnt, index, ["X", "Y", "Z"])
-        ori = self._get_data(ori, index, ["X", "Y", "Z"])
+        frz = self._get_data(
+            data=frz,
+            index=index,
+            columns=["X", "Y", "Z"],
+            unit=force_unit,
+        )
+        mnt = self._get_data(
+            data=mnt,
+            index=index,
+            columns=["X", "Y", "Z"],
+            unit=moment_unit,
+        )
+        ori = self._get_data(
+            data=ori,
+            index=index,
+            columns=["X", "Y", "Z"],
+            unit=origin_unit,
+        )
 
         # build the object
         super(ForcePlatform3D, self).__init__(
             force=frz,
             moment=mnt,
             origin=ori,
-            index=index,
         )
 
 
 class Link3D(Segment, Sensor):
     """
-    Generate an object reflecting a dimension-less vector in a n-dimensional space.
+    Generate an object reflecting a dimension-less vector in a n-dimensional
+    space.
 
     Parameters
     ----------
 
-    p0, p1: Point, _DF, pandas.DataFrame, numpy.ndarray, list
+    p0, p1: Point, UnitDataFrame, pandas.DataFrame, numpy.ndarray, list
         the first and second points of the segment.
 
     index: arraylike
-        the index for both the amplitude and origin of the vector.
+        the index for the samples of the sensor.
 
+    unit: str
+        the unit of measurement of the sensors.
     """
 
-    def __init__(self, p0, p1, index=None):
+    def __init__(self, p0, p1, index=None, unit=""):
         v0 = p0.coordinates if isinstance(p0, Point) else p0
         assert v0.ndim == 3, "a 3D dataset must be provided."
-        v0 = self._get_data(v0, index, ["X", "Y", "Z"])
+        v0 = self._get_data(v0, index, ["X", "Y", "Z"], unit)
         v1 = p1.coordinates if isinstance(p1, Point) else p1
         assert v1.ndim == 3, "a 3D dataset must be provided."
-        v1 = self._get_data(v1, index, ["X", "Y", "Z"])
+        v1 = self._get_data(v1, index, ["X", "Y", "Z"], unit)
         super(Link3D, self).__init__(p0=v0, p1=v1)
 
 
-class EmgSensor(_MathObject, Sensor):
+class EmgSensor(GeometricMathObject, Sensor):
     """
     Generate a n-channels EMG sensor instance.
 
     Parameters
     ----------
-    amplitude: _DF, pandas.DataFrame, numpy.ndarray, list
+    amplitude: UnitDataFrame, pandas.DataFrame, numpy.ndarray, list
         the amplitude of the EMG signal(s).
 
     index: arraylike
-        the index for both the amplitude and origin of the vector.
+        the index for the samples of the sensor.
+
+    unit: str
+        the unit of measurement of the sensors.
     """
 
     def __init__(self, amplitude, index=None):
@@ -163,7 +211,7 @@ class EmgSensor(_MathObject, Sensor):
                 raise ValueError("amplitude must be a 1D or 2D dataset.")
             cols = ["Channel{}".format(i + 1) for i in range(amp.shape[1])]
             df = self._get_data(amp, index, cols)
-        elif isinstance(amp, (pd.DataFrame, _Df)):
+        elif isinstance(amp, (pd.DataFrame, UnitDataFrame)):
             df = self._get_data(amp)
         super(EmgSensor, self).__init__(amplitude=df)
 
@@ -171,7 +219,7 @@ class EmgSensor(_MathObject, Sensor):
         """
         Parameters
         ----------
-        obj: int, float, np.ndarray, _DF, pd.DataFrame, Vector
+        obj: int, float, np.ndarray, UnitDataFrame, pd.DataFrame, Vector
             the second object included in the math operation.
 
         transpose: bool (optional, default=False)
@@ -239,52 +287,87 @@ class EmgSensor(_MathObject, Sensor):
         return EmgSensor(amplitude=self.amplitude @ val)
 
 
-class Imu3D(_Object, Sensor):
+class Imu3D(GeometricMathObject, Sensor):
     """
     generate a 3D object reflecting an Inertial Measurement Unit
     whose data have been collected over time in a 3D space.
 
     Parameters
     ----------
-    accelerometer: _DF, Point, pandas.DataFrame, numpy.ndarray, list, None
+    accelerometer: Any of the valid data input (see below)
         the amplitude of the accelerations.
 
-    gyroscope: _DF, Point, pandas.DataFrame, numpy.ndarray, list, None
+    gyroscope: Any of the valid data input (see below)
         the amplitude of angular velocities.
 
-    magnetometer: _DF, Point, pandas.DataFrame, numpy.ndarray, list, None
+    magnetometer: Any of the valid data input (see below)
         the amplitude of the magnetic field readings.
 
-    index: arraylike | None
-        the index for the input data.
+    index: arraylike
+        the index for the samples of the sensor.
+
+    accelerometer_unit: str
+        the unit of measurement of the accelerometer.
+
+    gyroscope_unit: str
+        the unit of measurement of the gyroscope.
+
+    magnetometer_unit: str
+        the unit of measurement of the magnetometer.
+
+    Valid inputs
+    ------------
+    UnitDataFrame, Point, pandas.DataFrame, numpy.ndarray, list, None
     """
 
-    def __init__(self, accelerometer, gyroscope, magnetometer, index=None):
+    def __init__(
+        self,
+        accelerometer,
+        gyroscope,
+        magnetometer,
+        index=None,
+        accelerometer_unit="m/s^2",
+        gyroscope_unit="rad/s",
+        magnetometer_unit="nT",
+    ):
         attrs = {}
+        txt = "only 3D data can be provided."
         if accelerometer is not None:
             if isinstance(accelerometer, Point):
                 attrs["accelerometer"] = accelerometer.coordinates
+                assert attrs["accelerometer"].ndim == 3, txt
             else:
-                attrs["accelerometer"] = accelerometer
+                attrs["accelerometer"] = self._get_data(
+                    data=accelerometer,
+                    index=index,
+                    coordinates=["X", "Y", "Z"],
+                    unit=accelerometer_unit,
+                )
         if gyroscope is not None:
             if isinstance(gyroscope, Point):
                 attrs["gyroscope"] = gyroscope.coordinates
+                assert attrs["gyroscope"].ndim == 3, txt
             else:
-                attrs["gyroscope"] = gyroscope
+                attrs["gyroscope"] = self._get_data(
+                    data=gyroscope,
+                    index=index,
+                    coordinates=["X", "Y", "Z"],
+                    unit=gyroscope_unit,
+                )
         if magnetometer is not None:
             if isinstance(magnetometer, Point):
                 attrs["magnetometer"] = magnetometer.coordinates
+                assert attrs["magnetometer"].ndim == 3, txt
             else:
-                attrs["magnetometer"] = magnetometer
-
-        # check the size
-        txt = "only 3D data can be provided."
-        for i, v in attrs.items():
-            assert v.ndim == 3, txt
-            attrs[i] = self._get_data(v, index, ["X", "Y", "Z"])
+                attrs["magnetometer"] = self._get_data(
+                    data=magnetometer,
+                    index=index,
+                    coordinates=["X", "Y", "Z"],
+                    unit=magnetometer_unit,
+                )
 
         # build the object
-        super(Imu3D, self).__init__(index=index, **attrs)
+        super(Imu3D, self).__init__(**attrs)
 
 
 class Model3D:
@@ -326,7 +409,7 @@ class Model3D:
 
         Parameters
         ----------
-        obj: _Object instance
+        obj: GeometricObject instance
             the object to be stored.
 
         name: str
@@ -334,7 +417,7 @@ class Model3D:
         """
 
         # check the input data
-        txt = "obj must be an instance of the _Object class."
+        txt = "obj must be an instance of the GeometricObject class."
         assert isinstance(obj, Sensor), txt
         assert isinstance(name, str), "name must be a string."
         txt = "only 3D objects must be provided."
@@ -348,7 +431,8 @@ class Model3D:
 
         # check if another object with the same name exists
         if any([i == name for i in getattr(self, cls)]):
-            txt = "{} already existing in {}. The old instance has been replaced"
+            txt = "{} already existing in {}. The old instance has been "
+            txt += "replaced"
             warnings.warn(txt.format(name, cls))
 
         # store the sensor
@@ -356,9 +440,11 @@ class Model3D:
 
     def pivot(self) -> pd.DataFrame:
         """
-        generate a wide dataframe object containing both origin and amplitudes.
+        generate a wide dataframe object containing both origin and
+        amplitudes.
         """
-        df = self.stack().pivot("Time", ["Sensor", "Type", "Source", "Dimension"])
+        col = ["Sensor", "Type", "Source", "Dimension"]
+        df = self.stack().pivot("Time", col)
         df.columns = pd.Index([i[1:] for i in df.columns])
         return df
 
@@ -383,8 +469,8 @@ class Model3D:
             a scatter plot is rendered.
 
         show: bool (default=True)
-            if True the generated figure is immediately plotted. Otherwise the
-            generated object is returned
+            if True the generated figure is immediately plotted.
+            Otherwise the generated object is returned.
 
         width: int (default=1280)
             the width of the output figure in pixels
@@ -421,8 +507,8 @@ class Model3D:
         Parameters
         ----------
         percentiles: list
-            a list of values in the [0, 1] range defining the desired percentiles
-            to be calculated.
+            a list of values in the [0, 1] range defining the desired
+            percentiles to be calculated.
 
         Returns
         -------
@@ -461,15 +547,13 @@ class Model3D:
 
         Parameters
         ----------
-
         df: pandas.DataFrame
             a pandas.DataFrame sorted as it would be generated by the
             .stack() method.
 
         Returns
         -------
-
-        obj: _Object
+        obj: GeometricObject
             the instance resulting from the dataframe reading.
         """
         out = cls()

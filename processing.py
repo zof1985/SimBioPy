@@ -160,16 +160,22 @@ def mean_filter(signal, n=1, pad_style="reflect", offset=0.5):
         the number of samples to be considered as averaging window.
 
     pad_style: "reflect"
-        padding style mode. The the numpy.pad function is used. Please refer to the
-        corresponding documentation for a detailed description of the padding modes.
+        padding style mode. The the numpy.pad function is used. Please refer
+        to the corresponding documentation for a detailed description of the
+        padding modes.
 
     offset: float
-        a value within the [0, 1] range defining how the averaging window is obtained.
-        Offset=0, indicate that for each sample, the filtered value will be the mean
-        of the subsequent n-1 values plus the current sample.
-        Offset=1, on the other hand, calculates the filtered value at each
-        sample as the mean of the n-1 preceding values plus the current sample.
-        Offset=0.5, centers the averaging window around the actual sample being evaluated.
+        a value within the [0, 1] range defining how the averaging window is
+        obtained.
+        Offset=0,
+            indicate that for each sample, the filtered value will be the mean
+            of the subsequent n-1 values plus the current sample.
+        Offset=1,
+            on the other hand, calculates the filtered value at each sample as
+            the mean of the n-1 preceding values plus the current sample.
+        Offset=0.5,
+            centers the averaging window around the actual sample being
+            evaluated.
 
     Returns
     -------
@@ -184,7 +190,8 @@ def mean_filter(signal, n=1, pad_style="reflect", offset=0.5):
     assert signal.ndim == 1, "signal must be a 1D array."
     assert isinstance(n, int), txt.format("n", "int")
     assert isinstance(pad_style, str), txt.format("pad_style", "str")
-    assert isinstance(offset, (int, float)), txt.format("offset", "(int, float)")
+    msg = txt.format("offset", "(int, float)")
+    assert isinstance(offset, (int, float)), msg
     assert 0 <= offset <= 1, "offset must be a float in the [0, 1] range."
 
     # get the window range
@@ -214,17 +221,20 @@ def median_filter(signal, n=1, pad_style="reflect", offset=0.5):
         the number of samples to be considered as averaging window.
 
     pad_style: "reflect"
-        padding style mode. The the numpy.pad function is used. Please refer to
-        the corresponding documentation
-        for a detailed description of the padding modes.
+        padding style mode. The the numpy.pad function is used. Please refer
+        to the corresponding documentation for a detailed description of the
+        padding modes.
 
     offset: float
         a value within the [0, 1] range defining how the window is obtained.
-        Offset=0, indicate that for each sample, the filtered value will be the
-        median of the subsequent n-1 values plus the current sample.
-        Offset=1, on the other hand, calculates the filtered value at each sample
-        as the median of the n-1 preceding values plus the current sample.
-        Offset=0.5, centers the window around the actual sample being evaluated.
+        Offset=0,
+            indicate that for each sample, the filtered value will be
+            the median of the subsequent n-1 values plus the current sample.
+        Offset=1,
+            on the other hand, calculates the filtered value at each sample as
+            the median of the n-1 preceding values plus the current sample.
+        Offset=0.5,
+            centers the window around the actual sample being evaluated.
 
     Returns
     -------
@@ -239,7 +249,8 @@ def median_filter(signal, n=1, pad_style="reflect", offset=0.5):
     assert signal.ndim == 1, "signal must be a 1D array."
     assert isinstance(n, int), txt.format("n", "int")
     assert isinstance(pad_style, str), txt.format("pad_style", "str")
-    assert isinstance(offset, (int, float)), txt.format("offset", "(int, float)")
+    msg = txt.format("offset", "(int, float)")
+    assert isinstance(offset, (int, float)), msg
     assert (
         0 <= offset <= 1
     ), "offset must be a numeric values included in the [0, 1] range."
@@ -341,29 +352,31 @@ def residuals_analysis(
         NOTE: values above 3 will greatly increase the computation time.
 
     min_samples: int, optional
-        the minimum number of elements that have to be considered for each segment
-        during the calculation of the best deflection point.
+        the minimum number of elements that have to be considered for each
+        segment during the calculation of the best deflection point.
 
     which_segment: int, optional
         the segment to be considered as the one allowing the calculation of the
         optimal cut-off.
-        It must be an int in the [1, segments] range. If None, the segment resulting
-        in the most flat line from those that have been calculated is used.
+        It must be an int in the [1, segments] range. If None, the segment
+        resulting in the most flat line from those that have been calculated
+        is used.
 
     filt_fun: function(signal, frequency, **kwargs)
-        the filter to be used for the analysis. If None, a Butterworth, low-pass,
-        4th order phase-corrected filter is used. If a function is provided, two
-        arguments are mandatory:
+        the filter to be used for the analysis. If None, a Butterworth,
+        low-pass, 4th order phase-corrected filter is used. If a function
+        is provided, two arguments are mandatory:
             - signal, 1D array passed as first argument
             - frequency, a float (positive) number passed as second argument.
-            - additional keyworded parameters that are directly passed to the function.
+            - additional keyworded parameters that are directly passed to the
+                function.
 
-        This function must return an array with the same shape of signal being its
-        filtered copy with cut-off frequency equal to "frequency".
+        This function must return an array with the same shape of signal being
+        its filtered copy with cut-off frequency equal to "frequency".
 
     filt_opt: dict, optional
-        the options for the filter. If not None, a dict containing the key-values
-        combinations to be passed to filt_fun.
+        the options for the filter. If not None, a dict containing the
+        key-values combinations to be passed to filt_fun.
 
     Returns
     -------
@@ -379,16 +392,16 @@ def residuals_analysis(
     -----
 
     The signal is filtered over a range of frequencies and the sum of squared
-    residuals (SSE) against the original signal is computer for each tested cut-off
-    frequency. Next, a series of fitting lines are used to estimate the
+    residuals (SSE) against the original signal is computer for each tested
+    cut-off frequency. Next, a series of fitting lines are used to estimate the
     optimal disruption point defining the cut-off frequency optimally
     discriminating between noise and good quality signal.
 
     References
     ----------
 
-    Winter DA 2009, Biomechanics and Motor Control of Human Movement. Fourth Ed.
-        John Wiley & Sons Inc, Hoboken, New Jersey (US).
+    Winter DA 2009, Biomechanics and Motor Control of Human Movement.
+        Fourth Ed. John Wiley & Sons Inc, Hoboken, New Jersey (US).
 
     Lerman PM 1980, Fitting Segmented Regression Models by Grid Search.
         Appl Stat. 29(1):77.
@@ -405,7 +418,8 @@ def residuals_analysis(
         P, F = psd(signal, fs)
         f_max = np.argwhere(np.cumsum(P) / np.sum(P) >= 0.99).flatten()
         f_max = np.min([fs / 2, F[f_max[0]]])
-    assert isinstance(f_max, (int, float)), txt.format("f_max", "(int, float, None)")
+    msg = txt.format("f_max", "(int, float, None)")
+    assert isinstance(f_max, (int, float)), msg
     assert isinstance(min_samples, int), txt.format("min_samples", "int")
     assert min_samples >= 2, "'min_samples' must be >= 2."
     if which_segment is not None:
@@ -414,15 +428,19 @@ def residuals_analysis(
     if filt_fun is None:
         filt_fun = butt_filt
     if filt_opt is None:
-        filt_opt = {"n": 4, "fs": fs, "type": "lowpass", "phase_corrected": True}
+        filt_opt = {
+            "n": 4,
+            "fs": fs,
+            "type": "lowpass",
+            "phase_corrected": True,
+        }
 
     # get the frequency span
     freqs = np.linspace(0, f_max, f_num + 1)[1:]
 
     # get the SSEs
-    Q = np.array(
-        [np.sum((signal - filt_fun(signal, i, **filt_opt)) ** 2) for i in freqs]
-    )
+    Q = [np.sum((signal - filt_fun(signal, i, **filt_opt)) ** 2) for i in freqs]
+    Q = np.array(Q)
 
     # reshape the SSE as dataframe
     D = pd.DataFrame(Q, index=freqs, columns=["SSE"])
@@ -489,10 +507,10 @@ def crossovers(signal, segments=2, min_samples=5):
             number of crossover points.
         2)  For each combination, calculate the regression lines corresponding
             to each segment.
-        3)  For each segment calculate the residuals between the calculated regression
-            line and the effective data.
-        5)  Once the sum of the residuals have been calculated for each combination,
-            sort them by residuals amplitude.
+        3)  For each segment calculate the residuals between the calculated
+            regression line and the effective data.
+        5)  Once the sum of the residuals have been calculated for each
+            combination, sort them by residuals amplitude.
 
     References
     ----------
@@ -530,8 +548,9 @@ def crossovers(signal, segments=2, min_samples=5):
         -------
 
         sse: float
-            the sum of squared errors corresponding to the error obtained fitting
-            the y-x relationship according to the segments provided by s.
+            the sum of squared errors corresponding to the error obtained
+            fitting the y-x relationship according to the segments provided
+            by s.
         """
         c = [
             np.arange(s[i], s[i + 1] + 1) for i in np.arange(len(s) - 1)
@@ -550,23 +569,25 @@ def crossovers(signal, segments=2, min_samples=5):
     x = np.arange(len(signal))
 
     # get all the possible combinations of segments
-    J = [
-        np.arange(min_samples * i, len(signal) - min_samples * (segments - i))
-        for i in np.arange(1, segments)
-    ]
+    J = []
+    for i in np.arange(1, segments):
+        rng = np.arange(
+            min_samples * i,
+            len(signal) - min_samples * (segments - i),
+        )
+        J += [rng]
     J = [j for j in it.product(*J)]
 
     # remove those combinations having segments shorter than "samples"
     J = [i for i in J if np.all(np.diff(i) >= min_samples)]
 
     # generate the crossovers matrix
-    J = np.hstack(
-        (
-            np.zeros((len(J), 1)),
-            np.atleast_2d(J),
-            np.ones((len(J), 1)) * len(signal) - 1,
-        )
-    ).astype(int)
+    J = (
+        np.zeros((len(J), 1)),
+        np.atleast_2d(J),
+        np.ones((len(J), 1)) * len(signal) - 1,
+    )
+    J = np.hstack(J).astype(int)
 
     # calculate the residuals for each combination
     R = np.array([SSEs(x, signal, i) for i in J])
@@ -622,9 +643,8 @@ def butt_filt(signal, fc, fs, n=4, type="lowpass", phase_corrected=True):
 
     # control the inputs
     txt = "{} must be an object of class {}."
-    assert isinstance(signal, (pd.Series, np.ndarray)), txt.format(
-        "signal", "(pandas.Series, numpy.ndarray)"
-    )
+    msg = txt.format("signal", "(pandas.Series, numpy.ndarray)")
+    assert isinstance(signal, (pd.Series, np.ndarray)), msg
     assert signal.ndim == 1, "signal must be a 1D array."
     assert isinstance(fs, (int, float)), txt.format("fs", "(int, float)")
     if isinstance(fc, (np.ndarray, list)):
@@ -636,14 +656,24 @@ def butt_filt(signal, fc, fs, n=4, type="lowpass", phase_corrected=True):
         assert isinstance(fc, (int, float)), txt.format("fc", "(int, float)")
     assert isinstance(type, str), txt.format("type", "str")
     types = ["lowpass", "highpass", "bandpass", "stopband"]
-    assert np.any([type == i for i in types]), "type must be any of " + str(types)
-    assert isinstance(phase_corrected, bool), txt.format("phase_corrected", "bool")
+    msg = "type must be any of " + str(types)
+    assert np.any([type == i for i in types]), msg
+    msg = txt.format("phase_corrected", "bool")
+    assert isinstance(phase_corrected, bool), msg
 
     # get the filter coefficients
-    sos = ss.butter(n, (np.array([fc]).flatten() / (0.5 * fs)), type, output="sos")
+    sos = ss.butter(
+        n,
+        (np.array([fc]).flatten() / (0.5 * fs)),
+        type,
+        output="sos",
+    )
 
     # get the filtered data
-    return ss.sosfiltfilt(sos, signal) if phase_corrected else ss.sosfilt(sos, signal)
+    if phase_corrected:
+        return ss.sosfiltfilt(sos, signal)
+    else:
+        return ss.sosfilt(sos, signal)
 
 
 def psd(signal, fs=1):
@@ -657,8 +687,9 @@ def psd(signal, fs=1):
         A 1D numpy array
 
     fs: int, float, optional
-        the sampling frequency (in Hz) of the signal. If not provided the power spectrum
-        frequencies are provided as normalized values within the (0, 0.5) range.
+        the sampling frequency (in Hz) of the signal. If not provided the
+        power spectrum frequencies are provided as normalized values within the
+        (0, 0.5) range.
 
     Returns
     -------
@@ -672,7 +703,7 @@ def psd(signal, fs=1):
 
     # check the input
     txt = "{} must be an object of class {}."
-    assert isinstance(signal, np.ndarray), txt.format("signal", "numpy.ndarray")
+    assert isinstance(signal, np.ndarray), txt.format("signal", "ndarray")
     assert signal.ndim == 1, "signal must be a 1D array."
     assert isinstance(fs, (int, float)), txt.format("fs", "(int, float)")
 
@@ -681,7 +712,7 @@ def psd(signal, fs=1):
         signal
     )  # normalized frequency spectrum
     a = abs(f)  # amplitude
-    p = np.concatenate([[a[0]], 2 * a[1:-1], [a[-1]]]).flatten() ** 2  # power spectrum
+    p = np.concatenate([[a[0]], 2 * a[1:-1], [a[-1]]]).flatten() ** 2  # power
     k = np.linspace(0, fs / 2, len(p))  # frequencies
 
     # return the data
@@ -699,8 +730,8 @@ def find_peaks(y, height=None):
         a 1D signal
 
     height: float, None
-        a scalar defining the minimum height to be considered for a valid peak.
-        If None, all peaks are returned.
+        a scalar defining the minimum height to be considered for
+        a valid peak. If None, all peaks are returned.
 
     Returns
     -------
@@ -715,7 +746,8 @@ def find_peaks(y, height=None):
     assert y.ndim == 1, "y must be a 1D array."
     if height is None:
         height = np.min(y)
-    assert isinstance(height, (int, float)), txt.format("height", "(int, float)")
+    txt = txt.format("height", "(int, float)")
+    assert isinstance(height, (int, float)), txt
 
     # get the first derivative of the signal
     d1 = d1y(y)

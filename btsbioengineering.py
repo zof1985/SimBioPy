@@ -7,7 +7,7 @@
 from io import BufferedReader
 from typing import Tuple
 from .sensors import *
-from .geometry import Point, _Object
+from .geometry import *
 import os
 import struct
 import numpy as np
@@ -227,17 +227,25 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
             if by_frame:
                 n = size * n_tracks * n_frames
                 segments = struct.unpack("%if" % n, fid.read(n * 4))
-                tracks = np.array(segments).reshape(n_frames, size * n_tracks).T
+                tracks = np.array(segments)
+                tracks = tracks.reshape(n_frames, size * n_tracks).T
 
             # read by track
             else:
                 (n_seg,) = struct.unpack("i", fid.read(4))
                 fid.seek(4, 1)
-                segments = struct.unpack("%ii" % (2 * n_seg), fid.read(8 * n_seg))
+                segments = struct.unpack(
+                    "%ii" % (2 * n_seg),
+                    fid.read(8 * n_seg),
+                )
                 segments = np.array(segments).reshape(n_seg, 2).T
                 shape = "{}f".format(size)
                 for s in range(n_seg):
-                    for row in range(segments[0, s], segments[0, s] + segments[1, s]):
+                    rng = range(
+                        segments[0, s],
+                        segments[0, s] + segments[1, s],
+                    )
+                    for row in rng:
                         val = struct.unpack(shape, fid.read(4 * size))
                         if row < n_frames:
                             cols = np.arange(size * trk, size * trk + size)
@@ -281,7 +289,10 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         if info["Format"] in [1, 3]:
             (n_links,) = struct.unpack("i", fid.read(4))
             fid.seek(4, 1)
-            links = struct.unpack("%ii" % (2 * n_links), fid.read(8 * n_links))
+            links = struct.unpack(
+                "%ii" % (2 * n_links),
+                fid.read(8 * n_links),
+            )
             links = np.reshape(links, (len(links) // 2, 2))
 
         # check if the file has to be read by frame or by track
@@ -292,7 +303,13 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
 
         # read the data
         tracks, labels, index = readTracks(
-            fid, n_frames, n_tracks, freq, time, by_frame, 3
+            fid,
+            n_frames,
+            n_tracks,
+            freq,
+            time,
+            by_frame,
+            3,
         )
 
         # generate the output markers
@@ -302,6 +319,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
             points[labels[trk]] = Marker3D(
                 coordinates=tracks[:, cols],
                 index=index,
+                unit="m",
             )
 
         # generate the links
@@ -309,7 +327,8 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         for link in links:
             p0 = points[labels[link[0]]].coordinates
             p1 = points[labels[link[1]]].coordinates
-            lnk["{} -> {}".format(*[labels[i] for i in link])] = Link3D(p0, p1)
+            lbl = "{} -> {}".format(*[labels[i] for i in link])
+            lnk[lbl] = Link3D(p0, p1)
 
         # get the output
         out = {"Marker3D": points}
@@ -370,6 +389,9 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
                 moment=moments,
                 origin=points,
                 index=index,
+                force_unit="N",
+                moment_unit="Nm",
+                origin_unit="m",
             )
 
         return {"ForcePlatform": fp}
@@ -404,11 +426,20 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         # read the data
         fid.read(n_tracks * 2)
         tracks, labels, index = readTracks(
-            fid, n_frames, n_tracks, freq, time, by_frame, 1
+            fid,
+            n_frames,
+            n_tracks,
+            freq,
+            time,
+            by_frame,
+            1,
         )
 
         # generate the output
-        return {"EMG": {i: EmgSensor(v, index) for i, v in zip(labels, tracks.T)}}
+        out = {}
+        for i, v in zip(labels, tracks.T):
+            out[i] = EmgSensor(amplitude=v * 1e6, index=index, unit="uV")
+        return {"EMG": out}
 
     def getIMU(file: str, info: str) -> dict:
         """
@@ -445,10 +476,17 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         imus = {}
         for i, label in enumerate(labels):
             acc_cols = np.arange(3) + 3 * i
-            acc = tracks[:, acc_cols]  # m/s^2
-            gyr_cols = acc_cols + 3  # deg/s
-            gyr = tracks[:, gyr_cols] * 180 / np.pi
-            imus[label] = Imu3D(accelerometer=acc, gyroscope=gyr, index=index)
+            gyr_cols = acc_cols + 3
+            mag_cols = acc_cols + 6
+            imus[label] = Imu3D(
+                accelerometer=tracks[:, acc_cols],
+                gyroscope=tracks[:, gyr_cols],
+                magnetometer=tracks[:, mag_cols],
+                index=index,
+                accelerometer_unit="m/s^2",
+                gyroscope_unit="rad/s",
+                magnetometer_unit="nT",
+            )
 
         return {"IMU": imus}
 
@@ -463,13 +501,13 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
 
         Paramters
         ---------
-        ref: _Object
+        ref: GeometricObject
             a point containing the reference data time.
 
         reset_time: bool
             if True the time of all the returned array will start from zero.
 
-        kwargs: key-values _Objects
+        kwargs: key-values GeometricObjects
             a variable number of named objects to be resized according to ref.
 
         Returns
@@ -480,11 +518,12 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         """
 
         # check the entries
-        txt = "{} must be a simbiopy._Object instance."
-        assert isinstance(ref, _Object), txt.format("'ref'")
+        txt = "{} must be a simbiopy.GeometricObject instance."
+        assert isinstance(ref, GeometricObject), txt.format("'ref'")
         for key, obj in kwargs.items():
-            assert isinstance(obj, _Object), txt.format(key)
-        assert reset_time or not reset_time, "'reset_time' must be a bool object."
+            assert isinstance(obj, GeometricObject), txt.format(key)
+        txt = "'reset_time' must be a bool object."
+        assert reset_time or not reset_time, txt
 
         # get the start and end ref time
         start = np.min(ref.index)
@@ -492,7 +531,9 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
 
         # resize all data
         idx = {i: v.index for i, v in kwargs.items()}
-        valid = {i: np.where((v >= start) & (v <= stop))[0] for i, v in idx.items()}
+        valid = {}
+        for i, v in idx.items():
+            valid[i] = np.where((v >= start) & (v <= stop))[0]
         resized = {i: v.iloc[valid[i]] for i, v in kwargs.items()}
 
         # check if the time has to be reset
@@ -512,11 +553,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
     # codes
     tdf_signature = "41604B82CA8411D3ACB60060080C6816"
     ids = {
-        # 0: {"fun": get_Link3D, "label": "Link3D"},
-        # 2: {"fun": get_Link3D, "label": "Link3D"},
-        # 4: {"fun": get_Link3D, "label": "Link3D"},
         5: {"fun": get_Marker3D, "label": "Marker3D"},
-        # 6: {"fun": get_Link3D, "label": "Link3D"},
         12: {"fun": get_Force3D, "label": "ForcePlatform3D"},
         11: {"fun": getEMG, "label": "EMG"},
         17: {"fun": getIMU, "label": "IMU"},
@@ -546,7 +583,8 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
 
         # get the data types
         block_info = struct.unpack("IIii", fid.read(16))
-        bi = {i: v for i, v in zip(["Type", "Format", "Offset", "Size"], block_info)}
+        block_labels = ["Type", "Format", "Offset", "Size"]
+        bi = dict(zip(block_labels, block_info))
 
         # retain only valid block types
         if any([i == bi["Type"] for i in ids]):

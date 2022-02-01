@@ -3,8 +3,10 @@
 
 #! IMPORTS
 
+
 from .regression import LinearRegression
 from .processing import interpolate_cs
+from itertools import product
 from typing import Tuple
 from scipy.spatial.transform import Rotation as R
 import weakref
@@ -40,11 +42,13 @@ class _Indexer:
         """
         assert isinstance(attr, str), "'attr' must be a str instance."
         self.attr = attr
-        assert isinstance(obj, (_Object)), "obj must be an _Object instance."
+        txt = "obj must be an GeometricObject instance."
+        assert isinstance(obj, GeometricObject), txt
         self.obj = obj
         self.attributes = {}
         for i, v in attributes.items():
-            assert hasattr(obj, i), "The {} attribute is not part of obj.".format(i)
+            txt = "The {} attribute is not part of obj.".format(i)
+            assert hasattr(obj, i), txt
             self.attributes[i] = v
 
     def __setitem__(self, item, value):
@@ -86,62 +90,76 @@ class _Indexer:
         return obj
 
 
-class _Df(pd.DataFrame):
+class UnitDataFrame(pd.DataFrame):
     """
-    Generate an object reflecting a custom DataFrame.
+    Generate an object reflecting a custom DataFrame with unit of measurement.
 
     Parameters
     ----------
     data: np.ndarray (structured or homogeneous), Iterable, dict, or DataFrame
-        Dict can contain Series, arrays, constants, dataclass or list-like objects.
-        If data is a dict, column order follows insertion-order.
-        If a dict contains Series which have an index defined, it is aligned by its index.
+        Dict can contain Series, arrays, constants, dataclass or list-like
+        objects. If data is a dict, column order follows insertion-order.
+        If a dict contains Series which have an index defined, it is aligned
+        by its index.
 
     index: Index or array-like
-        Index to use for resulting frame. Will default to RangeIndex if no indexing information
-        part of input data and no index provided.
+        Index to use for resulting frame. Will default to RangeIndex if no
+        indexing information part of input data and no index provided.
 
     columns: Index or array-like
         Column labels to use for resulting frame when data does not have them,
-        defaulting to RangeIndex(0, 1, 2, …, n). If data contains column labels, will
-        perform column selection instead.
+        defaulting to RangeIndex(0, 1, 2, …, n). If data contains column
+        labels, will perform column selection instead.
+
+    unit: str
+        the unit of measurement of the data.
     """
 
     _cacher = ()
 
     dtype = np.float64
 
+    _metadata = ["unit"]
+
+    unit = ""
+
     def _set_as_cached(self, item, cacher) -> None:
         """
-        Set the _cacher attribute on the calling object with a weakref to cacher.
+        Set the _cacher attribute on the calling object with a weakref to
+        cacher.
         """
         self._cacher = (item, weakref.ref(cacher))
 
     @property
     def _constructor(self):
-        return _Df
+        return UnitDataFrame
 
     @property
     def _constructor_sliced(self):
-        return _Df
+        return UnitDataFrame
 
     @property
     def T(self):
         """
         return the transpose of the object
         """
-        return super(_Df, self).T
+        return super(UnitDataFrame, self).T
 
     @property
     def norm(self):
         """
-        get the norm of the _DF.
+        get the norm of the UnitDataFrame.
         """
         dt = np.sqrt(np.sum(self.values ** 2, axis=1))
         lbls = [str(i) for i in self.columns.to_list()]
         cols = "|{}|".format("+".join(lbls))
         idx = self.index
-        return _Df(coordinates=dt, columns=[cols], index=idx)
+        return UnitDataFrame(
+            coordinates=dt,
+            columns=[cols],
+            index=idx,
+            unit=self.unit,
+        )
 
     @property
     def ndim(self):
@@ -160,7 +178,7 @@ class _Df(pd.DataFrame):
     @classmethod
     def unstack(cls, df):
         """
-        convert a long format DataFrame into a _Df instance.
+        convert a long format DataFrame into a UnitDataFrame instance.
 
         Parameters
         ----------
@@ -173,10 +191,12 @@ class _Df(pd.DataFrame):
         obj: _Ds
             the instance resulting from the dataframe reading.
         """
-        out = df.pivot("Time", "Dimension", "Amplitude")
+        unit = np.unique(df["Unit"].values.flatten())[0]
+        tmp = df.copy().drop("Unit", axis=1)
+        out = tmp.pivot("Time", "Dimension", "Amplitude")
         out.columns = pd.Index(out.columns.to_numpy())
         out.index = pd.Index(out.index.to_numpy())
-        return cls(out)
+        return cls(out, unit=unit)
 
     def stack(self):
         """
@@ -184,19 +204,30 @@ class _Df(pd.DataFrame):
         """
         out = pd.DataFrame(self, copy=True)
         out.insert(0, "Time", out.index.to_numpy())
-        return out.melt(
+        out = out.melt(
             id_vars="Time",
             value_vars=self.columns.to_numpy(),
             var_name="Dimension",
             value_name="Amplitude",
             ignore_index=True,
         )
+        out.insert(out.shape[1] - 1, "Unit", np.tile(self.unit, out.shape[0]))
+        return out
+
+    def pivot(self):
+        """
+        create a wide df view of the data.
+        """
+        out = pd.DataFrame(self)
+        cols = [i + " ({})".format(self.unit) for i in out.columns]
+        out.columns = pd.Index(cols)
+        return out
 
     def __str__(self):
         """
         support to print
         """
-        return pd.DataFrame(self).__str__()
+        return self.pivot().__str__()
 
     def matches(self, obj) -> bool:
         """
@@ -204,7 +235,7 @@ class _Df(pd.DataFrame):
 
         Parameters
         ----------
-        obj: 2D numpy.ndarray, pandas.DataFrame, _DF
+        obj: 2D numpy.ndarray, pandas.DataFrame, UnitDataFrame
             the object to be compared with self.
 
         Returns
@@ -213,7 +244,7 @@ class _Df(pd.DataFrame):
             True if obj has the same shape and, if appropriate, the same
             index and columns of self.
         """
-        valid = (np.ndarray, pd.DataFrame, _Df)
+        valid = (np.ndarray, pd.DataFrame, UnitDataFrame)
         if not isinstance(obj, valid):
             return False
         if obj.ndim != self.ndim:
@@ -225,6 +256,9 @@ class _Df(pd.DataFrame):
                 return False
             if not all([i == v for i, v in zip(self.index, obj.index)]):
                 return False
+        if isinstance(obj, UnitDataFrame):
+            if self.unit != obj.unit:
+                return False
         return True
 
     def _angles(self):
@@ -233,8 +267,8 @@ class _Df(pd.DataFrame):
 
         Returns
         -------
-        q: _DF
-            the _DF containing the angles in radiants.
+        q: UnitDataFrame
+            the UnitDataFrame containing the angles in radiants.
         """
         q = {}
         for i, c0 in self.columns.to_numpy()[:-1]:
@@ -244,13 +278,29 @@ class _Df(pd.DataFrame):
                 x = self[c1].values.flatten()
                 val = np.arctan2(y, x)
                 q[lbl] = val
-        return _Df(q, index=self.index)
+        return UnitDataFrame(q, index=self.index, unit="rad")
 
-    def __init__(self, *args, **kwargs):
+    def __init__(
+        self,
+        data,
+        index=None,
+        columns=None,
+        unit="",
+        *args,
+        **kwargs,
+    ):
         if any([i == "name" for i in kwargs]):
             args = [pd.Series(*args, **kwargs)]
             kwargs = {}
-        super(_Df, self).__init__(*args, **kwargs)
+        super(UnitDataFrame, self).__init__(
+            data=data,
+            index=index,
+            columns=columns,
+            *args,
+            **kwargs,
+        )
+        assert isinstance(unit, str), "unit must be a str object."
+        self.unit = unit
 
     def __radd__(self, obj):
         """
@@ -278,7 +328,7 @@ class _Df(pd.DataFrame):
         return (self ** (-1)) * obj
 
 
-class _Object:
+class GeometricObject:
     """
     generic class used as interface for the implementation of common methods.
 
@@ -290,11 +340,14 @@ class _Object:
     columns: array-like | None
         the list of labels for each dimension of the provided data
 
+    unit: str (optional)
+        the unit of measurement related to the provided data
+
     attributes: keyworded arguments
         The list of arguments containing the data of the object.
         The key of the arguments will be used as attributes of the object.
         The values of each key must be of type list, numpy.ndarray,
-        pandas.DataFrame, _DF.
+        pandas.DataFrame, UnitDataFrame.
     """
 
     # list of attributes of the class which contain relevant data.
@@ -305,6 +358,7 @@ class _Object:
         self,
         index: Tuple[list, np.ndarray] = None,
         columns: Tuple[list, np.ndarray] = None,
+        unit: str = "",
         **attributes,
     ):
         """
@@ -314,7 +368,7 @@ class _Object:
         objs = {}
         self._attributes = []
         for attr, value in attributes.items():
-            pnt = self._get_data(value, index, columns)
+            pnt = self._get_data(value, index, columns, unit)
             setattr(self, attr, pnt)
             objs[attr] = getattr(self, attr)
             self._attributes += [attr]
@@ -376,7 +430,7 @@ class _Object:
 
         Returns
         -------
-        val: _Object
+        val: GeometricObject
             the (sliced) object.
         """
         itm = self._get_item(item)
@@ -416,6 +470,115 @@ class _Object:
         else:
             return item
 
+    def _adjust_indices(self, idx: Tuple[list, np.ndarray]) -> np.ndarray:
+        """
+        adjust the input index or columns to be used for creating the object.
+
+        Parameters
+        ----------
+        idx: list, numpy.ndarray
+            a 1D list to be arranged properly for generating the object.
+
+        Returns
+        -------
+        out: numpy.ndarray
+            a 1D numpy.ndarray to be used for the generation of the object.
+        """
+        if isinstance(idx, list):
+            out = np.array(idx)
+        else:
+            out = idx
+        assert out.ndim < 2, "'array' must be a 1D array."
+        return out
+
+    def _get_data(
+        self,
+        data,
+        index: Tuple[list, np.ndarray] = None,
+        columns: Tuple[list, np.ndarray] = None,
+        unit: str = "",
+    ):
+        """
+        get the UnitDataFrame required to generate an attribute of the object.
+
+        Parameters
+        ----------
+        data: np.ndarray (structured or homogeneous), Iterable, dict,
+            or DataFrame Dict can contain Series, arrays, constants, dataclass
+            or list-like objects.
+            If data is a dict, column order follows insertion-order.
+            If a dict contains Series which have an index defined, it is
+            aligned by its index.
+
+        index: Index or array-like
+            Index to use for resulting frame. Will default to RangeIndex if no
+            indexing information part of input data and no index provided.
+
+        columns: Index or array-like
+            Column labels to use for resulting frame when data does not have
+            them, defaulting to RangeIndex(0, 1, 2, …, n). If data contains
+            column labels, will perform column selection instead.
+
+        unit: str (optional)
+            the unit of measurement of the provided data.
+
+        Returns
+        -------
+        out: UnitDataFrame
+            a UnitDataFrame instance to be used as attribute of the object.
+        """
+        assert isinstance(unit, str), "unit must be a string."
+        if isinstance(data, UnitDataFrame):
+            out = data
+        elif isinstance(data, pd.DataFrame):
+            out = UnitDataFrame(data, unit=unit)
+        elif isinstance(data, (list, np.ndarray)):
+
+            # check the data
+            if isinstance(data, list):
+                val = np.array(data)
+            elif isinstance(data, np.ndarray):
+                val = data
+            else:
+                txt = "data must be an instance of "
+                txt += "[List, numpy.ndarray, pandas.DataFrame, "
+                txt += "UnitDataFrame]."
+                raise ValueError(txt)
+            if val.ndim == 1:
+                val = np.atleast_2d(val).T
+            elif val.ndim > 2:
+                txt = "data must be a 1D or 2D array."
+                raise ValueError(txt)
+
+            # check the index
+            if index is None:
+                idx = np.arange(data.shape[0])
+            else:
+                idx = self._adjust_indices(index)
+            txt = "index has length {}, but it should be {}."
+            txt = txt.format(len(idx), val.shape[0])
+            assert len(idx) == val.shape[0], txt
+
+            # check the columns
+            if columns is None:
+                col = ["D{}".format(i + 1) for i in range(data.shape[1])]
+                col = np.array(col)
+            else:
+                col = self._adjust_indices(columns)
+            txt = "columns has length {}, but it should be {}."
+            txt = txt.format(len(col), val.shape[1])
+            assert len(col) == val.shape[1], txt
+
+            # generate the UnitDataFrame object
+            out = UnitDataFrame(data=val, index=idx, columns=col, unit=unit)
+
+        else:
+            txt = "'data' must be an instance of list, numpy.ndarray, "
+            txt += "pandas.DataFrame or UnitDataFrame."
+            raise TypeError(txt)
+
+        return out
+
     def _replace_value(self, value):
         """
         internal method used by fillna which replaces the values
@@ -428,7 +591,7 @@ class _Object:
 
         Returns
         -------
-        obj: _Object instance
+        obj: GeometricObject instance
             the object with missing data replaced by value.
         """
         assert isinstance(value, float, int), "value must be float or int."
@@ -447,7 +610,7 @@ class _Object:
 
         Returns
         -------
-        obj: _Object instance
+        obj: GeometricObject instance
             the object with missing data replaced by value.
         """
         obj = self.copy()
@@ -471,7 +634,7 @@ class _Object:
 
         Returns
         -------
-        filled: _Object
+        filled: GeometricObject
             the object without missing data.
         """
 
@@ -482,7 +645,7 @@ class _Object:
         assert len(predictors) > 0, txt
         txt = "one or more predictors does not match with self."
         for p in predictors:
-            assert self.matches(p), txt
+            assert self.matches(p, strict=False), txt
 
         # get mean absolute correlation between self and the predictors
         corrs = [np.mean(abs(self.corr(i).values)) for i in predictors]
@@ -511,113 +674,12 @@ class _Object:
             setattr(obj, attr, df)
         return obj
 
-    def _adjust_indices(self, idx: Tuple[list, np.ndarray]) -> np.ndarray:
-        """
-        adjust the input index or columns to be used for creating the object.
-
-        Parameters
-        ----------
-        idx: list, numpy.ndarray
-            a 1D list to be arranged properly for generating the object.
-
-        Returns
-        -------
-        out: numpy.ndarray
-            a 1D numpy.ndarray to be used for the generation of the object.
-        """
-        if isinstance(idx, list):
-            out = np.array(idx)
-        else:
-            out = idx
-        assert out.ndim < 2, "'array' must be a 1D array."
-        return out
-
-    def _get_data(
-        self,
-        data,
-        index: Tuple[list, np.ndarray] = None,
-        columns: Tuple[list, np.ndarray] = None,
-    ):
-        """
-        get the _DF required to generate an attribute of the object.
-
-        Parameters
-        ----------
-        data: np.ndarray (structured or homogeneous), Iterable, dict,
-            or DataFrame Dict can contain Series, arrays, constants, dataclass
-            or list-like objects.
-            If data is a dict, column order follows insertion-order.
-            If a dict contains Series which have an index defined, it is aligned
-            by its index.
-
-        index: Index or array-like
-            Index to use for resulting frame. Will default to RangeIndex if no
-            indexing information part of input data and no index provided.
-
-        columns: Index or array-like
-            Column labels to use for resulting frame when data does not have
-            them, defaulting to RangeIndex(0, 1, 2, …, n). If data contains
-            column labels, will perform column selection instead.
-
-        Returns
-        -------
-        out: _DF
-            a _DF instance to be used as attribute of the object.
-        """
-        if isinstance(data, _Df):
-            out = data
-        elif isinstance(data, pd.DataFrame):
-            out = _Df(data)
-        elif isinstance(data, (list, np.ndarray)):
-
-            # check the data
-            if isinstance(data, list):
-                val = np.array(data)
-            elif isinstance(data, np.ndarray):
-                val = data
-            else:
-                txt = "data must be an instance of "
-                txt += "[List, numpy.ndarray, pandas.DataFrame, _DF]."
-                raise ValueError(txt)
-            if val.ndim == 1:
-                val = np.atleast_2d(val).T
-            elif val.ndim > 2:
-                txt = "data must be a 1D or 2D array."
-                raise ValueError(txt)
-
-            # check the index
-            if index is None:
-                idx = np.arange(data.shape[0])
-            else:
-                idx = self._adjust_indices(index)
-            txt = "index has length {}, but it should be {}."
-            txt = txt.format(len(idx), val.shape[0])
-            assert len(idx) == val.shape[0], txt
-
-            # check the columns
-            if columns is None:
-                col = np.array(["D{}".format(i + 1) for i in range(data.shape[1])])
-            else:
-                col = self._adjust_indices(columns)
-            txt = "columns has length {}, but it should be {}."
-            txt = txt.format(len(col), val.shape[1])
-            assert len(col) == val.shape[1], txt
-
-            # generate the _DF object
-            out = _Df(data=val, index=idx, columns=col)
-
-        else:
-            txt = "'data' must be an instance of list, numpy.ndarray, "
-            txt += "pandas.DataFrame or _DF."
-            raise TypeError(txt)
-
-        return out
-
     def pivot(self) -> pd.DataFrame:
         """
-        generate a wide dataframe object containing both origin and amplitudes.
+        generate a wide dataframe object containing both origin and
+        amplitudes.
         """
-        df = self.stack().pivot("Time", ["Source", "Dimension"])
+        df = self.stack().pivot("Time", ["Source", "Dimension", "Unit"])
         df.columns = pd.Index([i[-1] for i in df.columns])
         df.index = pd.Index(df.index.to_numpy())
         return df
@@ -643,8 +705,8 @@ class _Object:
             a scatter plot is rendered.
 
         show: bool (default=True)
-            if True the generated figure is immediately plotted. Otherwise the
-            generated object is returned
+            if True the generated figure is immediately plotted. Otherwise
+            the generated object is returned
 
         width: int (default=1280)
             the width of the output figure in pixels
@@ -657,6 +719,11 @@ class _Object:
         None, if show = True. A plotly.Figure object, otherwise.
         """
         fun = px.line if lines else px.scatter
+        df = self.stack()
+        dims = df.loc[df.index, ["Dimension"]].values.flatten()
+        unts = df.loc[df.index, ["Unit"]].values.flatten()
+        vals = ["{} ({})".format(d, u) for d, u in zip(dims, unts)]
+        df.loc[df.index, ["Dimension"]] = np.atleast_2d(vals).T
         fig = fun(
             data_frame=self.stack(),
             x="Time",
@@ -681,20 +748,21 @@ class _Object:
         Parameters
         ----------
         percentiles: list
-            a list of values in the [0, 1] range defining the desired percentiles
-            to be calculated.
+            a list of values in the [0, 1] range defining the desired
+            percentiles to be calculated.
 
         Returns
         -------
         df: pd.DataFrame
             a pandas.DataFrame with the object descriptive statistics.
         """
-        grp = self.stack().drop("Time", axis=1).groupby(["Source", "Dimension"])
+        grp = self.stack().drop("Time", axis=1)
+        grp = grp.groupby(["Source", "Dimension", "Unit"])
         df = grp.describe(percentiles=percentiles)
         df.columns = pd.Index([i[1] for i in df.columns])
         return df
 
-    def matches(self, obj) -> bool:
+    def matches(self, obj, strict=False) -> bool:
         """
         check if obj is comparable to self.
 
@@ -703,20 +771,29 @@ class _Object:
         obj: Any
             the object to be compared
 
+        strict: bool
+            should a strict match be approached?
+            Strict matching means that, in case of multiple attributes
+            in the same GeometricObject, all attributes are required
+            to match with self. Otherwise it is required that just
+            one of the attributes matches with self.
+
         Returns
         -------
         Q: bool
             true if obj matches self, False otherwise.
         """
-        a = self._attributes[0]
-        if not isinstance(obj, (pd.DataFrame, _Df, np.ndarray)):
+        a = [getattr(self, i) for i in self._attributes]
+        if not isinstance(obj, (pd.DataFrame, UnitDataFrame, np.ndarray)):
             try:
-                b = obj._attributes[0]
+                b = [getattr(obj, i) for i in obj._attributes]
             except Exception:
                 return False
         else:
-            b = obj
-        return a.matches(b)
+            b = [obj]
+        combs = [i[0].matches(i[1]) for i in product(a, b)]
+
+        return all(combs) if strict else any(combs)
 
     def corr(self, obj, weighted=True):
         """
@@ -724,33 +801,36 @@ class _Object:
 
         Parameters
         ----------
-        obj: numpy.ndarray, pandas.DataFrame, _DF, _Object
+        obj: numpy.ndarray, pandas.DataFrame, UnitDataFrame, GeometricObject
             the object to be correlated with self.
 
         weighted: bool
-            should the correlation be weighted by the number of non-missing data?
-            True means that the correlation value is multiplied by the percentage
-            of non-missing data in the sample.
-            False, otherwise
+            should the correlation be weighted by the number of
+            non-missing data?
+            True means that the correlation value is multiplied by
+            the percentage of non-missing data in the sample. False, otherwise.
 
         Returns
         -------
         r: pandas.DataFrame
             the correlation between self and obj.
         """
-        assert self.matches(obj), "'obj' must be matchable with self."
+        txt = "'obj' must be matchable with self."
+        assert self.matches(obj, strict=False), txt
         a = self.pivot()
         if isinstance(obj, np.ndarray):
             cols = [("Obj", "", str(i)) for i in range(obj.shape[1])]
             cols = pd.MultiIndex.from_tuples(cols)
             b = pd.DataFrame(obj, index=self.index, columns=cols)
-        elif isinstance(obj, (pd.DataFrame, _Df)):
+        elif isinstance(obj, (pd.DataFrame, UnitDataFrame)):
             b = obj.copy()
-            b.columns = pd.MultiIndex.from_tuples([("Obj", "", i) for i in self])
+            cols = [("Obj", "", i) for i in self]
+            b.columns = pd.MultiIndex.from_tuples(cols)
         else:
             try:
                 b = obj.pivot()
-                b.columns = pd.MultiIndex.from_tuples([("Obj", *i) for i in b])
+                cols = [("Obj", *i) for i in b]
+                b.columns = pd.MultiIndex.from_tuples(cols)
             except Exception:
                 txt = "correlation between {} and {} is not supported."
                 txt = txt.format(*[i.__class__.__name__ for i in [self, obj]])
@@ -817,12 +897,13 @@ class _Object:
 
         Returns
         -------
-        obj: _Object
+        obj: GeometricObject
             the object with the function applied to each attribute.
         """
         obj = self.copy()
         for attr in self._attributes:
-            setattr(obj, attr, getattr(obj, attr).apply(fun, *args, **kwargs))
+            tmp = getattr(obj, attr).apply(fun, *args, **kwargs)
+            setattr(obj, attr, tmp)
         return obj
 
     def fillna(
@@ -840,20 +921,21 @@ class _Object:
             the value to be used for missing data replacement.
             if None, cubic spline interpolation is used to extract the
             missing data.
-            Please note that if predictors is not empty, this parameter is ignored.
+            Please note that if predictors is not empty, this parameter is
+            ignored.
 
         n: int
             the number of predictors to be used if predictors is not empty
 
         predictors: list
-            list of objects that can be matched with self and that can be used to obtain
-            missing coordinates via multiple linear regression.
-            If left empty, cubic spline interpolation or constant value substitution is
-            used according to the inputs provided in value.
+            list of objects that can be matched with self and that can be used
+            to obtain missing coordinates via multiple linear regression.
+            If left empty, cubic spline interpolation or constant value
+            substitution is used according to the inputs provided in value.
 
         Returns
         -------
-        filled: _Object
+        filled: GeometricObject
             the object without missing data.
         """
 
@@ -885,13 +967,14 @@ class _Object:
         Returns
         -------
 
-        obj: _Object
+        obj: GeometricObject
             the instance resulting from the dataframe reading.
         """
-        cols = ["Time", "Dimension", "Amplitude"]
+        cols = ["Time", "Dimension", "Unit", "Amplitude"]
         objs = {}
         for attr in np.unique(df["Source"].values.flatten()):
-            objs[attr] = _Df.unstack(df.loc[df.isin([attr]).any(1)][cols])
+            tmp = df.loc[df.isin([attr]).any(1)][cols]
+            objs[attr] = UnitDataFrame.unstack(tmp)
         return cls(**objs)
 
     @property
@@ -943,32 +1026,25 @@ class _Object:
         """
         return float(1.0 / np.mean(np.diff(self.index)))
 
-    @property
-    def T(self):
-        """
-        return the transpose of the object
-        """
-        obj = self.copy()
-        for attr in self._attributes:
-            setattr(obj, attr, getattr(self, attr).T)
-        return obj
 
-
-class ReferenceFrame(_Object):
+class ReferenceFrame(GeometricObject):
     """
     Create a ReferenceFrame instance.
 
     Parameters
     ----------
 
-    origin: pd.DataFrame, _DF, Point
+    origin: pd.DataFrame, UnitDataFrame, Point
         a pandas.DataFrame that contains the coordinates of the
         ReferenceFrame's origin at each time instant (index).
 
-    versors: named pd.DataFrame, _DF, Point, Vector
-        a dict where each key is a pandas.DataFrame or _DF or Point or Vector
-        with shape equal to origin that contains coordinates of the versors
-        defining the orientation of the reference frame at each time instant.
+    unit: str
+        the unit of measurement of the origin and the versors.
+
+    versors: named pd.DataFrame, UnitDataFrame, Point, Vector
+        a dict where each key is a valid object with shape equal to origin
+        that contains coordinates of the versors defining the orientation
+        of the reference frame at each time instant.
         The number of versors must be equal to the number of dimensions
         of 'origin'.
     """
@@ -976,16 +1052,18 @@ class ReferenceFrame(_Object):
     def __init__(
         self,
         origin,
+        unit="",
         **versors,
     ):
 
         # check the origin
-        txt = "'origin' must be an instance of (pandas.DataFrame, _DF or Point)."
-        assert isinstance(origin, (_Df, Point, pd.DataFrame)), txt
+        txt = "'origin' must be an instance of (pandas.DataFrame, "
+        txt += "UnitDataFrame or Point)."
+        assert isinstance(origin, (UnitDataFrame, Point, pd.DataFrame)), txt
         if isinstance(origin, Point):
             ori = self._get_data(origin.coordinates)
         else:
-            ori = self._get_data(origin)
+            ori = self._get_data(origin, unit=unit)
         idx = ori.index
         col = ori.columns
         assert 2 <= len(col) <= 3, "only 2D and 3D frames are supported."
@@ -999,10 +1077,10 @@ class ReferenceFrame(_Object):
                 v = versors[d].amplitude
             elif isinstance(versors[d], Point):
                 v = versors[d].coordinates
-            elif isinstance(versors[d], (pd.DataFrame, _Df)):
-                v = self._get_data(versors[d])
+            elif isinstance(versors[d], (pd.DataFrame, UnitDataFrame)):
+                v = self._get_data(versors[d], unit=unit)
             txt2 = "{} versor does not match with origin.".format(d)
-            assert ori.matches(v), txt2
+            assert ori.matches(v, strict=False), txt2
             vrs[d] = v.copy()
 
         # apply gram-schmidt normalization to the versors
@@ -1017,17 +1095,17 @@ class ReferenceFrame(_Object):
         # generate the object
         super(ReferenceFrame, self).__init__(origin=ori, **vrs)
 
-        # store the efficient scipy.Rotation class object allowing the rotation
-        # of additional input segments.
+        # store the efficient scipy.Rotation class object allowing the
+        # rotation of additional input segments.
         self._rotmat = R.from_matrix(mat)
 
-    def _rotate(self, obj, fun):
+    def _apply(self, obj, fun):
         """
         rotate the object.
 
         Parameters
         ----------
-        obj: _Object, _DF
+        obj: GeometricObject, UnitDataFrame
             the object to be rotated.
 
         fun: function
@@ -1035,15 +1113,25 @@ class ReferenceFrame(_Object):
 
         Returns
         -------
-        rot: _Object, _DF
+        rot: GeometricObject, UnitDataFrame
             the rotated object.
         """
-        if isinstance(obj, _Df):
-            return fun(obj)
+        if isinstance(obj, UnitDataFrame):
+            txt = "obj doesn't match with the ReferenceFrame."
+            assert self.matches(obj, strict=False), txt
+            out = fun(obj)
 
-        out = obj.copy()
-        for attr in self._attributes:
-            setattr(out, attr, self.rotate(getattr(out, attr)))
+        elif isinstance(obj, GeometricObject):
+            out = obj.copy()
+            for attr in out.attributes:
+                setattr(out, attr, self._apply(getattr(out, attr), fun))
+
+        else:
+            txt = "obj has class {}, which cannot be aligned to"
+            txt += "ReferenceFrame instances"
+            txt = txt.format(obj.__class__.__name__)
+            raise TypeError(txt)
+
         return out
 
     def _gram_schmidt(self, points: np.ndarray) -> np.ndarray:
@@ -1052,7 +1140,8 @@ class ReferenceFrame(_Object):
         Gram-Schmidt algorithm.
 
         Parameters:
-            points (np.ndarray): a NxN numpy.ndarray to be orthogonalized (by row).
+            points (np.ndarray): a NxN numpy.ndarray to be orthogonalized
+            (by row).
 
         Returns:
             a NxN numpy.ndarray containing the orthogonalized arrays.
@@ -1075,46 +1164,57 @@ class ReferenceFrame(_Object):
         # normalize
         return np.vstack([norm(u) for u in W])
 
-    def rotate(self, obj: Tuple[_Object, _Df]) -> Tuple[_Object, _Df]:
+    def apply_to(
+        self,
+        obj: Tuple[GeometricObject, UnitDataFrame],
+    ) -> Tuple[GeometricObject, UnitDataFrame]:
         """
-        Rotate point according to the current ReferenceFrame instance.
+        Align the object to the current ReferenceFrame instance.
 
         Parameters
         ----------
-        obj: _DF, _Object
+        obj: UnitDataFrame, GeometricObject
             the object to be rotated.
 
         Returns
         -------
-        rot: _DF, _Object
+        rot: UnitDataFrame, GeometricObject
             the rotated object.
         """
 
         def fun(obj):
-            vals = self._rotmat.apply((obj - self.origin).values)
-            return _Df(vals, index=obj.index, columns=obj.columns)
+            if self.matches(obj, strict=True):
+                return self._rotmat.apply(obj - self.origin)
+            else:
+                return self._rotmat.apply(obj)
 
-        return self._rotate(obj, fun)
+        return self._apply(obj, fun)
 
-    def invert(self, obj: Tuple[_Object, _Df]) -> Tuple[_Object, _Df]:
+    def invert(
+        self,
+        obj: Tuple[GeometricObject, UnitDataFrame],
+    ) -> Tuple[GeometricObject, UnitDataFrame]:
         """
         Rotate the object back to the global ReferenceFrame.
 
         Parameters
         ----------
-        obj: _DF, _Object
+        obj: UnitDataFrame, GeometricObject
             the object to be rotated.
 
         Returns
         -------
-        rot: _DF, _Object
+        rot: UnitDataFrame, GeometricObject
             the rotated object.
         """
 
         def fun(obj):
-            return self._rotmat.inv().apply(obj.values) + self.origin
+            out = self._rotmat.inv().apply(obj)
+            if self.matches(out, strict=True):
+                out += self.origin
+            return out
 
-        return self._rotate(obj, fun)
+        return self._apply(obj, fun)
 
     @property
     def versors(self):
@@ -1131,9 +1231,9 @@ class ReferenceFrame(_Object):
         return out
 
 
-class _MathObject(_Object):
+class GeometricMathObject(GeometricObject):
     """
-    class extending the default _Object instance by adding support
+    class extending the default GeometricObject instance by adding support
     to math operations.
 
     Parameters
@@ -1144,27 +1244,46 @@ class _MathObject(_Object):
     columns: array-like | None
         the list of labels for each dimension of the provided data
 
+    unit: str
+        the unit of measurement of the object's attributes
+
     attributes: keyworded arguments
         The list of arguments containing the data of the object.
         The key of the arguments will be used as attributes of the object.
         The values of each key must be of type list, numpy.ndarray,
-        pandas.DataFrame, _DF.
+        pandas.DataFrame, UnitDataFrame.
     """
 
     def __init__(
         self,
         index: Tuple[list, np.ndarray] = None,
         columns: Tuple[list, np.ndarray] = None,
+        unit: str = "",
         **attributes,
     ):
         """
         constructor.
         """
-        super(_MathObject, self).__init__(index=index, columns=columns, **attributes)
+        super(GeometricMathObject, self).__init__(
+            index=index,
+            columns=columns,
+            unit=unit,
+            **attributes,
+        )
+
+    @property
+    def T(self):
+        """
+        return the transpose of the object
+        """
+        obj = self.copy()
+        for attr in self._attributes:
+            setattr(obj, attr, getattr(self, attr).T)
+        return obj
 
     def _math_value(
         self,
-        obj: Tuple[int, float, np.ndarray, _Df, pd.DataFrame],
+        obj: Tuple[int, float, np.ndarray, UnitDataFrame, pd.DataFrame],
         transpose: bool = False,
     ) -> np.ndarray:
         """
@@ -1173,7 +1292,7 @@ class _MathObject(_Object):
 
         Parameters
         ----------
-        obj: int, float, np.ndarray, _DF, pd.DataFrame
+        obj: int, float, np.ndarray, UnitDataFrame, pd.DataFrame
             the second object included in the math operation.
 
         transpose: bool (optional, default=False)
@@ -1185,7 +1304,7 @@ class _MathObject(_Object):
         val: np.ndarray
             the value to be used for the math operation.
         """
-        if isinstance(obj, (_Df, pd.DataFrame)):
+        if isinstance(obj, (UnitDataFrame, pd.DataFrame)):
             val = obj.values
         elif isinstance(obj, (int, float, np.ndarray)):
             val = obj
@@ -1195,7 +1314,7 @@ class _MathObject(_Object):
             raise TypeError(txt)
         val = val * np.ones(self.shape)
         txt = "obj does not match with self."
-        assert self.matches(val.T if transpose else val), txt
+        assert self.matches(val.T if transpose else val, strict=True), txt
         return val
 
     def __iadd__(self, obj):
@@ -1334,7 +1453,7 @@ class _MathObject(_Object):
         raise NotImplementedError
 
 
-class Point(_MathObject):
+class Point(GeometricMathObject):
     """
     Generate an object reflecting a dimension-less point
     in a n-dimensional space.
@@ -1354,11 +1473,14 @@ class Point(_MathObject):
 
     columns: Index or array-like
         Column labels to use for resulting frame when data does not have them,
-        defaulting to RangeIndex(0, 1, 2, …, n). If data contains column labels,
-        will perform column selection instead.
+        defaulting to RangeIndex(0, 1, 2, …, n). If data contains column
+        labels, will perform column selection instead.
+
+    unit: str
+        the unit of measurement of the coordinates of the point.
     """
 
-    def __init__(self, coordinates, index=None, columns=None):
+    def __init__(self, coordinates, index=None, columns=None, unit=""):
         """
         constructor
         """
@@ -1366,13 +1488,14 @@ class Point(_MathObject):
             coordinates=coordinates,
             index=index,
             columns=columns,
+            unit=unit,
         )
 
     def _math_value(self, obj, transpose: bool = False) -> np.ndarray:
         """
         Parameters
         ----------
-        obj: int, float, np.ndarray, _DF, pd.DataFrame, Vector
+        obj: int, float, np.ndarray, UnitDataFrame, pd.DataFrame, Vector
             the second object included in the math operation.
 
         transpose: bool (optional, default=False)
@@ -1440,17 +1563,18 @@ class Point(_MathObject):
         return Point(coordinates=self.coordinates @ val)
 
 
-class Vector(_MathObject):
+class Vector(GeometricMathObject):
     """
-    Generate an object reflecting a dimension-less vector in a n-dimensional space.
+    Generate an object reflecting a dimension-less vector in a n-dimensional
+    space.
 
     Parameters
     ----------
 
-    amplitude: Point, _DF, pandas.DataFrame, numpy.ndarray, list
+    amplitude: Point, UnitDataFrame, pandas.DataFrame, numpy.ndarray, list
         the amplitude of the vector.
 
-    origin: Point, _DF, pandas.DataFrame, numpy.ndarray, list
+    origin: Point, UnitDataFrame, pandas.DataFrame, numpy.ndarray, list
         the origin of the vector.
 
     index: arraylike
@@ -1458,14 +1582,18 @@ class Vector(_MathObject):
 
     columns: arraylike
         the name of the dimensions of the vector's origin and amplitude.
+
+    unit: str
+        the unit of measurement of the vector's origin and amplitude.
     """
 
     def __init__(
         self,
-        amplitude: Tuple[Point, _Df, pd.DataFrame, np.ndarray, list],
-        origin: Tuple[_Df, pd.DataFrame, np.ndarray, list] = None,
+        amplitude: Tuple[Point, UnitDataFrame, pd.DataFrame, np.ndarray, list],
+        origin: Tuple[UnitDataFrame, pd.DataFrame, np.ndarray, list] = None,
         index: Tuple[list, np.ndarray] = None,
         columns: Tuple[list, np.ndarray] = None,
+        unit: str = "",
     ):
         if isinstance(amplitude, Point):
             amp = amplitude.coordinates
@@ -1480,16 +1608,17 @@ class Vector(_MathObject):
             origin=ori,
             index=index,
             columns=columns,
+            unit=unit,
         )
 
     @property
-    def norm(self) -> _Df:
+    def norm(self) -> UnitDataFrame:
         """
         get the norm of the vector.
         """
         return (self.amplitude - self.origin).norm
 
-    def angles(self) -> _Df:
+    def angles(self) -> UnitDataFrame:
         """
         return the angles between all dimensions using the arctan function.
         """
@@ -1499,7 +1628,7 @@ class Vector(_MathObject):
         """
         Parameters
         ----------
-        obj: int, float, np.ndarray, _DF, pd.DataFrame, Vector
+        obj: int, float, np.ndarray, UnitDataFrame, pd.DataFrame, Vector
             the second object included in the math operation.
 
         transpose: bool (optional, default=False)
@@ -1591,14 +1720,14 @@ class Vector(_MathObject):
         )
 
 
-class Segment(_MathObject):
+class Segment(GeometricMathObject):
     """
     Generate an object reflecting a segment a n-dimensional space.
 
     Parameters
     ----------
 
-    p0, p1: Point, _DF, pandas.DataFrame, numpy.ndarray, list
+    p0, p1: Point, UnitDataFrame, pandas.DataFrame, numpy.ndarray, list
         the first and second points of the segment.
 
     index: arraylike
@@ -1606,30 +1735,36 @@ class Segment(_MathObject):
 
     columns: arraylike
         the name of the dimensions of the vector's origin and amplitude.
+
+    unit: str
+        the unit of measurement of the coordinates defining the segment's
+        ends.
     """
 
     def __init__(
         self,
-        p0: Tuple[Point, _Df, pd.DataFrame, np.ndarray, list],
-        p1: Tuple[_Df, pd.DataFrame, np.ndarray, list] = None,
+        p0: Tuple[Point, UnitDataFrame, pd.DataFrame, np.ndarray, list],
+        p1: Tuple[UnitDataFrame, pd.DataFrame, np.ndarray, list] = None,
         index: Tuple[list, np.ndarray] = None,
         columns: Tuple[list, np.ndarray] = None,
+        unit: str = "",
     ):
         super(Segment, self).__init__(
             p0=p0.coordinates if isinstance(p0, Point) else p0,
             p1=p1.coordinates if isinstance(p1, Point) else p1,
             index=index,
             columns=columns,
+            unit=unit,
         )
 
     @property
-    def norm(self) -> _Df:
+    def norm(self) -> UnitDataFrame:
         """
         get the norm of the segment.
         """
         return (self.p1 - self.p0).norm
 
-    def angles(self) -> _Df:
+    def angles(self) -> UnitDataFrame:
         """
         return the angles between all dimensions using the arctan function.
         """
@@ -1665,8 +1800,8 @@ class Segment(_MathObject):
         # check the input data
         if not isinstance(distance, (float, int)):
             txt = "distance must be a float, int, Point, numpy.ndarray"
-            txt += " or pandas.DataFrame."
-            assert n.matches(distance), txt
+            txt += " UnitDataFrame or pandas.DataFrame."
+            assert n.matches(distance, strict=True), txt
             if isinstance(distance, (Point, pd.DataFrame)):
                 d = distance.values
             elif isinstance(distance, np.ndarray):
@@ -1704,7 +1839,8 @@ class Segment(_MathObject):
 
         # check the input data
         assert isinstance(pnt, Point), "pnt must be a Point object."
-        assert self.matches(pnt), "pnt does not match with the segment."
+        txt = "pnt does not match with the segment."
+        assert self.matches(pnt, strict=True), txt
 
         # get the pnt-p0-p1 angle
         a = three_points_angle(pnt, self.p0, self.p1)
@@ -1720,7 +1856,7 @@ class Segment(_MathObject):
         """
         Parameters
         ----------
-        obj: int, float, np.ndarray, _DF, pd.DataFrame, Segment
+        obj: int, float, np.ndarray, UnitDataFrame, pd.DataFrame, Segment
             the second object included in the math operation.
 
         transpose: bool (optional, default=False)
@@ -1811,14 +1947,14 @@ def three_points_angle(a: Point, b: Point, c: Point):
 
     Returns
     -------
-    q: _DF
+    q: UnitDataFrame
         the angle in radiants.
     """
 
     # check the data
-    assert a.matches(b), "a does not match b"
-    assert a.matches(c), "a does not match c"
-    assert b.matches(c), "b does not match c"
+    assert a.matches(b, strict=True), "a does not match b"
+    assert a.matches(c, strict=True), "a does not match c"
+    assert b.matches(c, strict=True), "b does not match c"
 
     # get the segments
     ab = (b - a).norm.values.flatten()
@@ -1827,4 +1963,9 @@ def three_points_angle(a: Point, b: Point, c: Point):
 
     # return the angle
     q = np.arccos((ac ** 2 - ab ** 2 - bc ** 2) / (-2 * ab * bc))
-    return _Df(q, columns=["Angle"], index=a.index)
+    return UnitDataFrame(
+        q,
+        columns=["Angle"],
+        index=a.index,
+        unit="rad",
+    )

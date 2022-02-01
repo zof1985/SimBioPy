@@ -42,8 +42,8 @@ def magnitude(y, base=10):
 
 def get_files(path, extension="", check_subfolders=False):
     """
-    list all the files having the required extension in the provided folder and its
-    subfolders (if required).
+    list all the files having the required extension in the provided folder
+    and its subfolders (if required).
 
     Parameters
     ----------
@@ -51,17 +51,18 @@ def get_files(path, extension="", check_subfolders=False):
             a directory where to look for the files.
 
         extension: str
-            a str object defining the ending of the files that have to be listed.
+            a str object defining the ending of the files that have to be
+            listed.
 
         check_subfolders: bool
-            if True, also the subfolders found in path are searched, otherwise only
-            path is checked.
+            if True, also the subfolders found in path are searched,
+            otherwise only path is checked.
 
     Returns
     -------
         files: list
-            a list containing the full_path to all the files corresponding to the
-            input criteria.
+            a list containing the full_path to all the files corresponding
+            to the input criteria.
     """
 
     # output storer
@@ -196,7 +197,8 @@ def from_excel(path, sheets=None, **kwargs):
     # retrive the data in the path path
     try:
         xlfile = pd.ExcelFile(path)
-        sheets = np.array(xlfile.sheet_names if sheets is None else [sheets]).flatten()
+        sheets = xlfile.sheet_names if sheets is None else [sheets]
+        sheets = np.array(sheets).flatten()
     except Exception:
         sheets = []
     finally:

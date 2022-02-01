@@ -40,8 +40,8 @@ class LinearRegression:
     ):
 
         # add the input parameters
-        txt = "{} must be a {} object."
-        assert isinstance(fit_intercept, bool), txt.format("fit_intercept", "bool")
+        txt = "{} must be a {} object.".format("fit_intercept", "bool")
+        assert isinstance(fit_intercept, bool), txt
         self.fit_intercept = fit_intercept
 
         # correct the shape of y and x
@@ -66,7 +66,8 @@ class LinearRegression:
         """
         internal method to check entries in the constructor.
         """
-        txt = "the input object must be a pandas.DataFrame, a numpy.ndarray or None."
+        txt = "the input object must be a pandas.DataFrame, a "
+        txt += "numpy.ndarray or None."
         if isinstance(v, pd.DataFrame):
             xx = v.astype(float)
         elif isinstance(v, np.ndarray):
@@ -123,8 +124,8 @@ class PolynomialRegression(LinearRegression):
         fit_intercept: bool = True,
     ):
         # add the input parameters
-        txt = "{} must be a {} object."
-        assert isinstance(fit_intercept, bool), txt.format("fit_intercept", "bool")
+        txt = "{} must be a {} object.".format("fit_intercept", "bool")
+        assert isinstance(fit_intercept, bool), txt
         self.fit_intercept = fit_intercept
         assert isinstance(n, int), txt.format("n", "int")
         self.n = n
@@ -151,7 +152,8 @@ class PolynomialRegression(LinearRegression):
         """
         internal method to check entries in the constructor.
         """
-        txt = "the input object must be a pandas.DataFrame, a numpy.ndarray or None."
+        txt = "the input object must be a pandas.DataFrame, a numpy.ndarray"
+        txt += " or None."
         if isinstance(v, pd.DataFrame):
             xx = v.astype(float)
         elif isinstance(v, np.ndarray):
