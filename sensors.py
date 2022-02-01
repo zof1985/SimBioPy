@@ -3,16 +3,28 @@
 
 #! IMPORTS
 
-from . import geometry as gm
+
+from .geometry import _Object, _MathObject, _Df, Point, Vector, Segment
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import warnings
 
 
 #! CLASSES
 
 
-class Marker3D(gm.Point):
+class Sensor:
+    """
+    general class containing just methods defining that the _Object is
+    also a Sensor.
+    """
+
+    def __init__(self):
+        pass
+
+
+class Marker3D(Point, Sensor):
     """
     generate a 3D object reflecting a marker collected over time in a 3D space.
 
@@ -31,7 +43,7 @@ class Marker3D(gm.Point):
         super(Marker3D, self).__init__(coordinates=amp)
 
 
-class ForcePlatform3D(gm._Object):
+class ForcePlatform3D(_Object, Sensor):
     """
     generate a 3D object reflecting a force platform whose data have been
     collected over time in a 3D space.
@@ -56,29 +68,29 @@ class ForcePlatform3D(gm._Object):
         """
         return the force vector measured by the ForcePlaftorm.
         """
-        return gm.Vector(amplitude=self._force, origin=self._origin)
+        return Vector(amplitude=self._force, origin=self._origin)
 
     @property
     def moment_vectors(self):
         """
         return the moments vector measured by the ForcePlaftorm.
         """
-        return gm.Vector(amplitude=self._moment, origin=self._origin)
+        return Vector(amplitude=self._moment, origin=self._origin)
 
     def __init__(self, force, moment, origin, index=None):
         # handle the case force and moment are vectors
-        if isinstance(force, gm.Vector) or isinstance(moment, gm.Vector):
+        if isinstance(force, Vector) or isinstance(moment, Vector):
             txt = "force and moment vectors must match and have the same origin."
-            assert isinstance(force, gm.Vector) and isinstance(moment, gm.Vector), txt
+            assert isinstance(force, Vector) and isinstance(moment, Vector), txt
             assert force.matches(moment), txt
             assert np.sum((force.origin - moment.origin).values) == 0, txt
             frz = force.amplitude
             mnt = moment.amplitude
             ori = force.origin
         else:
-            frz = force.coordinates if isinstance(force, gm.Point) else force
-            mnt = moment.coordinates if isinstance(moment, gm.Point) else moment
-            ori = origin.coordinates if isinstance(origin, gm.Point) else origin
+            frz = force.coordinates if isinstance(force, Point) else force
+            mnt = moment.coordinates if isinstance(moment, Point) else moment
+            ori = origin.coordinates if isinstance(origin, Point) else origin
 
         # check the size
         txt = "only 3D data can be provided."
@@ -98,7 +110,7 @@ class ForcePlatform3D(gm._Object):
         )
 
 
-class Link3D(gm.Segment):
+class Link3D(Segment, Sensor):
     """
     Generate an object reflecting a dimension-less vector in a n-dimensional space.
 
@@ -114,16 +126,16 @@ class Link3D(gm.Segment):
     """
 
     def __init__(self, p0, p1, index=None):
-        v0 = p0.coordinates if isinstance(p0, gm.Point) else p0
+        v0 = p0.coordinates if isinstance(p0, Point) else p0
         assert v0.ndim == 3, "a 3D dataset must be provided."
         v0 = self._get_data(v0, index, ["X", "Y", "Z"])
-        v1 = p1.coordinates if isinstance(p1, gm.Point) else p1
+        v1 = p1.coordinates if isinstance(p1, Point) else p1
         assert v1.ndim == 3, "a 3D dataset must be provided."
         v1 = self._get_data(v1, index, ["X", "Y", "Z"])
         super(Link3D, self).__init__(p0=v0, p1=v1)
 
 
-class EmgSensor(gm._MathObject):
+class EmgSensor(_MathObject, Sensor):
     """
     Generate a n-channels EMG sensor instance.
 
@@ -151,9 +163,9 @@ class EmgSensor(gm._MathObject):
                 raise ValueError("amplitude must be a 1D or 2D dataset.")
             cols = ["Channel{}".format(i + 1) for i in range(amp.shape[1])]
             df = self._get_data(amp, index, cols)
-        elif isinstance(amp, (pd.DataFrame, gm._Df)):
+        elif isinstance(amp, (pd.DataFrame, _Df)):
             df = self._get_data(amp)
-        super(EmgSensor, self).__init__(amplitude=amp)
+        super(EmgSensor, self).__init__(amplitude=df)
 
     def _math_value(self, obj, transpose: bool = False) -> np.ndarray:
         """
@@ -227,7 +239,7 @@ class EmgSensor(gm._MathObject):
         return EmgSensor(amplitude=self.amplitude @ val)
 
 
-class Imu3D(gm._Object):
+class Imu3D(_Object, Sensor):
     """
     generate a 3D object reflecting an Inertial Measurement Unit
     whose data have been collected over time in a 3D space.
@@ -250,17 +262,17 @@ class Imu3D(gm._Object):
     def __init__(self, accelerometer, gyroscope, magnetometer, index=None):
         attrs = {}
         if accelerometer is not None:
-            if isinstance(accelerometer, gm.Point):
+            if isinstance(accelerometer, Point):
                 attrs["accelerometer"] = accelerometer.coordinates
             else:
                 attrs["accelerometer"] = accelerometer
         if gyroscope is not None:
-            if isinstance(gyroscope, gm.Point):
+            if isinstance(gyroscope, Point):
                 attrs["gyroscope"] = gyroscope.coordinates
             else:
                 attrs["gyroscope"] = gyroscope
         if magnetometer is not None:
-            if isinstance(magnetometer, gm.Point):
+            if isinstance(magnetometer, Point):
                 attrs["magnetometer"] = magnetometer.coordinates
             else:
                 attrs["magnetometer"] = magnetometer
@@ -273,3 +285,204 @@ class Imu3D(gm._Object):
 
         # build the object
         super(Imu3D, self).__init__(index=index, **attrs)
+
+
+class Model3D:
+    """
+    generic class used as interface for the implementation of
+    specific 3D models.
+
+    Parameters
+    ----------
+    sensors: keyworded arguments
+        The list of arguments containing the data of the object.
+        The key of the arguments will be used as attributes of the object.
+        The values of each key must be an instance of the Sensor class.
+    """
+
+    # list of attributes of the class which contain relevant data.
+    # NOTE THESE ATTRIBUTES ARE CONSTANTS THAT SHOULD NOT BE MODIFIED
+    _attributes = []
+
+    def __init__(self, **sensors):
+        """
+        class constructor.
+        """
+        self._attributes = []
+
+        # populate the object with the input sensors
+        for attr, value in sensors.items():
+            self.append(obj=value, name=attr)
+
+    def __str__(self) -> str:
+        """
+        convert self to a string.
+        """
+        return self.pivot().__str__()
+
+    def append(self, obj, name):
+        """
+        append an object to self and store it appropriately.
+
+        Parameters
+        ----------
+        obj: _Object instance
+            the object to be stored.
+
+        name: str
+            the label denoting the object.
+        """
+
+        # check the input data
+        txt = "obj must be an instance of the _Object class."
+        assert isinstance(obj, Sensor), txt
+        assert isinstance(name, str), "name must be a string."
+        txt = "only 3D objects must be provided."
+        assert isinstance(obj, EmgSensor) or obj.ndim == 3, txt
+
+        # ensure the object will be stored according to its class
+        cls = obj.__class__.__name__
+        if not cls in self._attributes:
+            self._attributes += [cls]
+            setattr(self, cls, {})
+
+        # check if another object with the same name exists
+        if any([i == name for i in getattr(self, cls)]):
+            txt = "{} already existing in {}. The old instance has been replaced"
+            warnings.warn(txt.format(name, cls))
+
+        # store the sensor
+        getattr(self, cls).update({name: obj})
+
+    def pivot(self) -> pd.DataFrame:
+        """
+        generate a wide dataframe object containing both origin and amplitudes.
+        """
+        df = self.stack().pivot("Time", ["Sensor", "Type", "Source", "Dimension"])
+        df.columns = pd.Index([i[1:] for i in df.columns])
+        return df
+
+    def plot(
+        self,
+        as_subplots: bool = False,
+        lines: bool = True,
+        show: bool = True,
+        width: int = 1280,
+        height: int = 720,
+    ):
+        """
+        generate a plotly plot representing the current object.
+
+        Parameters
+        ----------
+        as_subplots: bool (default=False)
+            should the dimensions of object be plotted as a single subplot?
+
+        lines: bool (default=True)
+            if True, only lines linking the samples are rendered. Otherwise,
+            a scatter plot is rendered.
+
+        show: bool (default=True)
+            if True the generated figure is immediately plotted. Otherwise the
+            generated object is returned
+
+        width: int (default=1280)
+            the width of the output figure in pixels
+
+        height: int (default=720)
+            the height of the output figure in pixels
+
+        Returns
+        -------
+        None, if show = True. A plotly.Figure object, otherwise.
+        """
+        fun = px.line if lines else px.scatter
+        fig = fun(
+            data_frame=self.stack(),
+            x="Time",
+            y="Amplitude",
+            color="Dimension",
+            facet_row="Dimension" if as_subplots else None,
+            facet_col="Source",
+            width=width,
+            height=height,
+            template="simple_white",
+        )
+        fig.update_layout(showlegend=not as_subplots)
+        if show:
+            fig.show()
+        else:
+            return fig
+
+    def describe(self, percentiles: list = []) -> pd.DataFrame:
+        """
+        provide descriptive statistics about the parameters in df.
+
+        Parameters
+        ----------
+        percentiles: list
+            a list of values in the [0, 1] range defining the desired percentiles
+            to be calculated.
+
+        Returns
+        -------
+        df: pd.DataFrame
+            a pandas.DataFrame with the object descriptive statistics.
+        """
+        grp = self.stack().drop("Time", axis=1)
+        grp = grp.groupby(["Type", "Sensor", "Source", "Dimension"])
+        df = grp.describe(percentiles=percentiles)
+        df.columns = pd.Index([i[1] for i in df.columns])
+        return df
+
+    def stack(self) -> pd.DataFrame:
+        """
+        stack the object as a long format DataFrame.
+        """
+        out = []
+        for attr in self._attributes:
+            for lbl, obj in getattr(self, attr).items():
+                df = obj.stack()
+                df.insert(0, "Sensor", np.tile(lbl, df.shape[0]))
+                df.insert(0, "Type", np.tile(attr, df.shape[0]))
+                out += [df]
+        return pd.concat(out, axis=0, ignore_index=True)
+
+    def copy(self):
+        """
+        make a copy of the object
+        """
+        return self.unstack(self.stack())
+
+    @classmethod
+    def unstack(cls, df: pd.DataFrame):
+        """
+        convert a long format DataFrame into an instance of the object.
+
+        Parameters
+        ----------
+
+        df: pandas.DataFrame
+            a pandas.DataFrame sorted as it would be generated by the
+            .stack() method.
+
+        Returns
+        -------
+
+        obj: _Object
+            the instance resulting from the dataframe reading.
+        """
+        out = cls()
+        root = ["Type", "Sensor"]
+        types = np.unique(df[root].values.astype(str), axis=0)
+        for typ, sns in types:
+            sub = df.loc[df[root].isin([sns, typ]).all(1)]
+            out.append(obj=eval(typ).unstack(sub), name=sns)
+        return out
+
+    @property
+    def attributes(self):
+        """
+        return the attributes of this instance.
+        """
+        return self._attributes

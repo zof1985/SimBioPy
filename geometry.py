@@ -157,20 +157,6 @@ class _Df(pd.DataFrame):
         """
         return len(self.index)
 
-    def stack(self):
-        """
-        stack the dataframe in long format.
-        """
-        out = pd.DataFrame(self, copy=True)
-        out.insert(0, "Time", out.index.to_numpy())
-        return out.melt(
-            id_vars="Time",
-            value_vars=self.columns.to_numpy(),
-            var_name="Dimension",
-            value_name="Amplitude",
-            ignore_index=True,
-        )
-
     @classmethod
     def unstack(cls, df):
         """
@@ -191,6 +177,20 @@ class _Df(pd.DataFrame):
         out.columns = pd.Index(out.columns.to_numpy())
         out.index = pd.Index(out.index.to_numpy())
         return cls(out)
+
+    def stack(self):
+        """
+        stack the dataframe in long format.
+        """
+        out = pd.DataFrame(self, copy=True)
+        out.insert(0, "Time", out.index.to_numpy())
+        return out.melt(
+            id_vars="Time",
+            value_vars=self.columns.to_numpy(),
+            var_name="Dimension",
+            value_name="Amplitude",
+            ignore_index=True,
+        )
 
     def __str__(self):
         """
@@ -618,7 +618,8 @@ class _Object:
         generate a wide dataframe object containing both origin and amplitudes.
         """
         df = self.stack().pivot("Time", ["Source", "Dimension"])
-        df.columns = pd.Index([i[1:] for i in df.columns])
+        df.columns = pd.Index([i[-1] for i in df.columns])
+        df.index = pd.Index(df.index.to_numpy())
         return df
 
     def plot(
