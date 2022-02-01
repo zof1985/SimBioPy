@@ -68,6 +68,9 @@ def read_emt(path):
     # get time
     time = values[rows, 1].flatten()
 
+    # get the unit of measurement
+    unit = lines[3][1]
+
     # generate a dataframe for each variable
     for v in names:
 
@@ -88,6 +91,7 @@ def read_emt(path):
             coordinates=np.vstack(np.atleast_2d(coordinates)).T,
             index=time,
             columns=nn,
+            unit=unit,
         )
 
     return vd
