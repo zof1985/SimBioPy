@@ -5,9 +5,11 @@
 
 
 from .geometry import *
+from plotly.subplots import make_subplots
+import plotly.express.colors as pcol
+import plotly.graph_objects as go
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import warnings
 
 
@@ -42,7 +44,7 @@ class Marker3D(Point, Sensor):
 
     def __init__(self, coordinates, index=None, unit="m"):
         amp = self._get_data(
-            coordinates=coordinates,
+            data=coordinates,
             index=index,
             columns=["X", "Y", "Z"],
             unit=unit,
@@ -81,14 +83,14 @@ class ForcePlatform3D(GeometricObject, Sensor):
     """
 
     @property
-    def force_vectors(self):
+    def force_vector(self):
         """
         return the force vector measured by the ForcePlaftorm.
         """
         return Vector(amplitude=self._force, origin=self._origin)
 
     @property
-    def moment_vectors(self):
+    def moment_vector(self):
         """
         return the moments vector measured by the ForcePlaftorm.
         """
@@ -196,7 +198,7 @@ class EmgSensor(GeometricMathObject, Sensor):
         the unit of measurement of the sensors.
     """
 
-    def __init__(self, amplitude, index=None):
+    def __init__(self, amplitude, index=None, unit=""):
         """
         constructor
         """
@@ -213,7 +215,7 @@ class EmgSensor(GeometricMathObject, Sensor):
             df = self._get_data(amp, index, cols)
         elif isinstance(amp, (pd.DataFrame, UnitDataFrame)):
             df = self._get_data(amp)
-        super(EmgSensor, self).__init__(amplitude=df)
+        super(EmgSensor, self).__init__(amplitude=df, unit=unit)
 
     def _math_value(self, obj, transpose: bool = False) -> np.ndarray:
         """
@@ -383,15 +385,15 @@ class Model3D:
         The values of each key must be an instance of the Sensor class.
     """
 
-    # list of attributes of the class which contain relevant data.
+    # list of sensors of the class which contain relevant data.
     # NOTE THESE ATTRIBUTES ARE CONSTANTS THAT SHOULD NOT BE MODIFIED
-    _attributes = []
+    _sensors = []
 
     def __init__(self, **sensors):
         """
         class constructor.
         """
-        self._attributes = []
+        self._sensors = []
 
         # populate the object with the input sensors
         for attr, value in sensors.items():
@@ -417,16 +419,14 @@ class Model3D:
         """
 
         # check the input data
-        txt = "obj must be an instance of the GeometricObject class."
+        txt = "obj must be a Sensor instance."
         assert isinstance(obj, Sensor), txt
         assert isinstance(name, str), "name must be a string."
-        txt = "only 3D objects must be provided."
-        assert isinstance(obj, EmgSensor) or obj.ndim == 3, txt
 
         # ensure the object will be stored according to its class
         cls = obj.__class__.__name__
-        if not cls in self._attributes:
-            self._attributes += [cls]
+        if not cls in self._sensors:
+            self._sensors += [cls]
             setattr(self, cls, {})
 
         # check if another object with the same name exists
@@ -443,15 +443,436 @@ class Model3D:
         generate a wide dataframe object containing both origin and
         amplitudes.
         """
-        col = ["Sensor", "Type", "Source", "Dimension"]
+        col = ["Sensor", "Label", "Source", "Dimension"]
         df = self.stack().pivot("Time", col)
         df.columns = pd.Index([i[1:] for i in df.columns])
         return df
 
+    def _colors(self, as_subplots=True):
+        """
+        colors used in the plot generation.
+        """
+        if as_subplots:
+            nrows = len(self.EmgSensor)
+        else:
+            nrows = 1
+        # set the colors
+        palette = pcol.qualitative.Plotly + pcol.qualitative.D3
+        emg_col = []
+        for i in range(nrows):
+            emg_col += [palette[3] if as_subplots else palette[(i + 3) % 20]]
+        return {
+            "Point": palette[0],
+            "Vector": palette[1],
+            "Segment": palette[2],
+            "EmgSensor": emg_col,
+        }
+
+    def _make_figure(self, as_subplots=True):
+        """
+        return the background frame on which including the animated
+        traces.
+
+        Parameters
+        ----------
+
+        as_subplots: bool (default=True)
+            if EmgSensor data is available, should they be separated
+            by channel into single line plots?
+
+        Returns
+        -------
+        fig: plotly.FigureWidget
+            the figure representing the required frame.
+        """
+
+        # generate the figure grid
+        plot_emg = any([i == EmgSensor.__name__ for i in self.sensors])
+        if plot_emg:
+            if as_subplots:
+                sub_titles = ["3D View"] + [i for i in self.EmgSensor]
+                nrows = len(self.EmgSensor)
+            else:
+                sub_titles = ["3D View", "EMG"]
+                nrows = 1
+            ncols = 2
+            specs = [[{"type": "scene"}, {}]]
+            specs += [[None, {}] for _ in range(nrows - 1)]
+            col_widths = [0.7, 0.3]
+        else:
+            nrows = 1
+            ncols = 1
+            specs = [[{"type": "scene"}]]
+            col_widths = [1]
+            sub_titles = ["3D View"]
+        fig = make_subplots(
+            rows=nrows,
+            cols=ncols,
+            column_widths=col_widths,
+            subplot_titles=sub_titles,
+            specs=specs,
+            shared_xaxes=True,
+        )
+
+        # populate the emg plot(s) with the whole signals
+        colors = self._colors(as_subplots)
+        if plot_emg:
+            for i, label in enumerate(self.EmgSensor):
+                obj = self.EmgSensor[label]
+                t = obj.index
+                y = obj.amplitude.values.flatten()
+                fig.add_trace(
+                    row=i + 1,
+                    col=ncols,
+                    trace=go.Scatter(
+                        x=t,
+                        y=y,
+                        mode="lines",
+                        name=label,
+                        legendgroup="EMG",
+                        legendgrouptitle_text="EMG",
+                        showlegend=not as_subplots,
+                        line=dict(
+                            color=colors["EmgSensor"][i],
+                            dash="solid",
+                            width=2,
+                        ),
+                    ),
+                )
+
+                # plot an empty vertical line
+                fig.add_trace(
+                    row=i + 1,
+                    col=ncols,
+                    trace=go.Scatter(
+                        x=[],
+                        y=[],
+                        name="_" + label,
+                        mode="lines",
+                        showlegend=False,
+                        line=dict(
+                            color="grey",
+                            dash="dash",
+                            width=1,
+                        ),
+                    ),
+                )
+
+        # update the axes such as the x-axis of the EMG
+        # subplots will be shared with each-other
+        fig.update_xaxes(matches="x1")
+
+        # add the markers
+        plot_markers = any([i == Marker3D.__name__ for i in self.sensors])
+        if plot_markers:
+            for i, label in enumerate(self.Marker3D):
+                fig.add_trace(
+                    row=1,
+                    col=1,
+                    trace=go.Scatter3d(
+                        x=[],
+                        y=[],
+                        z=[],
+                        mode="markers",
+                        name=label,
+                        text=label,
+                        legendgroup="Marker3D",
+                        legendgrouptitle_text="Marker3D",
+                        showlegend=False,
+                        marker=dict(color=colors["Point"], size=8),
+                    ),
+                )
+
+        # add the links
+        plot_links = any([i == Link3D.__name__ for i in self.sensors])
+        if plot_links:
+            for i, label in enumerate(self.Link3D):
+                fig.add_trace(
+                    row=1,
+                    col=1,
+                    trace=go.Scatter3d(
+                        x=[],
+                        y=[],
+                        z=[],
+                        mode="lines",
+                        name="_" + label,
+                        showlegend=False,
+                        marker=dict(color=colors["Segment"], size=4),
+                    ),
+                )
+
+        # add the forces
+        plot_fp = any([i == ForcePlatform3D.__name__ for i in self.sensors])
+        if plot_fp:
+            for i, label in enumerate(self.ForcePlatform3D):
+                fig.add_traces(
+                    rows=1,
+                    cols=1,
+                    data=[
+                        go.Scatter3d(
+                            x=[],
+                            y=[],
+                            z=[],
+                            opacity=0.5,
+                            mode="lines",
+                            name=label,
+                            text=label,
+                            legendgroup="Force3D",
+                            legendgrouptitle_text="Force3D",
+                            showlegend=False,
+                            marker=dict(color=colors["Vector"], size=6),
+                        ),
+                        go.Cone(
+                            x=[],
+                            y=[],
+                            z=[],
+                            u=[],
+                            v=[],
+                            w=[],
+                            opacity=0.5,
+                            sizemode="absolute",
+                            sizeref=2,
+                            anchor="tip",
+                            name=label,
+                            text=label,
+                            colorscale=[
+                                [0, colors["Vector"]],
+                                [1, colors["Vector"]],
+                            ],
+                            legendgroup="Force3D",
+                            legendgrouptitle_text="Force3D",
+                            showlegend=False,
+                        ),
+                    ],
+                )
+
+        return fig
+
+    def _make_frame(self, index, as_subplots=True):
+        """
+        return a plotly figure of the frame corresponding to the
+        provided index.
+
+        Parameters
+        ----------
+        index: float, int
+            the time index of which the frame is required.
+
+        as_subplots: bool (default=True)
+            if EmgSensor data is available, should they be separated
+            by channel into single line plots?
+
+        Returns
+        -------
+        fig: plotly.FigureWidget
+            the figure representing the required frame.
+        """
+
+        # generate the figure grid
+        plot_emg = any([i == EmgSensor.__name__ for i in self.sensors])
+        if plot_emg:
+            if as_subplots:
+                sub_titles = ["3D View"] + [i for i in self.EmgSensor]
+                nrows = len(self.EmgSensor)
+            else:
+                sub_titles = ["3D View", "EMG"]
+                nrows = 1
+            ncols = 2
+            specs = [[{"type": "scene"}, {}]]
+            specs += [[None, {}] for _ in range(nrows - 1)]
+            col_widths = [0.7, 0.3]
+        else:
+            nrows = 1
+            ncols = 1
+            specs = [[{"type": "scene"}]]
+            col_widths = [1]
+            sub_titles = ["3D View"]
+        fig = make_subplots(
+            rows=nrows,
+            cols=ncols,
+            column_widths=col_widths,
+            subplot_titles=sub_titles,
+            specs=specs,
+        )
+
+        # set the colors
+        palette = pcol.qualitative.Plotly + pcol.qualitative.D3
+        emg_col = []
+        for i in range(nrows):
+            emg_col += [palette[3] if as_subplots else palette[(i + 3) % 20]]
+        colors = {
+            "Point": palette[0],
+            "Vector": palette[1],
+            "Segment": palette[2],
+            "EmgSensor": emg_col,
+        }
+
+        # populate the emg plot(s)
+        # include the whole data and a vertical dashed bar
+        # at the time instant corresponding to index.
+        for i, label in enumerate(self.EmgSensor):
+            obj = self.EmgSensor[label]
+            t = obj.index
+            y = obj.amplitude.values.flatten()
+            idx = np.where(t == index)[0]
+            y_index = y[idx]
+            fig.add_traces(
+                rows=i + 1,
+                cols=ncols,
+                data=[
+                    go.Scatter(
+                        x=t,
+                        y=y,
+                        mode="lines",
+                        name=label,
+                        legendgroup="EMG",
+                        legendgrouptitle_text="EMG",
+                        showlegend=not as_subplots,
+                        line=dict(
+                            color=colors["EmgSensor"][i],
+                            dash="solid",
+                            width=4,
+                        ),
+                    ),
+                    go.Scatter(
+                        x=[index, index],
+                        y=[y_index, y_index],
+                        mode="lines",
+                        showlegend=False,
+                        line=dict(
+                            color="grey",
+                            dash="dash",
+                            width=2,
+                        ),
+                    ),
+                ],
+            )
+
+        # update the axes such as the x-axis of the EMG
+        # subplots will be shared with each-other
+        fig.update_xaxes(matches="x1")
+
+        # add the markers
+        plot_markers = any([i == Marker3D.__name__ for i in self.sensors])
+        if plot_markers:
+            for i, label in enumerate(self.Marker3D):
+                obj = self.Marker3D[label]
+                o = obj[index].dropna()
+                if o.nsamp > 0:
+                    x, y, z = o.coordinates.values.flatten()
+                else:
+                    x, y, z = ([], [], [])
+                fig.add_trace(
+                    row=1,
+                    col=1,
+                    trace=go.Scatter3d(
+                        x=list(x),
+                        y=list(y),
+                        z=list(z),
+                        mode="markers",
+                        name=label,
+                        text=label,
+                        legendgroup="Marker3D",
+                        legendgrouptitle_text="Marker3D",
+                        showlegend=False,
+                        marker=dict(color=colors["Point"], size=8),
+                    ),
+                )
+
+        # add the links
+        plot_links = any([i == Link3D.__name__ for i in self.sensors])
+        if plot_links:
+            for i, label in enumerate(self.Link3D):
+                obj = self.Link3D[label]
+                o = obj[index].dropna()
+                if o.nsamp > 0:
+                    x0, y0, z0 = o.p0.values.flatten()
+                    x1, y1, z1 = o.p1.values.flatten()
+                    x = [x0, x1]
+                    y = [y0, y1]
+                    z = [z0, z1]
+                else:
+                    x, y, z = ([], [], [])
+                fig.add_trace(
+                    row=1,
+                    col=1,
+                    trace=go.Scatter3d(
+                        x=x,
+                        y=y,
+                        z=z,
+                        mode="lines",
+                        name=label,
+                        showlegend=False,
+                        marker=dict(color=colors["Segment"], size=4),
+                    ),
+                )
+
+        # add the forces
+        plot_fp = any([i == ForcePlatform3D.__name__ for i in self.sensors])
+        if plot_fp:
+            for i, label in enumerate(self.ForcePlatform3D):
+                obj = self.ForcePlatform3D[label].force_vector()
+                o = obj[index].dropna()
+                if o.nsamp > 0:
+                    p0 = o.origin
+                    p2 = p0 + o.amplitude.values
+                    p1 = Segment(p0, p2).point_at(0.75, True)
+                    v0 = p0.values.flatten()
+                    v1 = p1.values.flatten()
+                    v2 = p2.values.flatten()
+                    x_line, y_line, z_line = [[i, v] for i, v in zip(v0, v1)]
+                    cones_coords = [[i, v] for i, v in zip(v2, v2 - v1)]
+                    x_cone, y_cone, z_cone = cones_coords
+
+                else:
+                    x_line, y_line, z_line = [[], [], []]
+                    x_cone, y_cone, z_cone = [[], [], []]
+                fig.add_traces(
+                    rows=1,
+                    cols=1,
+                    data=[
+                        go.Scatter3d(
+                            x=x_line,
+                            y=y_line,
+                            z=z_line,
+                            opacity=0.5,
+                            mode="lines",
+                            name=label,
+                            text=label,
+                            legendgroup="Force3D",
+                            legendgrouptitle_text="Force3D",
+                            showlegend=False,
+                            marker=dict(color=colors["Vector"], size=6),
+                        ),
+                        go.Cone(
+                            x=x_cone[0],
+                            y=y_cone[0],
+                            z=z_cone[0],
+                            u=x_cone[1],
+                            v=y_cone[2],
+                            w=z_cone[3],
+                            opacity=0.5,
+                            sizemode="absolute",
+                            sizeref=2,
+                            anchor="tip",
+                            name=label,
+                            text=label,
+                            colorscale=[
+                                [0, colors["Vector"]],
+                                [1, colors["Vector"]],
+                            ],
+                            legendgroup="Force3D",
+                            legendgrouptitle_text="Force3D",
+                            showlegend=False,
+                        ),
+                    ],
+                )
+
+        return fig
+
     def plot(
         self,
-        as_subplots: bool = False,
-        lines: bool = True,
+        as_subplots=True,
         show: bool = True,
         width: int = 1280,
         height: int = 720,
@@ -461,12 +882,9 @@ class Model3D:
 
         Parameters
         ----------
-        as_subplots: bool (default=False)
-            should the dimensions of object be plotted as a single subplot?
-
-        lines: bool (default=True)
-            if True, only lines linking the samples are rendered. Otherwise,
-            a scatter plot is rendered.
+        as_subplots: bool (default=True)
+            if EmgSensor data is available, should they be separated
+            by channel into single line plots?
 
         show: bool (default=True)
             if True the generated figure is immediately plotted.
@@ -482,23 +900,30 @@ class Model3D:
         -------
         None, if show = True. A plotly.Figure object, otherwise.
         """
-        fun = px.line if lines else px.scatter
-        fig = fun(
-            data_frame=self.stack(),
-            x="Time",
-            y="Amplitude",
-            color="Dimension",
-            facet_row="Dimension" if as_subplots else None,
-            facet_col="Source",
+
+        # get the background structure
+        fig = self._make_figure(as_subplots)
+
+        # update the layout
+        fig.update_layout(
             width=width,
             height=height,
             template="simple_white",
         )
-        fig.update_layout(showlegend=not as_subplots)
-        if show:
-            fig.show()
-        else:
-            return fig
+
+        # get the adjustable traces indices
+        traces = []
+        for i, v in enumerate(fig.data):
+            if v.name[0] == "_" or v.legendgroup in ["Force3D", "Marker3D"]:
+                traces += [i]
+
+        fig.show()
+
+        # get the samples of the model
+        idx = self.pivot().index.to_numpy()
+
+        # get the frames corresponding to each sample
+        frames = [self._make_frame(i, as_subplots) for i in idx]
 
     def describe(self, percentiles: list = []) -> pd.DataFrame:
         """
@@ -516,7 +941,7 @@ class Model3D:
             a pandas.DataFrame with the object descriptive statistics.
         """
         grp = self.stack().drop("Time", axis=1)
-        grp = grp.groupby(["Type", "Sensor", "Source", "Dimension"])
+        grp = grp.groupby(["Sensor", "Label", "Source", "Dimension"])
         df = grp.describe(percentiles=percentiles)
         df.columns = pd.Index([i[1] for i in df.columns])
         return df
@@ -526,11 +951,11 @@ class Model3D:
         stack the object as a long format DataFrame.
         """
         out = []
-        for attr in self._attributes:
-            for lbl, obj in getattr(self, attr).items():
+        for sns in self._sensors:
+            for lbl, obj in getattr(self, sns).items():
                 df = obj.stack()
-                df.insert(0, "Sensor", np.tile(lbl, df.shape[0]))
-                df.insert(0, "Type", np.tile(attr, df.shape[0]))
+                df.insert(0, "Label", np.tile(lbl, df.shape[0]))
+                df.insert(0, "Sensor", np.tile(sns, df.shape[0]))
                 out += [df]
         return pd.concat(out, axis=0, ignore_index=True)
 
@@ -565,8 +990,8 @@ class Model3D:
         return out
 
     @property
-    def attributes(self):
+    def sensors(self):
         """
-        return the attributes of this instance.
+        return the sensors of this instance.
         """
-        return self._attributes
+        return self._sensors

@@ -680,7 +680,7 @@ class GeometricObject:
         amplitudes.
         """
         df = self.stack().pivot("Time", ["Source", "Dimension", "Unit"])
-        df.columns = pd.Index([i[-1] for i in df.columns])
+        df.columns = pd.Index([i[1:] for i in df.columns])
         df.index = pd.Index(df.index.to_numpy())
         return df
 
@@ -864,7 +864,13 @@ class GeometricObject:
         return the object without missing data.
         """
         i = self.pivot().dropna().index.to_numpy()
-        return self[i].copy()
+        if len(i) == 0:
+            out = self.copy()
+            for attr in out.attributes:
+                setattr(out, attr, getattr(out, attr).loc[i])
+        else:
+            out = self[i].copy()
+        return out
 
     def has_na(self):
         """
