@@ -56,7 +56,7 @@ def read_emt(path):
 
     # get the data values
     values = np.vstack([np.atleast_2d(i[: len(vrs)]) for i in lines[11:-2]])
-    values = values.astype(float)
+    values = values.astype(np.float32)
 
     # get the columns of interest
     cols = np.arange(np.argwhere(vrs == "Time").flatten()[0] + 1, len(vrs))
@@ -255,8 +255,8 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
                             cols = np.arange(size * trk, size * trk + size)
                             tracks[row, cols] = val
 
-        # calculate the index
-        idx = np.arange(n_frames) / freq + time
+        # calculate the index (in msec)
+        idx = np.round((np.arange(n_frames) / freq + time) * 1000).astype(int)
 
         # return the tracks
         fid.close()
@@ -494,25 +494,21 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
 
         return {"IMU": imus}
 
-    def resize(
-        ref: pd.DataFrame,
-        reset_time: bool = True,
-        **kwargs: Tuple[Point, pd.DataFrame],
-    ) -> dict:
+    def resize(obj, ref, reset_time=True) -> dict:
         """
         resize the data contained in kwargs to match the sample range
         of ref.
 
         Paramters
         ---------
+        obj: Any
+            the object to be resized
+
         ref: GeometricObject
             a point containing the reference data time.
 
         reset_time: bool
             if True the time of all the returned array will start from zero.
-
-        kwargs: key-values GeometricObjects
-            a variable number of named objects to be resized according to ref.
 
         Returns
         -------
@@ -524,8 +520,6 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         # check the entries
         txt = "{} must be a simbiopy.GeometricObject instance."
         assert isinstance(ref, GeometricObject), txt.format("'ref'")
-        for key, obj in kwargs.items():
-            assert isinstance(obj, GeometricObject), txt.format(key)
         txt = "'reset_time' must be a bool object."
         assert reset_time or not reset_time, txt
 
@@ -534,21 +528,20 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         stop = np.max(ref.index)
 
         # resize all data
-        idx = {i: v.index for i, v in kwargs.items()}
-        valid = {}
-        for i, v in idx.items():
-            valid[i] = np.where((v >= start) & (v <= stop))[0]
-        resized = {i: v.iloc[valid[i]] for i, v in kwargs.items()}
+        def _resize(obj):
+            if isinstance(obj, dict):
+                return {i: _resize(v) for i, v in obj.items()}
+            idx = np.where((obj.index >= start) & (obj.index <= stop))[0]
+            out = obj.iloc[idx]
+            if reset_time:
+                for attr in out._attributes:
+                    df = getattr(out, attr)
+                    idx = df.index.to_numpy() - start
+                    df.index = pd.Index(np.round(idx).astype(int))
+                    setattr(out, attr, df)
+            return out
 
-        # check if the time has to be reset
-        if reset_time:
-            for i, v in resized.items():
-                for attr in v._attributes:
-                    df = getattr(v, attr)
-                    df.index = pd.Index(df.index.to_numpy() - start)
-                    setattr(resized[i], attr, df)
-
-        return resized
+        return _resize(obj)
 
     # ----
     # MAIN
@@ -618,7 +611,7 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
         idx = ref.index
         idx = np.where((idx >= start) & (idx <= stop))[0]
         ref = ref.iloc[idx]
-        out = {l: resize(ref, True, **v) for l, v in out.items()}
+        out = resize(out, ref, True)
 
     # return what has been read
     mod = Model3D()

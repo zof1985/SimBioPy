@@ -85,7 +85,7 @@ class _Indexer:
             the value associated to the requried item.
         """
         obj = self.obj.copy()
-        for i, v in self.attributes.items():
+        for i, v in getattr(obj, self.attr).attributes.items():
             setattr(obj, i, getattr(v, self.attr)[item])
         return obj
 
@@ -117,7 +117,7 @@ class UnitDataFrame(pd.DataFrame):
 
     _cacher = ()
 
-    dtype = np.float64
+    dtype = np.float32
 
     _metadata = ["unit"]
 
@@ -195,7 +195,7 @@ class UnitDataFrame(pd.DataFrame):
         tmp = df.copy().drop("Unit", axis=1)
         out = tmp.pivot("Time", "Dimension", "Amplitude")
         out.columns = pd.Index(out.columns.to_numpy())
-        out.index = pd.Index(out.index.to_numpy())
+        out.index = pd.Index(out.index.to_numpy().astype(int))
         return cls(out, unit=unit)
 
     def stack(self):
@@ -203,16 +203,21 @@ class UnitDataFrame(pd.DataFrame):
         stack the dataframe in long format.
         """
         out = pd.DataFrame(self, copy=True)
-        out.insert(0, "Time", out.index.to_numpy())
+        out.insert(0, "Time", out.index.to_numpy().astype(int))
         out = out.melt(
             id_vars="Time",
             value_vars=self.columns.to_numpy(),
             var_name="Dimension",
             value_name="Amplitude",
-            ignore_index=True,
         )
         out.insert(out.shape[1] - 1, "Unit", np.tile(self.unit, out.shape[0]))
         return out
+
+    def to_dict(self):
+        """
+        return the content of the actual UnitDataFrame as dict.
+        """
+        return {i: self[[i]].values.flatten().tolist() for i in self.columns}
 
     def pivot(self):
         """
@@ -292,6 +297,8 @@ class UnitDataFrame(pd.DataFrame):
         if any([i == "name" for i in kwargs]):
             args = [pd.Series(*args, **kwargs)]
             kwargs = {}
+        if data is not None:
+            args = []
         super(UnitDataFrame, self).__init__(
             data=data,
             index=index,
@@ -681,7 +688,6 @@ class GeometricObject:
         """
         df = self.stack().pivot("Time", ["Source", "Dimension", "Unit"])
         df.columns = pd.Index([i[1:] for i in df.columns])
-        df.index = pd.Index(df.index.to_numpy())
         return df
 
     def plot(
@@ -863,7 +869,7 @@ class GeometricObject:
         """
         return the object without missing data.
         """
-        i = self.pivot().dropna().index.to_numpy()
+        i = self.pivot().dropna().index.to_numpy().astype(int)
         if len(i) == 0:
             out = self.copy()
             for attr in out.attributes:
@@ -878,6 +884,15 @@ class GeometricObject:
         """
         i = self.pivot().isna().any(1)
         return self[i].index
+
+    def to_dict(self):
+        """
+        return a dict representation of the object.
+        """
+        out = {}
+        for attr in self.attributes:
+            out[attr] = getattr(self, attr).to_dict()
+        return out
 
     def unique(self):
         """
@@ -1002,7 +1017,7 @@ class GeometricObject:
         """
         return the index of the object.
         """
-        return getattr(self, self._attributes[0]).index.to_list()
+        return getattr(self, self._attributes[0]).index.to_numpy().astype(int)
 
     @property
     def shape(self):
@@ -1030,7 +1045,7 @@ class GeometricObject:
         """
         return the "average" sampling frequency of the object.
         """
-        return float(1.0 / np.mean(np.diff(self.index)))
+        return float(1000.0 / np.mean(np.diff(self.index)))
 
 
 class ReferenceFrame(GeometricObject):
@@ -1154,7 +1169,7 @@ class ReferenceFrame(GeometricObject):
         """
 
         def proj(a, b):
-            return (np.inner(a, b) / np.inner(b, b) * b).astype(float)
+            return (np.inner(a, b) / np.inner(b, b) * b).astype(np.float32)
 
         def norm(v):
             return v / np.sqrt(np.sum(v ** 2))
@@ -1162,7 +1177,7 @@ class ReferenceFrame(GeometricObject):
         # calculate the projection points
         W = []
         for i, u in enumerate(points):
-            w = np.copy(u).astype(float)
+            w = np.copy(u).astype(np.float32)
             for j in points[:i, :]:
                 w -= proj(u, j)
             W += [w]
