@@ -616,6 +616,5 @@ def read_tdf(path: str, fit_to_kinematics: bool = False) -> dict:
     # return what has been read
     mod = Model3D()
     for elems in out.values():
-        for name, obj in elems.items():
-            mod.append(obj=obj, name=name)
+        mod.append(**elems)
     return mod

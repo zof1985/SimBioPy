@@ -5,9 +5,9 @@
 
 
 from typing import Union
+from scipy.linalg import pinv
 import numpy as np
 import pandas as pd
-import scipy.linalg as sl
 import sympy as sy
 
 
@@ -57,7 +57,7 @@ class LinearRegression:
 
         # get the coefficients and intercept
         self.betas = pd.DataFrame(
-            data=sl.pinv(xx.T.dot(xx)).dot(xx.T).dot(self.Y.values),
+            data=pinv(xx.T.dot(xx)).dot(xx.T).dot(self.Y.values),
             index=["INTERCEPT"] + self.X.columns.to_numpy().tolist(),
             columns=self.Y.columns.to_numpy().tolist(),
         )
@@ -143,7 +143,7 @@ class PolynomialRegression(LinearRegression):
 
         # get the coefficients and intercept
         self.betas = pd.DataFrame(
-            data=sl.pinv(xx.T.dot(xx)).dot(xx.T).dot(self.Y.values),
+            data=pinv(xx.T.dot(xx)).dot(xx.T).dot(self.Y.values),
             index=["INTERCEPT"] + self.X.columns.to_numpy().tolist(),
             columns=self.Y.columns.to_numpy().tolist(),
         )
@@ -214,7 +214,7 @@ class PowerRegression(LinearRegression):
         XX = np.hstack([np.ones((XX.shape[0], 1)), XX])
 
         # get the coefficients
-        coefs = sl.pinv(XX.T.dot(XX)).dot(XX.T).dot(YY)
+        coefs = pinv(XX.T.dot(XX)).dot(XX.T).dot(YY)
         coefs[0] = np.e ** coefs[0]
 
         # get the coefficients and intercept
@@ -312,7 +312,7 @@ class HyperbolicRegression(LinearRegression):
         XX = np.hstack([np.ones((XX.shape[0], 1)), XX])
 
         # get the linear regression coefficients
-        coefs = sl.pinv(XX.T.dot(XX)).dot(XX.T).dot(YY)
+        coefs = pinv(XX.T.dot(XX)).dot(XX.T).dot(YY)
 
         # obtain the hyberbolic coefficients
         # a = -1 / intercept

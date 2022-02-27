@@ -150,7 +150,7 @@ class UnitDataFrame(pd.DataFrame):
         """
         get the norm of the UnitDataFrame.
         """
-        dt = np.sqrt(np.sum(self.values ** 2, axis=1))
+        dt = np.sqrt(np.sum(self.values**2, axis=1))
         lbls = [str(i) for i in self.columns.to_list()]
         cols = "|{}|".format("+".join(lbls))
         idx = self.index
@@ -212,6 +212,13 @@ class UnitDataFrame(pd.DataFrame):
         )
         out.insert(out.shape[1] - 1, "Unit", np.tile(self.unit, out.shape[0]))
         return out
+
+    def dropna(self):
+        """
+        drop missing samples.
+        """
+        ix = pd.DataFrame(self).dropna(axis=0, inplace=False).index
+        return self.loc[ix]
 
     def to_dict(self):
         """
@@ -1172,7 +1179,7 @@ class ReferenceFrame(GeometricObject):
             return (np.inner(a, b) / np.inner(b, b) * b).astype(np.float32)
 
         def norm(v):
-            return v / np.sqrt(np.sum(v ** 2))
+            return v / np.sqrt(np.sum(v**2))
 
         # calculate the projection points
         W = []
@@ -1937,7 +1944,7 @@ class Segment(GeometricMathObject):
         power elevation (** operator).
         """
         v0, v1 = self._math_value(obj)
-        return Segment(p0=self.p0 ** v0, p1=self.p1 ** v1)
+        return Segment(p0=self.p0**v0, p1=self.p1**v1)
 
     def __mod__(self, obj):
         """
@@ -1983,7 +1990,7 @@ def three_points_angle(a: Point, b: Point, c: Point):
     ac = (c - a).norm.values.flatten()
 
     # return the angle
-    q = np.arccos((ac ** 2 - ab ** 2 - bc ** 2) / (-2 * ab * bc))
+    q = np.arccos((ac**2 - ab**2 - bc**2) / (-2 * ab * bc))
     return UnitDataFrame(
         q,
         columns=["Angle"],
