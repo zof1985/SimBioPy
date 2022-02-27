@@ -12,7 +12,7 @@ import PySide2.QtCore as qtc
 import PySide2.QtGui as qtg
 import matplotlib.pyplot as pl
 from matplotlib.gridspec import GridSpec
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as Canvas
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib import use as matplotlib_use
 from mpl_toolkits import mplot3d
 from .geometry import *
@@ -610,12 +610,13 @@ class Model3D:
         return self.pivot().index.to_numpy().astype(int)
 
 
-class Model3DWidget(qtw.QWidget, Model3D):
+class Model3DWidget(qtw.QWidget):
     """
     renderer for a 3D Model.
     """
 
     # class objects
+    model = None
     canvas = None
     slider = None
     time_label = None
@@ -626,293 +627,95 @@ class Model3DWidget(qtw.QWidget, Model3D):
 
     # private variables
     _font_size = 10
-    _timer = None
+    _play_timer = None
     _update_rate = 10  # msec
     _is_running = False
     _figure = None
     _axis3D = None
+    _marker3D_crds = None
+    _marker3D_lbls = {}
+    _force3D = None
+    _force3D_crds = None
+    _force3D_lbls = {}
+    _force3D_sclr = 1
     _axisEMG = []
+    _emg_vertical_lines = []
     _dpi = 300
     _data = None
     _actual_frame = None
 
-    def __init__(self, parent=None, **sensors):
+    def __init__(self, model, parent=None):
         """
         constructor
         """
-        super(Model3DWidget, self).__init__(parent=parent, **sensors)
+        super(Model3DWidget, self).__init__(parent=parent)
+
+        # store the model
+        txt = "model must be a Model3D instance."
+        assert isinstance(model, Model3D), txt
+        self.model = model
 
         # timer
-        self._timer = qtc.QTimer()
-        self._timer.timeout.connect(self._update_figure)
+        self._play_timer = qtc.QTimer()
+        self._play_timer.timeout.connect(self._player)
+
+        # path to the package folder
+        self._path = os.path.sep.join([os.getcwd(), "simbiopy"])
 
         # buttons
         self.backward_button = self._render_button(
-            label=os.path.sep.join(["icons", "backward.ico"]),
+            icon=os.path.sep.join([self._path, "icons", "backward.png"]),
             event_handler=self._backward_pressed,
         )
         self.play_button = self._render_button(
-            label=os.path.sep.join(["icons", "play.ico"]),
+            icon=os.path.sep.join([self._path, "icons", "play.png"]),
             event_handler=self._play_pressed,
         )
         self.forward_button = self._render_button(
-            label=os.path.sep.join(["icons", "forward.ico"]),
+            icon=os.path.sep.join([self._path, "icons", "forward.png"]),
             event_handler=self._forward_pressed,
         )
         self.repeat_button = self._render_button(
-            label=os.path.sep.join(["icons", "repeat.ico"]),
-            event_handler=self._repeat_pressed,
+            icon=os.path.sep.join([self._path, "icons", "repeat.png"]),
         )
-
-        # forward step button
-        self.forward_button = qtw.QPushButton("▶▶")
-        self.forward_button.setFixedHeight = 35
-        self.forward_button.setFixedWidth = 35
-        self.forward_button.setFont = qtg.QFont("Arial", self.font_size)
-        self.forward_button.clicked.connect(self._forward_pressed)
+        self.repeat_button.setCheckable(True)
 
         # slider
-        self.slider = qtw.QSlider()
+        self.slider = qtw.QSlider(qtc.Qt.Horizontal)
         self.slider.setMinimum = 0
         self.slider.setTickInterval(1)
-        self.slider.valueChanged.connect(self._update_figure)
+        self.slider.valueChanged.connect(self._update_slider)
 
-        # play/pause button
-        self.play_button = qtw.QPushButton("▶")
-        self.play_button.setFixedHeight = 35
-        self.play_button.setFixedWidth = 35
-        self.play_button.setFont = qtg.QFont("Arial", self.font_size)
-        self.play_button.clicked.connect(self._play_pressed)
-
-        # forward step button
-        self.forward_button = qtw.QPushButton("▶▶")
-        self.forward_button.setFixedHeight = 35
-        self.forward_button.setFixedWidth = 35
-        self.forward_button.setFont = qtg.QFont("Arial", self.font_size)
-        self.forward_button.clicked.connect(self._forward_pressed)
+        # time label
+        self.time_label = qtw.QLabel("00:00.000")
+        self.time_label.setFont(qtg.QFont("Arial", self._font_size))
+        self.time_label.setFixedHeight(35)
+        self.time_label.setFixedWidth(100)
+        self.time_label.setAlignment(qtc.Qt.AlignVCenter)
 
         # commands widget
         commands_layout = qtw.QHBoxLayout()
         commands_layout.addWidget(self.backward_button)
         commands_layout.addWidget(self.play_button)
         commands_layout.addWidget(self.forward_button)
-        commands_layout.addWidget(self.slider)
-        commands_layout.addWidget(self.time_label)
         commands_layout.addWidget(self.repeat_button)
+        commands_layout.addWidget(self.time_label)
+        commands_layout.addWidget(self.slider)
         commands_widget = qtw.QWidget()
         commands_widget.setLayout(commands_layout)
+        commands_widget.setFixedHeight(40)
+
+        # update the figure
+        self._update_data()
 
         # image pane
-        self.canvas = Canvas(self._figure)
+        self.canvas = FigureCanvasQTAgg(self._figure)
 
         # widget layout
         layout = qtw.QVBoxLayout()
         layout.addWidget(self.canvas)
         layout.addWidget(commands_widget)
         self.setLayout(layout)
-
-        # generate the figure grid
-        if self.has_EmgSensor():
-            if as_subplots:
-                sub_titles = ["3D View"] + [i for i in self.EmgSensor]
-                nrows = len(self.EmgSensor)
-            else:
-                sub_titles = ["3D View", "EMG"]
-                nrows = 1
-            ncols = 2
-            specs = [[{"type": "scene"}, {}]]
-            specs += [[None, {}] for _ in range(nrows - 1)]
-            col_widths = [0.7, 0.3]
-        else:
-            nrows = 1
-            ncols = 1
-            specs = [[{"type": "scene"}]]
-            col_widths = [1]
-            sub_titles = ["3D View"]
-        fig = make_subplots(
-            rows=nrows,
-            cols=ncols,
-            column_widths=col_widths,
-            subplot_titles=sub_titles,
-            specs=specs,
-            shared_xaxes=False,
-        )
-
-        # get the trace colors
-        colors = self._colors(as_subplots)
-
-        # get the traces
-        traces = []
-        data = self.stack()
-        points = data.loc[data.isin(["Marker3D"]).any(1)]
-        if points.shape[0] > 0:
-            points = points.pivot(["Time", "Label"], "Dimension", "Amplitude")
-            lbl = points.index.to_frame()["Label"].values.flatten()
-            points.insert(0, "Text", lbl)
-            points.columns = pd.Index([i.lower() for i in points.columns])
-            times = points.index.to_frame()["Time"].values.flatten()
-            points.index = pd.Index(times)
-
-        emg = data.loc[data.isin(["EmgSensor"]).any(1)]
-        if emg.shape[0] > 0:
-            emg = emg.pivot("Time", "Label", "Amplitude")
-            emg_min = pd.DataFrame(emg.min(0)).T
-            emg_max = pd.DataFrame(emg.max(0)).T
-            emg_data = {}
-            for muscle in emg.columns:
-                if as_subplots:
-                    min_val = emg_min[muscle].values[0]
-                    max_val = emg_max[muscle].values[0]
-                else:
-                    min_val = np.min(emg_min.values.flatten())
-                    max_val = np.max(emg_max.values.flatten())
-                df = emg[[muscle]]
-                df.columns = pd.Index(["Amplitude"])
-                df.insert(0, "Max", np.tile(min_val, df.shape[0]))
-                df.insert(0, "Min", np.tile(max_val, df.shape[0]))
-                emg_data[muscle] = df
-            traces["EMG"] = emg_data
-
-        segments = data.loc[data.isin(["Link3D"]).any(1)]
-        if segments.shape[0] > 0:
-            segments_data = {}
-            for lbl in np.unique(segments["Label"].values.flatten()):
-                df = segments.loc[segments.isin([lbl]).any(1)]
-                df0 = df.loc[df.isin(["p0"]).any(1)]
-                df0 = df0.pivot("Time", "Dimension", "Amplitude")
-                df0.insert(0, "Source", np.tile("p0", df0.shape[0]))
-                df1 = df.loc[df.isin(["p1"]).any(1)]
-                df1 = df1.pivot("Time", "Dimension", "Amplitude")
-                df1.insert(0, "Source", np.tile("p1", df0.shape[0]))
-                segments_data[lbl] = pd.concat([df0, df1], axis=0)
-            traces["Link3D"] = segments_data
-
-        forces = data.loc[data.isin(["ForcePlatform3D"]).any(1)]
-        if forces.shape[0] > 0:
-            force_data = {}
-            for lbl in np.unique(forces["Label"].values.flatten()):
-                df = forces.loc[forces.isin([lbl]).any(1)]
-                ori = df.loc[df.isin(["origin"]).any(1)]
-                ori = ori.pivot("Time", "Dimension", "Amplitude")
-                ori.insert(0, "Source", np.tile("Origin", ori.shape[0]))
-                frz = df.loc[df.isin(["force"]).any(1)] * force_scaler
-                frz = frz.pivot("Time", "Dimension", "Amplitude")
-                frz.insert(0, "Source", np.tile("Force", frz.shape[0]))
-                force_data[lbl] = pd.concat([ori, frz], axis=0)
-            traces["ForcePlatform3D"] = force_data
-
-        # populate the emg plot(s) with the whole signals
-        if emg.shape[0] > 0:
-            for i, muscle in enumerate(emg_data):
-                t = emg_data[muscle].index.to_numpy()
-                y = emg_data[muscle]["Amplitude"].values.flatten()
-                fig.add_trace(
-                    row=1 + (i if as_subplots else 0),
-                    col=ncols,
-                    trace=go.Scatter(
-                        x=t,
-                        y=y,
-                        mode="lines",
-                        name=muscle,
-                        legendgroup="EMG",
-                        legendgrouptitle_text="EMG",
-                        showlegend=not as_subplots,
-                        line=dict(
-                            color=colors["EmgSensor"][i],
-                            dash="solid",
-                            width=2,
-                        ),
-                    ),
-                )
-
-        # update the layout
-        fig.update_layout(
-            width=width,
-            height=height,
-            template="simple_white",
-            updatemenus=[
-                {
-                    "buttons": [
-                        self._animation_button("PLAY", 2),
-                        self._animation_button("PAUSE", 0),
-                    ],
-                    "direction": "left",
-                    "pad": {"r": 10, "t": 87},
-                    "showactive": False,
-                    "type": "buttons",
-                    "x": 0.1,
-                    "xanchor": "right",
-                    "y": 0,
-                    "yanchor": "top",
-                }
-            ],
-            sliders=[
-                self._animation_slider(
-                    steps=self.index,
-                    label="TIME (msec): ",
-                    duration=2,
-                ),
-            ],
-        )
-
-        # split the data in frames
-        def get_sample(obj, i):
-            if isinstance(obj, dict):
-                return {j: get_sample(k, i) for j, k in obj.items()}
-            new = obj.loc[i]
-            if isinstance(new, pd.Series):
-                new = pd.DataFrame(new).T
-            return new
-
-        frames = [get_sample(traces, i) for i in times[:100]]
-
-        # get the EMG amplitude ranges
-        emg_rng = {}
-        if self.has_EmgSensor():
-            for lbl, obj in self.EmgSensor.items():
-                min_val = np.min(obj.amplitude.values.flatten())
-                max_val = np.max(obj.amplitude.values.flatten())
-                emg_rng[lbl] = [min_val, max_val]
-            if not as_subplots:
-                min_val = np.min([v[0] for v in emg_rng.values()])
-                max_val = np.max([v[1] for v in emg_rng.values()])
-                for lbl, obj in self.EmgSensor:
-                    emg_rng[lbl] = [min_val, max_val]
-
-        # get the valid time indices
-        times = self.pivot()
-        times = times.loc[times.notna().all(1)].index.to_numpy()
-
-        # add the first frame to the static traces
-        frame0 = self._plotly_traces(
-            time=times[0],
-            emg_ranges=emg_rng,
-            as_subplots=as_subplots,
-            force_scaler=force_scaler,
-        )
-        for t in frame0:
-            dct = {"trace": t["trace"], "row": t["row"], "col": t["col"]}
-            fig.add_trace(**dct)
-
-        # add the frames to be animated
-        def _frames(i):
-            frame_data = self._plotly_traces(
-                time=i,
-                emg_ranges=emg_rng,
-                as_subplots=as_subplots,
-                force_scaler=force_scaler,
-            )
-            data = [j["trace"] for j in frame_data]
-            traces = [j["n"] for j in frame_data]
-            return go.Frame(data=data, traces=traces, name=str(i))
-
-        self.frames = [_frames(i) for i in times]
-
-        # return the figure or plot it
-        if show:
-            fig.show()
-        else:
-            return fig
 
     def append(self, **objs):
         """
@@ -923,68 +726,23 @@ class Model3DWidget(qtw.QWidget, Model3D):
         objs: keyword-named sensor
             any object being instance of the Sensor class.
         """
-        super(Model3DWidget, self).append(**objs)
+        self.model.append(**objs)
         self._update_data()
 
-    def _update_data(self):
+    def is_running(self):
         """
-        private function used to update the data when new sensors are
-        appended.
+        check if the player is running.
         """
-        data = self.stack()
-        times, idx = np.unique(
-            ar=data["Time"].values.flatten(),
-            return_index=True,
-        )
-        frames = np.arange(len(idx))
-        for i, v in enumerate(idx):
-            frames[v] = i
-        data.insert(0, "FRAME", frames)
-        self._data = data.groupby(["FRAME"])
+        return self._is_running
 
-        # update the slider
-        self.slider.setMaximum = len(frames) - 1
-        self.slider.setValue = 0
-
-        # make the figure
-        rows = len(self.EmgSensor) if self.has_EmgSensor() else 1
-        grid = GridSpec(rows, 3)
-        self._figure = pl.Figure(dpi=self._dpi)
-
-        # populate the EMG data
-        self._axisEMG = []
-        if self.has_EmgSensor():
-            for i, s in enumerate(self.EmgSensor):
-
-                # plot the whole EMG signal
-                time = s.amplitude.index.to_numpy()
-                amplitude = s.amplitude.values.flatten()
-                ax = self._figure.add_subplot(grid[i, 2])
-                ax.plot(time, amplitude)
-                ax.set_title(i)
-
-                # share the x axis
-                if i > 0:
-                    ax.get_shared_x_axes().join(self._axisEMG[0], ax)
-                    ax.set_xticklabels([])
-
-                # store the axis
-                self._axisEMG += [ax]
-
-        # add the 3D model projection
-        self._axis3D = self._figure.add_subplot(grid[:, :2], projection="3d")
-
-        # render the first frame
-        self._plot_frame(0)
-
-    def _render_button(self, label, event_handler):
+    def _render_button(self, icon, event_handler=None):
         """
         private method used to generate valid buttons for this widget.
 
         Parameters
         ----------
-        label: str
-            the label of the button
+        icon: str
+            the path to the image used for the button
 
         event_handler: function
             the method to be passed as event handler for having the
@@ -995,45 +753,286 @@ class Model3DWidget(qtw.QWidget, Model3D):
         obj: qtw.QPushButton
             a novel PushButton object.
         """
-        button = qtw.QPushButton(label)
+        button = qtw.QPushButton("")
         button.setFixedHeight = 35
         button.setFixedWidth = 35
-        button.setFont = qtg.QFont("Arial", self.font_size)
-        button.clicked.connect(event_handler)
+        button.setFont(qtg.QFont("Arial", 0))
+        qicon = qtg.QIcon(qtg.QPixmap(icon).scaled(35, 35))
+        button.setIcon(qicon)
+        if event_handler is not None:
+            button.clicked.connect(event_handler)
         return button
 
-    def is_running(self):
+    def _player(self):
         """
-        check if the player is running.
+        function handling the press of the play button.
         """
-        return self._is_running
+        next_value = self.slider.value() + self._update_rate
+        if next_value > self.slider.maximum():
+            next_value = 0
+        self.slider.setValue(next_value)
+        self._update_slider()
+
+    def _start_player(self):
+        """
+        stop the player
+        """
+        self._play_timer.start(self._update_rate)
+        self._is_running = True
+        icon_path = os.path.sep.join([self._path, "icons", "pause.png"])
+        icon = qtg.QIcon(qtg.QPixmap(icon_path).scaled(35, 35))
+        self.play_button.setIcon(icon)
+
+    def _stop_player(self):
+        """
+        stop the player
+        """
+        self._play_timer.stop()
+        self._is_running = False
+        icon_path = os.path.sep.join([self._path, "icons", "play.png"])
+        icon = qtg.QIcon(qtg.QPixmap(icon_path).scaled(35, 35))
+        self.play_button.setIcon(icon)
 
     def _play_pressed(self):
         """
         method handling the play button press events.
         """
         if self.is_running():
-            self.play_button.setIcon(os.path.sep.join(["icons", "backward.ico"]))
-            self.play_button.setText("❚❚")
-            self._timer.start(self._update_rate)
+            self._stop_player()
         else:
-            self._timer.stop()
-            self.play_button.setText("▶")
+            self._start_player()
 
-    def _get_frame(self, frame):
+    def _forward_pressed(self):
         """
-        return the long-form dataframe containing the data of the model
-        at the required frame.
-
-        Parameters
-        ----------
-        frame: int
-            the index of the required frame.
-
-        Returns
-        -------
-        df: pd.DataFrame
-            the dataframe containing the data of the model at the required
-            frame.
+        method handling the forward button press events.
         """
-        return self._data.get_group(frame)
+
+        # stop any running event
+        self._stop_player()
+
+        # check the actual repeat button selection
+        if self.slider.maximum() > self._actual_frame:
+            self.slider.setValue(self._actual_frame + 1)
+        elif self.repeat_button.isChecked():
+            self.slider.setValue(0)
+        self._update_slider()
+
+    def _backward_pressed(self):
+        """
+        method handling the forward button press events.
+        """
+
+        # stop any running event
+        self._stop_player()
+
+        # check the actual repeat button selection
+        if self.slider.value() > 0:
+            self.slider.setValue(self._actual_frame - 1)
+        elif self.repeat_button.isChecked():
+            self.slider.setValue(self.slider.maximum())
+        self._update_slider()
+
+    def _update_slider(self):
+        """
+        event handler for the slider value update.
+        """
+        self._actual_frame = self.slider.value()
+        self._update_figure()
+
+    def _update_data(self):
+        """
+        private function used to update the data when new sensors are
+        appended.
+        """
+
+        # get 3D data
+        sns = self.model.stack()
+        times = sns["Time"].values.flatten()
+        frames = np.arange(sns.shape[0])
+        for i, time in enumerate(np.unique(times)):
+            frames[np.where(times == time)[0]] = i
+        sns.insert(0, "Frame", frames)
+        self._data = sns.groupby(["Frame", "Sensor"])
+
+        # update the slider and the actual frame
+        self._actual_frame = 0
+        self.slider.setMaximum(len(frames) - 1)
+        self.slider.setValue(self._actual_frame)
+
+        # make the figure
+        rows = len(self.model.EmgSensor) if self.model.has_EmgSensor() else 1
+        if self.model.has_Marker3D() or self.model.has_ForcePlatform3D():
+            cols = 3
+        else:
+            cols = 1
+        grid = GridSpec(rows, cols)
+        self._figure = pl.figure(dpi=self._dpi)
+
+        # populate the EMG data
+        self._axisEMG = []
+        if self.model.has_EmgSensor():
+            for i, s in enumerate(self.model.EmgSensor):
+
+                # plot the whole EMG signal
+                ax = self._figure.add_subplot(grid[i, cols - 1])
+                ax.set_title(s, fontsize=self._font_size)
+                obj = self.model.EmgSensor[s].amplitude
+                obj = obj.dropna()
+                time = obj.index.to_numpy()
+                amplitude = obj.values.flatten()
+                ax.plot(time, amplitude)
+
+                # plot the vertical lines
+                x_line = [time[0], time[0]]
+                y_line = [np.min(amplitude), np.max(amplitude)]
+                vline = ax.plot(x_line, y_line, "--", linewidth=0.5)
+
+                # set the x-axis limits
+                ax.set_xlim(time[0], time[-1])
+
+                # share the x axis
+                if i > 0:
+                    ax.get_shared_x_axes().join(self._axisEMG[0], ax)
+                    ax.set_xticklabels([])
+
+                # store the axis and the vertical line traces
+                self._axisEMG += [ax]
+                self._emg_vertical_lines += vline
+
+        # add the 3D model projection
+        if self.model.has_Marker3D() or self.model.has_ForcePlatform3D():
+
+            # generate the axis
+            self._axis3D = self._figure.add_subplot(
+                grid[:, :2],
+                projection="3d",
+            )
+
+            # set the limits
+            sns = sns.groupby("Sensor")
+            if self.model.has_Marker3D():
+                edges = sns.get_group("Marker3D")
+            else:
+                edges = sns.get_group("ForcePlatform3D").groupby("Source")
+                edges = edges.get_group("Amplitude")
+            edges = edges.pivot(["Time", "Label"], "Dimension", "Amplitude")
+            edges = edges.dropna(axis=0, inplace=False)
+            maxc = max(0, np.max(edges.max(0).values.flatten()))
+            minc = min(0, np.min(edges.min(0).values.flatten()))
+            self._axis3D.set_xlim(minc, maxc)
+            self._axis3D.set_ylim(minc, maxc)
+            self._axis3D.set_zlim(minc, maxc)
+
+            # deal with markers
+            if self.model.has_Marker3D():
+
+                # generate the marker3D reference object
+                markers3D = self._axis3D.plot(0, 0, 0, "o")
+                self._marker3D_crds = markers3D[0]
+
+                # generate the marker3D labels reference objects
+                self._marker3D_lbls = {}
+                markers = sns.get_group("Marker3D")
+                labels = markers["Label"].values.flatten()
+                for label in np.unique(labels):
+                    tx = self._axis3D.text(0, 0, 0, label, None)
+                    self._marker3D_lbls[label] = tx
+
+            # deal with forces
+            if self.model.has_ForcePlatform3D():
+
+                # generate the force3D quiver reference object
+                self._force3D_crds = self._axis3D.quiver(0, 0, 0, 1, 0, 0)
+
+                # generate the force3D labels reference objects
+                self._force3D_lbls = {}
+                forces = sns.get_group("ForcePlatform3D")
+                labels = forces["Label"].values.flatten()
+                for label in np.unique(labels):
+                    tx = self._axis3D.text(0, 0, 0, label, None, font_size=0)
+                    self._force3D_lbls[label] = tx
+
+                # get the force scaler (if required)
+                max_range = maxc - minc
+                force = sns.get_group("ForcePlatform3D").groupby("Source")
+                force = edges.get_group("Amplitude")
+                force = force.pivot("Label", "Dimension", "Amplitude")
+                force = force.dropna(axis=0, inplace=False)
+                max_amplitude = np.max(np.sqrt(np.sum(force.values**2, 1)))
+                self._force3D_sclr = max_range / max_amplitude
+
+        # update the actual figure
+        self._update_figure()
+
+    def _update_figure(self):
+        """
+        update the actual rendered figure.
+        """
+
+        # update the 3D marker coords and labels
+        if self.model.has_Marker3D():
+            idx = (self._actual_frame, "Marker3D")
+            try:
+                markers = self._data.get_group(idx)
+                markers = markers.pivot("Label", "Dimension", "Amplitude")
+                markers = markers.dropna(axis=0, inplace=False)
+                xs, ys, zs = markers.values.T
+                ts = markers.index.to_numpy()
+                self._marker3D_crds.set_data_3d(xs, ys, zs)
+                for t in self._marker3D_lbls:
+                    if t in ts:
+                        i = np.where(ts == t)[0]
+                        self._marker3D_lbls[t].set_x(xs[i][0])
+                        self._marker3D_lbls[t].set_y(ys[i][0])
+                        self._marker3D_lbls[t].set_z(zs[i][0])
+                        self._marker3D_lbls[t].set_fontsize(self._font_size)
+                    else:
+                        self._marker3D_lbls[t].set_fontsize(0)
+            except KeyError:
+                pass
+
+        # update the 3D force coords and labels
+        if self.model.has_ForcePlatform3D():
+            idx = (self._actual_frame, "ForcePlatform3D")
+            try:
+                forces = self._data.get_group(idx)
+                forces = forces.dropna(axis=0, inplace=False)
+                grp = forces.groupby("Source")
+                ori = grp.get_group("Origin")
+                ori = ori.pivot("Label", "Dimension", "Amplitude")
+                amp = grp.get_group("Amplitude")
+                amp = amp.pivot("Label", "Dimension", "Amplitude")
+                amp = amp * self._force3D_sclr
+
+                # plot the quivers and their labels
+                xs, ys, zs = np.meshgrid(*ori.values)
+                us, vs, ws = np.meshgrid(*amp.values)
+                ts = amp.index.to_numpy()
+                self._force3D_crds.set_x(xs)
+                self._force3D_crds.set_y(ys)
+                self._force3D_crds.set_z(zs)
+                self._force3D_crds.set_u(us)
+                self._force3D_crds.set_v(vs)
+                self._force3D_crds.set_w(ws)
+                for t in self._force3D_lbls:
+                    if t in ts:
+                        i = np.where(ts == t)[0]
+                        self._force3D_lbls[t].set_x(xs[i][0])
+                        self._force3D_lbls[t].set_y(ys[i][0])
+                        self._force3D_lbls[t].set_z(zs[i][0])
+                        self._force3D_lbls[t].set_fontsize(self._font_size)
+                    else:
+                        self._force3D_lbls[t].set_fontsize(0)
+            except KeyError:
+                pass
+
+        # update the emg vertical lines
+        if len(self._emg_vertical_lines) > 0:
+            idx = (self._actual_frame, "EmgSensor")
+            try:
+                emgs = self._data.get_group(idx)
+                time = emgs["Time"].values[0]
+                for i in range(len(self._emg_vertical_lines)):
+                    self._emg_vertical_lines[i].set_x([time, time])
+            except KeyError:
+                pass
