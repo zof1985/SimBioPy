@@ -13,19 +13,20 @@ import PySide2.QtGui as qtg
 import matplotlib.pyplot as pl
 from matplotlib.gridspec import GridSpec
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 from matplotlib import use as matplotlib_use
 from mpl_toolkits import mplot3d
 from .geometry import *
 
 # matplotlib options
 matplotlib_use("Qt5Agg")
-pl.rc("font", size=4)  # controls default text sizes
-pl.rc("axes", titlesize=4)  # fontsize of the axes title
-pl.rc("axes", labelsize=4)  # fontsize of the x and y labels
-pl.rc("xtick", labelsize=4)  # fontsize of the x tick labels
-pl.rc("ytick", labelsize=4)  # fontsize of the y tick labels
-pl.rc("legend", fontsize=4)  # legend fontsize
-pl.rc("figure", titlesize=4)  # fontsize of the figure title
+pl.rc("font", size=3)  # controls default text sizes
+pl.rc("axes", titlesize=3)  # fontsize of the axes title
+pl.rc("axes", labelsize=3)  # fontsize of the x and y labels
+pl.rc("xtick", labelsize=3)  # fontsize of the x tick labels
+pl.rc("ytick", labelsize=3)  # fontsize of the y tick labels
+pl.rc("legend", fontsize=3)  # legend fontsize
+pl.rc("figure", titlesize=3)  # fontsize of the figure title
 
 #! CLASSES
 
@@ -636,7 +637,8 @@ class Model3DWidget(qtw.QWidget):
     repeat_button = None
 
     # private variables
-    _font_size = 10
+    _font_size = 12
+    _button_size = 75
     _play_timer = None
     _update_rate = 1  # msec
     _is_running = False
@@ -666,7 +668,7 @@ class Model3DWidget(qtw.QWidget):
 
         # timer
         self._play_timer = qtc.QTimer()
-        self._play_timer.timeout.connect(self._player)
+        self._play_timer.timeout.connect(self._move_forward)
 
         # path to the package folder
         self._path = os.path.sep.join([os.getcwd(), "simbiopy"])
@@ -712,7 +714,9 @@ class Model3DWidget(qtw.QWidget):
         commands_layout.addWidget(self.slider)
         commands_widget = qtw.QWidget()
         commands_widget.setLayout(commands_layout)
-        commands_widget.setFixedHeight(40)
+        opacity_zero = qtw.QGraphicsOpacityEffect()
+        opacity_zero.setOpacity(0)
+        commands_widget.setGraphicsEffect(opacity_zero)
 
         # update the figure
         self._update_data()
@@ -725,6 +729,7 @@ class Model3DWidget(qtw.QWidget):
         layout.addWidget(self.canvas)
         layout.addWidget(commands_widget)
         self.setLayout(layout)
+        self.setGraphicsEffect(opacity_zero)
 
     def append(self, **objs):
         """
@@ -763,24 +768,42 @@ class Model3DWidget(qtw.QWidget):
             a novel PushButton object.
         """
         button = qtw.QPushButton("")
-        button.setFixedHeight = 35
-        button.setFixedWidth = 35
+        button.setFixedHeight = self._button_size
+        button.setFixedWidth = self._button_size
         button.setFont(qtg.QFont("Arial", 0))
-        qicon = qtg.QIcon(qtg.QPixmap(icon).scaled(35, 35))
+        pixmap = qtg.QPixmap(icon)
+        pixmap = pixmap.scaled(self._button_size, self._button_size)
+        qicon = qtg.QIcon(pixmap)
         button.setIcon(qicon)
         if event_handler is not None:
             button.clicked.connect(event_handler)
         return button
 
-    def _player(self):
+    def _move_forward(self):
         """
         function handling the press of the play button.
         """
-        next_value = self.slider.value() + self._update_rate
-        if next_value > self.slider.maximum():
-            next_value = 0
-        self.slider.setValue(next_value)
-        self._update_slider()
+        frame = self.slider.value()
+        next_frame = frame + 1
+        if next_frame > self.slider.maximum():
+            if self.repeat_button.isChecked():
+                next_frame = 0
+            else:
+                next_frame = frame
+        self.slider.setValue(next_frame)
+
+    def _move_backward(self):
+        """
+        function handling the press of the play button.
+        """
+        frame = self.slider.value()
+        next_frame = frame - 1
+        if next_frame < 0:
+            if self.repeat_button.isChecked():
+                next_frame = self.slider.maximum()
+            else:
+                next_frame = frame
+        self.slider.setValue(next_frame)
 
     def _start_player(self):
         """
@@ -789,7 +812,9 @@ class Model3DWidget(qtw.QWidget):
         self._play_timer.start(self._update_rate)
         self._is_running = True
         icon_path = os.path.sep.join([self._path, "icons", "pause.png"])
-        icon = qtg.QIcon(qtg.QPixmap(icon_path).scaled(35, 35))
+        pxmap = qtg.QPixmap(icon_path)
+        pxmap = pxmap.scaled(self._button_size, self._button_size)
+        icon = qtg.QIcon(pxmap)
         self.play_button.setIcon(icon)
 
     def _stop_player(self):
@@ -799,7 +824,9 @@ class Model3DWidget(qtw.QWidget):
         self._play_timer.stop()
         self._is_running = False
         icon_path = os.path.sep.join([self._path, "icons", "play.png"])
-        icon = qtg.QIcon(qtg.QPixmap(icon_path).scaled(35, 35))
+        pxmap = qtg.QPixmap(icon_path)
+        pxmap = pxmap.scaled(self._button_size, self._button_size)
+        icon = qtg.QIcon(pxmap)
         self.play_button.setIcon(icon)
 
     def _play_pressed(self):
@@ -815,31 +842,15 @@ class Model3DWidget(qtw.QWidget):
         """
         method handling the forward button press events.
         """
-
-        # stop any running event
         self._stop_player()
-
-        # check the actual repeat button selection
-        if self.slider.maximum() > self._actual_frame:
-            self.slider.setValue(self._actual_frame + 1)
-        elif self.repeat_button.isChecked():
-            self.slider.setValue(0)
-        self._update_slider()
+        self._move_forward()
 
     def _backward_pressed(self):
         """
         method handling the forward button press events.
         """
-
-        # stop any running event
         self._stop_player()
-
-        # check the actual repeat button selection
-        if self.slider.value() > 0:
-            self.slider.setValue(self._actual_frame - 1)
-        elif self.repeat_button.isChecked():
-            self.slider.setValue(self.slider.maximum())
-        self._update_slider()
+        self._move_backward()
 
     def _update_slider(self):
         """
@@ -848,22 +859,23 @@ class Model3DWidget(qtw.QWidget):
         self._actual_frame = self.slider.value()
         self._update_figure()
 
-    def _get_frame(self, time):
+    def _get_frame(self, index):
         """
         return the required frame.
 
         Parameters
         ----------
-        time: float
-            the time index corresponding to the wanted frame.
+        index: int
+            the index corresponding to the wanted frame.
 
         Returns
         -------
         frame: dict
             the data resulting from the required frame.
         """
-        frame = self._frames[time]
-        if frame["Time"] is None:
+        frame = self._frames[index]
+        calculated = all([i is not None for i in frame.values()])
+        if not calculated:
 
             def get_source(data, src):
                 dd = data.get_group(src)
@@ -873,8 +885,7 @@ class Model3DWidget(qtw.QWidget):
                 return xs, ys, zs, ts
 
             # get the output frame
-            df1 = self._data.get_group(time).groupby("Sensor")
-            frame["Time"] = time
+            df1 = self._data.get_group(frame["Time"]).groupby("Sensor")
             for sensor in list(df1.groups.keys()):
                 df2 = df1.get_group(sensor).groupby("Source")
 
@@ -889,30 +900,41 @@ class Model3DWidget(qtw.QWidget):
                     ts = t1[i1]
                     frame[sensor] = {}
                     for x, y, z, t in zip(xs, ys, zs, ts):
-                        frame[sensor][t] = (x, y, z)
+                        if np.any(np.isnan([x, y, z])):
+                            frame[sensor][t] = None
+                        else:
+                            frame[sensor][t] = (x, y, z)
 
                 if sensor == "Marker3D":
                     xs, ys, zs, ts = get_source(df2, "coordinates")
-                    frame[sensor] = (xs, ys, zs)
-                    for x, y, z, t in zip(xs, ys, zs, ts):
-                        frame["Text3D"][t] = (x, y, z)
+                    ix = ~np.isnan(xs)
+                    frame[sensor] = (xs[ix], ys[ix], zs[ix])
+                    for i, x, y, z, t in zip(ix, xs, ys, zs, ts):
+                        if i:
+                            frame["Text3D"][t] = None
+                        else:
+                            frame["Text3D"][t] = (x, y, z)
 
                 if sensor == "ForcePlatform3D":
                     xs, ys, zs, ts = get_source(df2, "origin")
-                    xs, ys, zs = np.meshgrid(xs, ys, zs)
                     us, vs, ws, _ = get_source(df2, "amplitude")
-                    us, vs, ws = np.meshgrid(us, vs, ws)
-                    us = us * self._force_sclr
-                    vs = vs * self._force_sclr
-                    ws = ws * self._force_sclr
-                    frame[sensor] = (xs, ys, zs, us, vs, ws)
-                    js = (xs + us) * 0.5
-                    ks = (ys + vs) * 0.5
-                    ls = (zs + ws) * 0.5
-                    for j, k, l, t in zip(js, ks, ls, ts):
-                        frame["Text3D"][t] = (j, k, l)
+                    ix = ~np.isnan(xs)
+                    x, y, z = np.meshgrid(xs[ix], ys[ix], zs[ix])
+                    u, v, w = np.meshgrid(us[ix], vs[ix], ws[ix])
+                    u = u * self._force_sclr
+                    v = v * self._force_sclr
+                    w = w * self._force_sclr
+                    frame[sensor] = (x, y, z, u, v, w)
+                    for x, y, z, u, v, w, t in zip(xs, ys, zs, us, vs, ws, ts):
+                        if np.any(np.isnan([x, y, z])):
+                            frame["Text3D"][t] = None
+                        else:
+                            j = (x + u) * 0.5
+                            k = (y + v) * 0.5
+                            l = (z + w) * 0.5
+                            frame["Text3D"][t] = (j, k, l)
 
-            self._frames[time] = frame
+            self._frames[index] = frame
 
         return frame
 
@@ -957,6 +979,14 @@ class Model3DWidget(qtw.QWidget):
                 projection="3d",
             )
 
+            # set the camera view
+            self._axis3D.view_init(elev=10, azim=45)
+
+            # set the axis label
+            self._axis3D.set_xlabel("X", weight="bold")
+            self._axis3D.set_ylabel("Y", weight="bold")
+            self._axis3D.set_zlabel("Z", weight="bold")
+
             # set the axis limits
             if self.model.has_Marker3D():
                 edges = df.groupby("Sensor").get_group("Marker3D")
@@ -981,29 +1011,24 @@ class Model3DWidget(qtw.QWidget):
         # get the (empty) frames
         self._data = df.groupby(["Time"])
         times = list(self._data.groups.keys())
-        frame = {i: () for i in sensors3D}
-        frame["Text3D"] = {i: () for i in labels}
-        frame["Time"] = None
-        self._frames = {time: frame for time in times}
-
-        # populate the plot
-        self._actual_frame = times[0]
-        frame = self._get_frame(self._actual_frame)
-        for track, values in frame.items():
-            if track == "Marker3D" and len(values) > 0:
-                self._marker3D = self._axis3D.scatter(*values)
-
-            if track == "ForcePlatform3D" and len(values) > 0:
-                self._force3D = self._axis3D.quiver(*values)
-
-            if track == "Link3D" and len(values) > 0:
-                for lbl, vals in values.items():
-                    self._link3D[lbl] = self._axis3D.plot(*vals)[0]
-
-            if track == "Text3D" and len(values) > 0:
-                for lbl, vals in values.items():
-                    x, y, z = vals
-                    self._text3D[lbl] = self._axis3D.text(x, y, z, lbl)
+        links = df.groupby(["Sensor"])
+        if any([i == "Link3D" for i in list(links.groups.keys())]):
+            links = links.get_group("Link3D")["Label"].values.flatten()
+            links = {i: None for i in np.unique(links)}
+        else:
+            links = {}
+        frame = {
+            "Marker3D": None,
+            "ForcePlatform3D": None,
+            "Link3D": links,
+            "Text3D": {i: None for i in labels},
+        }
+        self._frames = []
+        for i, t in enumerate(times):
+            frm = frame.copy()
+            frm["Time"] = t
+            self._frames += [frm]
+        self._actual_frame = 0
 
         # populate the EMG data
         self._axisEMG = []
@@ -1013,32 +1038,64 @@ class Model3DWidget(qtw.QWidget):
 
                 # plot the whole EMG signal
                 ax = self._figure.add_subplot(grid[n - 1 - i, cols - 1])
-                ax.set_title(s)
                 obj = self.model.EmgSensor[s].amplitude
                 obj = obj.dropna()
                 time = obj.index.to_numpy()
                 amplitude = obj.values.flatten()
                 ax.plot(time, amplitude, linewidth=0.6)
 
-                # plot the vertical lines
-                x_line = [frame["Time"], frame["Time"]]
-                y_line = [np.min(amplitude), np.max(amplitude)]
-                vline = ax.plot(x_line, y_line, "--", linewidth=0.5)
+                # plot the title within the figure box
+                xt = time[0]
+                yt = (np.max(amplitude) - np.min(amplitude)) * 1.05
+                yt += np.min(amplitude)
+                ax.text(xt, yt, s.upper(), fontweight="bold")
 
-                # set the x-axis limits
-                ax.set_xlim(times[0], times[-1])
+                # set the x-axis limits and bounds
+                time_rng = times[-1] - times[0]
+                x_off = time_rng * 0.05
+                ax.set_xlim(times[0] - x_off, times[-1] + x_off)
+                ax.spines["bottom"].set_bounds(np.min(time), np.max(time))
+
+                # set the y-axis limits
+                amplitude_range = np.max(amplitude) - np.min(amplitude)
+                y_off = amplitude_range * 0.05
+                y_min = np.min(amplitude)
+                y_max = np.max(amplitude)
+                ax.set_ylim(y_min - y_off, y_max + y_off)
+                ax.spines["left"].set_bounds(y_min, y_max)
 
                 # share the x axis
                 if i > 0:
                     ax.get_shared_x_axes().join(self._axisEMG[0], ax)
                     ax.set_xticklabels([])
 
-                # store the axis and the vertical line traces
-                self._axisEMG += [ax]
+                # adjust the layout
+                ax.spines["right"].set_visible(False)
+                ax.spines["top"].set_visible(False)
+                if i == 0:
+                    ax.set_xlabel("TIME", weight="bold")
+                else:
+                    ax.spines["bottom"].set_visible(False)
+                    ax.xaxis.set_ticks([])
+
+                # plot the vertical lines
+                x_line = [times[0], times[0]]
+                y_line = [np.min(amplitude), np.max(amplitude)]
+                vline = ax.plot(x_line, y_line, "--", linewidth=0.5)
                 self._emg_vertical_lines += vline
 
+                # store the axis data
+                self._axisEMG += [ax]
+
+        # populate the links and text data
+        self._link3D = {i: None for i in links}
+        self._text3D = {i: None for i in labels}
+
+        # update the slider
+        self.slider.setMaximum(len(self._frames) - 1)
+
         # update the actual figure
-        self._figure.tight_layout()
+        self._figure.tight_layout(rect=(0.025, 0.025, 1, 0.975))
         self._update_figure()
 
     def _update_figure(self):
@@ -1049,34 +1106,68 @@ class Model3DWidget(qtw.QWidget):
         # get the actual frame
         frame = self._get_frame(self._actual_frame)
 
-        # update the plots
-        for track, values in frame.items():
-            if track == "Marker3D" and len(values) > 0:
-                self._marker3D._offsets3d = values
-
-            if track == "ForcePlatform3D" and len(values) > 0:
-                self._force3D._offsets3d = values
-            """
-            if track == "Link3D":
-                for lbl, vals in values.items():
-                    if len(vals) > 0:
-                        self._link3D[lbl].set_data_3d(*values)
-            """
-            if track == "Text3D":
-                for lbl, vals in values.items():
-                    if len(vals) > 0:
-                        x, y, z = vals
-                        self._text3D[lbl]._x = x
-                        self._text3D[lbl]._y = y
-                        self._text3D[lbl]._z = z
-                        self._text3D[lbl].set_alpha(0.5)
-                    else:
-                        self._text3D[lbl].set_alpha(0.0)
-
-        # populate the EMG data
+        # update the EMG plots
         time = frame["Time"]
         for i in range(len(self._emg_vertical_lines)):
             self._emg_vertical_lines[i].set_xdata([time, time])
+
+        # update the 3D model
+        for track, values in frame.items():
+            if track == "Marker3D":
+                if self._marker3D is None:
+                    if values is not None:
+                        self._marker3D = self._axis3D.scatter(*values)
+                        self._marker3D.set_alpha(1)
+                else:
+                    if values is not None:
+                        self._marker3D._offsets3d = values
+                        self._marker3D._visible = True
+                    else:
+                        self._marker3D._visible = False
+
+            if track == "ForcePlatform3D":
+                if self._force3D is None:
+                    if values is not None:
+                        self._force3D = self._axis3D.quiver(*values)
+                        self._force3D.set_alpha(0.75)
+                else:
+                    if values is not None:
+                        self._force3D._offsets3d = values
+                        self._force3D._visible = True
+                    else:
+                        self._force3D._visible = False
+
+            if track == "Link3D":
+                for lbl, vals in values.items():
+                    if self._link3D[lbl] is None:
+                        if vals is not None:
+                            x, y, z = vals
+                            ax = self._axis3D.plot(x, y, z, color="darkred")[0]
+                            self._link3D[lbl] = ax
+                            self._link3D[lbl].set_alpha(0.75)
+                    else:
+                        if vals is not None:
+                            self._link3D[lbl].set_data_3d(*vals)
+                            self._link3D[lbl]._visible = True
+                        else:
+                            self._link3D[lbl]._visible = False
+
+            if track == "Text3D" and values is not None:
+                for lbl, vals in values.items():
+                    if self._text3D[lbl] is None:
+                        if vals is not None:
+                            x, y, z = vals
+                            self._text3D[lbl] = self._axis3D.text(x, y, z, lbl)
+                            self._text3D[lbl].set_alpha(0.5)
+                    else:
+                        if vals is not None:
+                            x, y, z = vals
+                            self._text3D[lbl]._x = x
+                            self._text3D[lbl]._y = y
+                            self._text3D[lbl]._z = z
+                            self._text3D[lbl]._visible = True
+                        else:
+                            self._text3D[lbl]._visible = False
 
         # update the timer
         minutes = time // 60000
