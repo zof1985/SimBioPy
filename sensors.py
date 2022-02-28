@@ -644,9 +644,9 @@ class Model3DWidget(qtw.QWidget):
     _is_running = False
     _figure = None
     _axis3D = None
-    _axisEMG = []
-    _marker3D = None
-    _force3D = None
+    _emgSignals = {}
+    _marker3D = {}
+    _force3D = {}
     _link3D = {}
     _text3D = {}
     _force3D_sclr = 1
@@ -874,7 +874,13 @@ class Model3DWidget(qtw.QWidget):
             the data resulting from the required frame.
         """
         frame = self._frames[index]
-        calculated = all([i is not None for i in frame.values()])
+        calculated = True
+        for i, k in frame.items():
+            if i != "Time":
+                for j in k.values():
+                    if j is None:
+                        calculated = False
+                        break
         if not calculated:
 
             def get_source(data, src):
@@ -890,49 +896,42 @@ class Model3DWidget(qtw.QWidget):
                 df2 = df1.get_group(sensor).groupby("Source")
 
                 if sensor == "Link3D":
-                    x0, y0, z0, t0 = get_source(df2, "p0")
-                    x1, y1, z1, t1 = get_source(df2, "p1")
-                    i0 = [i in t1 for i in t0]
-                    i1 = [i in t0 for i in t1]
-                    xs = np.vstack([x0[i0], x1[i1]]).T
-                    ys = np.vstack([y0[i0], y1[i1]]).T
-                    zs = np.vstack([z0[i0], z1[i1]]).T
-                    ts = t1[i1]
-                    frame[sensor] = {}
+                    x0, y0, z0, ts = get_source(df2, "p0")
+                    x1, y1, z1, _ = get_source(df2, "p1")
+                    xs = np.vstack([x0, x1]).T
+                    ys = np.vstack([y0, y1]).T
+                    zs = np.vstack([z0, z1]).T
                     for x, y, z, t in zip(xs, ys, zs, ts):
                         if np.any(np.isnan([x, y, z])):
-                            frame[sensor][t] = None
+                            frame["Link3D"][t] = None
                         else:
-                            frame[sensor][t] = (x, y, z)
+                            frame["Link3D"][t] = (x, y, z)
 
                 if sensor == "Marker3D":
                     xs, ys, zs, ts = get_source(df2, "coordinates")
-                    ix = ~np.isnan(xs)
-                    frame[sensor] = (xs[ix], ys[ix], zs[ix])
-                    for i, x, y, z, t in zip(ix, xs, ys, zs, ts):
-                        if i:
+                    for x, y, z, t in zip(xs, ys, zs, ts):
+                        if np.any(np.isnan([x, y, z])):
                             frame["Text3D"][t] = None
+                            frame["Marker3D"][t] = None
                         else:
                             frame["Text3D"][t] = (x, y, z)
+                            frame["Marker3D"][t] = (x, y, z)
 
                 if sensor == "ForcePlatform3D":
                     xs, ys, zs, ts = get_source(df2, "origin")
                     us, vs, ws, _ = get_source(df2, "amplitude")
-                    ix = ~np.isnan(xs)
-                    x, y, z = np.meshgrid(xs[ix], ys[ix], zs[ix])
-                    u, v, w = np.meshgrid(us[ix], vs[ix], ws[ix])
-                    u = u * self._force_sclr
-                    v = v * self._force_sclr
-                    w = w * self._force_sclr
-                    frame[sensor] = (x, y, z, u, v, w)
+                    xs, ys, zs = np.meshgrid(xs, ys, zs)
+                    us, vs, ws = np.meshgrid(us, vs, ws) * self._force_sclr
                     for x, y, z, u, v, w, t in zip(xs, ys, zs, us, vs, ws, ts):
-                        if np.any(np.isnan([x, y, z])):
+                        if np.any(np.isnan([x, y, z, u, v, w])):
                             frame["Text3D"][t] = None
+                            frame["Force3D"][t] = None
                         else:
                             j = (x + u) * 0.5
                             k = (y + v) * 0.5
                             l = (z + w) * 0.5
                             frame["Text3D"][t] = (j, k, l)
+                            frame["Force3D"][t] = (x, y, z, u, v, w)
 
             self._frames[index] = frame
 
@@ -1011,18 +1010,16 @@ class Model3DWidget(qtw.QWidget):
         # get the (empty) frames
         self._data = df.groupby(["Time"])
         times = list(self._data.groups.keys())
-        links = df.groupby(["Sensor"])
-        if any([i == "Link3D" for i in list(links.groups.keys())]):
-            links = links.get_group("Link3D")["Label"].values.flatten()
-            links = {i: None for i in np.unique(links)}
-        else:
-            links = {}
-        frame = {
-            "Marker3D": None,
-            "ForcePlatform3D": None,
-            "Link3D": links,
-            "Text3D": {i: None for i in labels},
-        }
+        sensors = df.groupby(["Sensor"])
+        frame = {}
+        for sensor in sensors3D:
+            if any([i == sensor for i in list(sensors.groups.keys())]):
+                trc = sensors.get_group(sensor)["Label"].values.flatten()
+                trc = {i: None for i in np.unique(trc)}
+            else:
+                trc = {}
+            frame[sensor] = trc
+        frame["Text3D"] = {i: None for i in labels}
         self._frames = []
         for i, t in enumerate(times):
             frm = frame.copy()
@@ -1031,7 +1028,7 @@ class Model3DWidget(qtw.QWidget):
         self._actual_frame = 0
 
         # populate the EMG data
-        self._axisEMG = []
+        self._emgSignals = {}
         if self.model.has_EmgSensor():
             n = len(self.model.EmgSensor)
             for i, s in enumerate(self.model.EmgSensor):
@@ -1066,7 +1063,8 @@ class Model3DWidget(qtw.QWidget):
 
                 # share the x axis
                 if i > 0:
-                    ax.get_shared_x_axes().join(self._axisEMG[0], ax)
+                    lbl = list(self._emgSignals.keys())[0]
+                    ax.get_shared_x_axes().join(self._emgSignals[lbl], ax)
                     ax.set_xticklabels([])
 
                 # adjust the layout
@@ -1085,11 +1083,13 @@ class Model3DWidget(qtw.QWidget):
                 self._emg_vertical_lines += vline
 
                 # store the axis data
-                self._axisEMG += [ax]
+                self._emgSignals[s] = ax
 
-        # populate the links and text data
-        self._link3D = {i: None for i in links}
-        self._text3D = {i: None for i in labels}
+        # reset the 3D data
+        self._marker3D = frame["Marker3D"]
+        self._force3D = frame["ForcePlatform3D"]
+        self._link3D = frame["Link3D"]
+        self._text3D = frame["Text3D"]
 
         # update the slider
         self.slider.setMaximum(len(self._frames) - 1)
@@ -1113,36 +1113,38 @@ class Model3DWidget(qtw.QWidget):
 
         # update the 3D model
         for track, values in frame.items():
+
             if track == "Marker3D":
-                if self._marker3D is None:
-                    if values is not None:
-                        self._marker3D = self._axis3D.scatter(*values)
-                        self._marker3D.set_alpha(1)
-                else:
-                    if values is not None:
-                        self._marker3D._offsets3d = values
-                        self._marker3D._visible = True
+                for lbl, vals in values.items():
+                    if self._marker3D[lbl] is None:
+                        if vals is not None:
+                            ax = self._axis3D.scatter(*vals, color="navy")
+                            self._marker3D[lbl] = ax
                     else:
-                        self._marker3D._visible = False
+                        if vals is not None:
+                            self._marker3D[lbl]._offsets3d = vals
+                            self._marker3D[lbl]._visible = True
+                        else:
+                            self._marker3D[lbl]._visible = False
 
             if track == "ForcePlatform3D":
-                if self._force3D is None:
-                    if values is not None:
-                        self._force3D = self._axis3D.quiver(*values)
-                        self._force3D.set_alpha(0.75)
-                else:
-                    if values is not None:
-                        self._force3D._offsets3d = values
-                        self._force3D._visible = True
+                for lbl, vals in values.items():
+                    if self._force3D[lbl] is None:
+                        if vals is not None:
+                            ax = self._axis3D.quiver(*vals, color="darkgreen")
+                            self._force3D[lbl] = ax
                     else:
-                        self._force3D._visible = False
+                        if vals is not None:
+                            self._force3D[lbl]._offsets3d = vals
+                            self._force3D[lbl]._visible = True
+                        else:
+                            self._force3D[lbl]._visible = False
 
             if track == "Link3D":
                 for lbl, vals in values.items():
                     if self._link3D[lbl] is None:
                         if vals is not None:
-                            x, y, z = vals
-                            ax = self._axis3D.plot(x, y, z, color="darkred")[0]
+                            ax = self._axis3D.plot(*vals, color="darkred")
                             self._link3D[lbl] = ax
                             self._link3D[lbl].set_alpha(0.75)
                     else:
@@ -1152,12 +1154,12 @@ class Model3DWidget(qtw.QWidget):
                         else:
                             self._link3D[lbl]._visible = False
 
-            if track == "Text3D" and values is not None:
+            if track == "Text3D":
                 for lbl, vals in values.items():
                     if self._text3D[lbl] is None:
                         if vals is not None:
-                            x, y, z = vals
-                            self._text3D[lbl] = self._axis3D.text(x, y, z, lbl)
+                            ax = self._axis3D.text(*vals)
+                            self._text3D[lbl] = ax
                             self._text3D[lbl].set_alpha(0.5)
                     else:
                         if vals is not None:
