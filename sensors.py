@@ -1013,7 +1013,7 @@ class Model3DWidget(qtw.QWidget):
 
                 # plot the whole EMG signal
                 ax = self._figure.add_subplot(grid[n - 1 - i, cols - 1])
-                ax.set_title(s, fontsize=4)
+                ax.set_title(s)
                 obj = self.model.EmgSensor[s].amplitude
                 obj = obj.dropna()
                 time = obj.index.to_numpy()
