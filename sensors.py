@@ -859,84 +859,6 @@ class Model3DWidget(qtw.QWidget):
         self._actual_frame = self.slider.value()
         self._update_figure()
 
-    def _get_frame(self, index):
-        """
-        return the required frame.
-
-        Parameters
-        ----------
-        index: int
-            the index corresponding to the wanted frame.
-
-        Returns
-        -------
-        frame: dict
-            the data resulting from the required frame.
-        """
-        frame = self._frames[index]
-        calculated = True
-        for i, k in frame.items():
-            if i != "Time":
-                for j in k.values():
-                    if j is None:
-                        calculated = False
-                        break
-        if not calculated:
-
-            def get_source(data, src):
-                dd = data.get_group(src)
-                dd = dd.pivot("Label", "Dimension", "Amplitude")
-                xs, ys, zs = dd.values.T
-                ts = dd.index.to_numpy()
-                return xs, ys, zs, ts
-
-            # get the output frame
-            df1 = self._data.get_group(frame["Time"]).groupby("Sensor")
-            for sensor in list(df1.groups.keys()):
-                df2 = df1.get_group(sensor).groupby("Source")
-
-                if sensor == "Link3D":
-                    x0, y0, z0, ts = get_source(df2, "p0")
-                    x1, y1, z1, _ = get_source(df2, "p1")
-                    xs = np.vstack([x0, x1]).T
-                    ys = np.vstack([y0, y1]).T
-                    zs = np.vstack([z0, z1]).T
-                    for x, y, z, t in zip(xs, ys, zs, ts):
-                        if np.any(np.isnan([x, y, z])):
-                            frame["Link3D"][t] = None
-                        else:
-                            frame["Link3D"][t] = (x, y, z)
-
-                if sensor == "Marker3D":
-                    xs, ys, zs, ts = get_source(df2, "coordinates")
-                    for x, y, z, t in zip(xs, ys, zs, ts):
-                        if np.any(np.isnan([x, y, z])):
-                            frame["Text3D"][t] = None
-                            frame["Marker3D"][t] = None
-                        else:
-                            frame["Text3D"][t] = (x, y, z)
-                            frame["Marker3D"][t] = (x, y, z)
-
-                if sensor == "ForcePlatform3D":
-                    xs, ys, zs, ts = get_source(df2, "origin")
-                    us, vs, ws, _ = get_source(df2, "amplitude")
-                    xs, ys, zs = np.meshgrid(xs, ys, zs)
-                    us, vs, ws = np.meshgrid(us, vs, ws) * self._force_sclr
-                    for x, y, z, u, v, w, t in zip(xs, ys, zs, us, vs, ws, ts):
-                        if np.any(np.isnan([x, y, z, u, v, w])):
-                            frame["Text3D"][t] = None
-                            frame["Force3D"][t] = None
-                        else:
-                            j = (x + u) * 0.5
-                            k = (y + v) * 0.5
-                            l = (z + w) * 0.5
-                            frame["Text3D"][t] = (j, k, l)
-                            frame["Force3D"][t] = (x, y, z, u, v, w)
-
-            self._frames[index] = frame
-
-        return frame
-
     def _update_data(self):
         """
         private function used to update the data when new sensors are
@@ -1086,10 +1008,10 @@ class Model3DWidget(qtw.QWidget):
                 self._emgSignals[s] = ax
 
         # reset the 3D data
-        self._marker3D = frame["Marker3D"]
-        self._force3D = frame["ForcePlatform3D"]
-        self._link3D = frame["Link3D"]
-        self._text3D = frame["Text3D"]
+        self._marker3D = frame["Marker3D"].copy()
+        self._force3D = frame["ForcePlatform3D"].copy()
+        self._link3D = frame["Link3D"].copy()
+        self._text3D = frame["Text3D"].copy()
 
         # update the slider
         self.slider.setMaximum(len(self._frames) - 1)
@@ -1097,6 +1019,84 @@ class Model3DWidget(qtw.QWidget):
         # update the actual figure
         self._figure.tight_layout(rect=(0.025, 0.025, 1, 0.975))
         self._update_figure()
+
+    def _get_frame(self, index):
+        """
+        return the required frame.
+
+        Parameters
+        ----------
+        index: int
+            the index corresponding to the wanted frame.
+
+        Returns
+        -------
+        frame: dict
+            the data resulting from the required frame.
+        """
+        frame = self._frames[index]
+        calculated = True
+        for i, k in frame.items():
+            if i != "Time":
+                for j in k.values():
+                    if j is None:
+                        calculated = False
+                        break
+        if not calculated:
+
+            def get_source(data, src):
+                dd = data.get_group(src)
+                dd = dd.pivot("Label", "Dimension", "Amplitude")
+                xs, ys, zs = dd.values.T
+                ts = dd.index.to_numpy()
+                return xs, ys, zs, ts
+
+            # get the output frame
+            df1 = self._data.get_group(frame["Time"]).groupby("Sensor")
+            for sensor in list(df1.groups.keys()):
+                df2 = df1.get_group(sensor).groupby("Source")
+
+                if sensor == "Link3D":
+                    x0, y0, z0, ts = get_source(df2, "p0")
+                    x1, y1, z1, _ = get_source(df2, "p1")
+                    xs = np.vstack([x0, x1]).T
+                    ys = np.vstack([y0, y1]).T
+                    zs = np.vstack([z0, z1]).T
+                    for x, y, z, t in zip(xs, ys, zs, ts):
+                        if np.any(np.isnan([x, y, z])):
+                            frame["Link3D"][t] = None
+                        else:
+                            frame["Link3D"][t] = (x, y, z)
+
+                if sensor == "Marker3D":
+                    xs, ys, zs, ts = get_source(df2, "coordinates")
+                    for x, y, z, t in zip(xs, ys, zs, ts):
+                        if np.any(np.isnan([x, y, z])):
+                            frame["Text3D"][t] = None
+                            frame["Marker3D"][t] = None
+                        else:
+                            frame["Text3D"][t] = (x, y, z)
+                            frame["Marker3D"][t] = (x, y, z)
+
+                if sensor == "ForcePlatform3D":
+                    xs, ys, zs, ts = get_source(df2, "origin")
+                    us, vs, ws, _ = get_source(df2, "amplitude")
+                    xs, ys, zs = np.meshgrid(xs, ys, zs)
+                    us, vs, ws = np.meshgrid(us, vs, ws) * self._force_sclr
+                    for x, y, z, u, v, w, t in zip(xs, ys, zs, us, vs, ws, ts):
+                        if np.any(np.isnan([x, y, z, u, v, w])):
+                            frame["Text3D"][t] = None
+                            frame["Force3D"][t] = None
+                        else:
+                            j = (x + u) * 0.5
+                            k = (y + v) * 0.5
+                            l = (z + w) * 0.5
+                            frame["Text3D"][t] = (j, k, l)
+                            frame["Force3D"][t] = (x, y, z, u, v, w)
+
+            self._frames[index] = frame
+
+        return frame
 
     def _update_figure(self):
         """
@@ -1113,7 +1113,7 @@ class Model3DWidget(qtw.QWidget):
 
         # update the 3D model
         for track, values in frame.items():
-
+            """
             if track == "Marker3D":
                 for lbl, vals in values.items():
                     if self._marker3D[lbl] is None:
@@ -1126,7 +1126,7 @@ class Model3DWidget(qtw.QWidget):
                             self._marker3D[lbl]._visible = True
                         else:
                             self._marker3D[lbl]._visible = False
-
+            """
             if track == "ForcePlatform3D":
                 for lbl, vals in values.items():
                     if self._force3D[lbl] is None:
@@ -1145,7 +1145,7 @@ class Model3DWidget(qtw.QWidget):
                     if self._link3D[lbl] is None:
                         if vals is not None:
                             ax = self._axis3D.plot(*vals, color="darkred")
-                            self._link3D[lbl] = ax
+                            self._link3D[lbl] = ax[0]
                             self._link3D[lbl].set_alpha(0.75)
                     else:
                         if vals is not None:
@@ -1158,7 +1158,8 @@ class Model3DWidget(qtw.QWidget):
                 for lbl, vals in values.items():
                     if self._text3D[lbl] is None:
                         if vals is not None:
-                            ax = self._axis3D.text(*vals)
+                            x, y, z = vals
+                            ax = self._axis3D.text(x, y, z, lbl)
                             self._text3D[lbl] = ax
                             self._text3D[lbl].set_alpha(0.5)
                     else:
