@@ -4,6 +4,7 @@
 #! IMPORTS
 
 import os
+from threading import Thread
 import warnings
 import numpy as np
 import pandas as pd
@@ -644,16 +645,16 @@ class Model3DWidget(qtw.QWidget):
     _is_running = False
     _figure = None
     _axis3D = None
-    _emgSignals = {}
     _marker3D = {}
     _force3D = {}
     _link3D = {}
     _text3D = {}
     _force3D_sclr = 1
-    _emg_vertical_lines = []
+    _emg = []
     _dpi = 300
     _actual_frame = None
     _frames = None
+    _threads = {}
 
     def __init__(self, model, parent=None):
         """
@@ -730,6 +731,18 @@ class Model3DWidget(qtw.QWidget):
         layout.addWidget(commands_widget)
         self.setLayout(layout)
         self.setGraphicsEffect(opacity_zero)
+
+        # set the threads
+        self._threads = {}
+        if self.model.has_Marker3D():
+            self._threads["Marker3D"] = Thread(target=self._update_markers)
+        if self.model.has_ForcePlatform3D():
+            th = Thread(target=self._update_forces)
+            self._threads["ForcePlatform3D"] = th
+        if self.model.has_Link3D():
+            self._threads["Link3D"] = Thread(target=self._update_links)
+        if self.model.has_EmgSensor():
+            self._threads["EmgSensor"] = Thread(target=self._update_emgs)
 
     def append(self, **objs):
         """
@@ -873,26 +886,11 @@ class Model3DWidget(qtw.QWidget):
             cols = 1
         grid = GridSpec(rows, cols)
         self._figure = pl.figure(dpi=self._dpi)
-
-        # handle the 3D data
-        df = self.model.stack().groupby("Sensor")
-        ss = []
-        sensors3D = ["Marker3D", "ForcePlatform3D", "Link3D"]
-        for i in sensors3D:
-            try:
-                ss += [df.get_group(i)]
-            except KeyError:
-                pass
-        df = pd.concat(ss, axis=0)
-        df = df.dropna(axis=0, inplace=False, how="all")
+        self._figure.tight_layout(rect=(0.025, 0.025, 1, 0.975))
 
         # generate the 3D axis
-        labels = df.groupby(["Sensor"])
-        groups = list(labels.groups.keys())
-        groups = [i for i in groups if i in ["Marker3D", "ForcePlatform3D"]]
-        labels = pd.concat([labels.get_group(i) for i in groups], axis=0)
-        labels = np.unique(labels["Label"].values.flatten())
-        if len(labels) > 0:
+        df0 = self.model.stack()
+        if self.model.has_ForcePlatform3D() or self.model.has_Marker3D():
 
             # generate the axis
             self._axis3D = self._figure.add_subplot(
@@ -910,10 +908,10 @@ class Model3DWidget(qtw.QWidget):
 
             # set the axis limits
             if self.model.has_Marker3D():
-                edges = df.groupby("Sensor").get_group("Marker3D")
+                edges = df0.loc[df0.isin({"Sensor": ["Marker3D"]}).any(1)]
             else:
-                edges = df.groupby(["Sensor", "Source"])
-                edges = edges.get_group(("ForcePlatform3D", "origin"))
+                idx = {"Sensor": ["ForcePlatform3D"], "Source": ["origin"]}
+                edges = df0.loc[df0[["Sensor", "Source"]].isin(idx).all(1)]
             edges = edges["Amplitude"].values.flatten()
             maxc = max(0, np.nanmax(edges))
             minc = min(0, np.nanmin(edges))
@@ -924,33 +922,71 @@ class Model3DWidget(qtw.QWidget):
             # force amplitude scaler
             if self.model.has_ForcePlatform3D():
                 max_range = maxc - minc
-                amp = df.groupby(["Sensor", "Source"])
-                amp = amp.get_group(("ForcePlatform3D", "amplitude"))
+                idx = {"Sensor": ["ForcePlatform3D"], "Source": ["amplitude"]}
+                amp = df0.loc[df0[["Sensor", "Source"]].isin(idx).all(1)]
                 amplitude = np.nanmax(amp["Amplitude"].values.flatten())
                 self._force3D_sclr = max_range / amplitude
 
-        # get the (empty) frames
-        self._data = df.groupby(["Time"])
-        times = list(self._data.groups.keys())
-        sensors = df.groupby(["Sensor"])
-        frame = {}
-        for sensor in sensors3D:
-            if any([i == sensor for i in list(sensors.groups.keys())]):
-                trc = sensors.get_group(sensor)["Label"].values.flatten()
-                trc = {i: None for i in np.unique(trc)}
-            else:
-                trc = {}
-            frame[sensor] = trc
-        frame["Text3D"] = {i: None for i in labels}
-        self._frames = []
-        for i, t in enumerate(times):
-            frm = frame.copy()
-            frm["Time"] = t
-            self._frames += [frm]
+        # set the text objects
+        df1 = df0.isin({"Sensor": ["Marker3D", "ForcePlatform3D"]}).any(1)
+        df1 = df0.loc[df1]
+        self._text3D = {}
+        for label in np.unique(df1["Label"].values.flatten()):
+            ax = self._axis3D.text(0, 0, 0, label, alpha=0.5)
+            self._text3D[label] = ax
+
+        # set the link objects
+        self._link3D = {}
+        df1 = df0.loc[df0.isin({"Sensor": ["Link3D"]}).any(1)]
+        for label in np.unique(df1["Label"].values.flatten()):
+            ax = self._axis3D.plot(
+                [0, 0],
+                [0, 0],
+                [0, 0],
+                alpha=0.7,
+                color="darkred",
+            )
+            self._link3D[label] = ax[0]
+
+        # set the markers objects
+        self._marker3D = {}
+        df1 = df0.loc[df0.isin({"Sensor": ["Marker3D"]}).any(1)]
+        for label in np.unique(df1["Label"].values.flatten()):
+            ax = self._axis3D.scatter(
+                0,
+                0,
+                0,
+                alpha=1.0,
+                color="navy",
+            )
+            self._marker3D[label] = ax
+
+        # set the force platform objects
+        self._force3D = {}
+        df1 = df0.loc[df0.isin({"Sensor": ["ForcePlatform3D"]}).any(1)]
+        for label in np.unique(df1["Label"].values.flatten()):
+            self._force3D[label] = self._axis3D.quiver(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                color="darkgreen",
+                alpha=0.7,
+            )
+
+        # get the time and frames
+        self._data = df0.groupby(["Time", "Sensor", "Source"])
+        idx = {"Sensor": ["ForcePlatform3D", "Marker3D", "Link3D"]}
+        times = df0.loc[df0.isin(idx).any(1)]["Time"].values.flatten()
+        self._times = np.unique(times)
+        self._frames = np.arange(len(self._times))
         self._actual_frame = 0
 
-        # populate the EMG data
-        self._emgSignals = {}
+        # add the emg data
+        self._emg = {}
+        emg_axes = []
         if self.model.has_EmgSensor():
             n = len(self.model.EmgSensor)
             for i, s in enumerate(self.model.EmgSensor):
@@ -985,8 +1021,7 @@ class Model3DWidget(qtw.QWidget):
 
                 # share the x axis
                 if i > 0:
-                    lbl = list(self._emgSignals.keys())[0]
-                    ax.get_shared_x_axes().join(self._emgSignals[lbl], ax)
+                    ax.get_shared_x_axes().join(emg_axes[0], ax)
                     ax.set_xticklabels([])
 
                 # adjust the layout
@@ -1001,178 +1036,112 @@ class Model3DWidget(qtw.QWidget):
                 # plot the vertical lines
                 x_line = [times[0], times[0]]
                 y_line = [np.min(amplitude), np.max(amplitude)]
-                vline = ax.plot(x_line, y_line, "--", linewidth=0.5)
-                self._emg_vertical_lines += vline
+                self._emg[s] = ax.plot(x_line, y_line, "--", linewidth=0.5)[0]
 
-                # store the axis data
-                self._emgSignals[s] = ax
-
-        # reset the 3D data
-        self._marker3D = frame["Marker3D"].copy()
-        self._force3D = frame["ForcePlatform3D"].copy()
-        self._link3D = frame["Link3D"].copy()
-        self._text3D = frame["Text3D"].copy()
+                # update the emg axes
+                emg_axes += [ax]
 
         # update the slider
         self.slider.setMaximum(len(self._frames) - 1)
 
-        # update the actual figure
-        self._figure.tight_layout(rect=(0.025, 0.025, 1, 0.975))
+        # update the figure
         self._update_figure()
 
-    def _get_frame(self, index):
+    def _get_source(self, df):
         """
-        return the required frame.
+        extract the values from a specific source.
 
         Parameters
         ----------
-        index: int
-            the index corresponding to the wanted frame.
+        data: DataFrame
+            the data from which the info have to be extracted.
 
         Returns
         -------
-        frame: dict
-            the data resulting from the required frame.
+        x, y, z, labels: array-like
+            4 arrays containing the data of the source.
         """
-        frame = self._frames[index]
-        calculated = True
-        for i, k in frame.items():
-            if i != "Time":
-                for j in k.values():
-                    if j is None:
-                        calculated = False
-                        break
-        if not calculated:
+        dd = df.pivot("Label", "Dimension", "Amplitude")
+        xs, ys, zs = dd.values.T
+        ts = dd.index.to_numpy()
+        return xs, ys, zs, ts
 
-            def get_source(data, src):
-                dd = data.get_group(src)
-                dd = dd.pivot("Label", "Dimension", "Amplitude")
-                xs, ys, zs = dd.values.T
-                ts = dd.index.to_numpy()
-                return xs, ys, zs, ts
+    def _update_markers(self):
+        """
+        function used to read the markers contained at a specific time instant.
+        """
+        time = self._times[self._actual_frame]
+        df = self._data.get_group((time, "Marker3D", "coordinates"))
+        xs, ys, zs, ts = self._get_source(df)
+        for x, y, z, t in zip(xs, ys, zs, ts):
+            if np.any(np.isnan([x, y, z])):
+                self._text3D[t]._visible = False
+                self._marker3D[t]._visible = False
+            else:
+                self._text3D[t]._visible = True
+                self._text3D[t]._x = x
+                self._text3D[t]._y = y
+                self._text3D[t]._z = z
+                self._marker3D[t]._visible = True
+                self._marker3D[t]._offsets3d = (x, y, z)
 
-            # get the output frame
-            df1 = self._data.get_group(frame["Time"]).groupby("Sensor")
-            for sensor in list(df1.groups.keys()):
-                df2 = df1.get_group(sensor).groupby("Source")
+    def _update_links(self):
+        """
+        function used to read the links contained at a specific time instant.
+        """
+        time = self._times[self._actual_frame]
+        df0 = self._data.get_group((time, "Link3D", "p0"))
+        df1 = self._data.get_group((time, "Link3D", "p1"))
+        x0, y0, z0, ts = self._get_source(df0)
+        x1, y1, z1, _ = self._get_source(df1)
+        xs = np.vstack([x0, x1]).T
+        ys = np.vstack([y0, y1]).T
+        zs = np.vstack([z0, z1]).T
+        for x, y, z, t in zip(xs, ys, zs, ts):
+            if np.any(np.isnan(np.concatenate([x, y, z]))):
+                self._link3D[t]._visible = False
+            else:
+                self._link3D[t]._visible = True
+                self._link3D[t].set_data_3d(x, y, z)
 
-                if sensor == "Link3D":
-                    x0, y0, z0, ts = get_source(df2, "p0")
-                    x1, y1, z1, _ = get_source(df2, "p1")
-                    xs = np.vstack([x0, x1]).T
-                    ys = np.vstack([y0, y1]).T
-                    zs = np.vstack([z0, z1]).T
-                    for x, y, z, t in zip(xs, ys, zs, ts):
-                        if np.any(np.isnan([x, y, z])):
-                            frame["Link3D"][t] = None
-                        else:
-                            frame["Link3D"][t] = (x, y, z)
+    def _update_forces(self):
+        """
+        function used to read the forces contained at a specific time instant.
+        """
+        time = self._times[self._actual_frame]
+        ori = self._data.get_group((time, "ForcePlatform3D", "origin"))
+        amp = self._data.get_group((time, "ForcePlatform3D", "origin"))
+        xs, ys, zs, ts = self._get_source(ori)
+        us, vs, ws, _ = self._get_source(amp)
+        for x, y, z, u, v, w, t in zip(xs, ys, zs, us, vs, ws, ts):
+            if np.any(np.isnan(np.concatenate([x, y, z, u, v, w]))):
+                self._force3D[t]._visible = False
+                self._text3D[t]._visible = False
+            else:
+                self._force3D[t]._visible = True
+                self._force3D[t].set_data_3d(x, y, z, u, v, z)
+                self._text3D[t]._visible = True
+                self._text3D[t]._x = x
+                self._text3D[t]._y = y
+                self._text3D[t]._z = z
 
-                if sensor == "Marker3D":
-                    xs, ys, zs, ts = get_source(df2, "coordinates")
-                    for x, y, z, t in zip(xs, ys, zs, ts):
-                        if np.any(np.isnan([x, y, z])):
-                            frame["Text3D"][t] = None
-                            frame["Marker3D"][t] = None
-                        else:
-                            frame["Text3D"][t] = (x, y, z)
-                            frame["Marker3D"][t] = (x, y, z)
-
-                if sensor == "ForcePlatform3D":
-                    xs, ys, zs, ts = get_source(df2, "origin")
-                    us, vs, ws, _ = get_source(df2, "amplitude")
-                    xs, ys, zs = np.meshgrid(xs, ys, zs)
-                    us, vs, ws = np.meshgrid(us, vs, ws) * self._force_sclr
-                    for x, y, z, u, v, w, t in zip(xs, ys, zs, us, vs, ws, ts):
-                        if np.any(np.isnan([x, y, z, u, v, w])):
-                            frame["Text3D"][t] = None
-                            frame["Force3D"][t] = None
-                        else:
-                            j = (x + u) * 0.5
-                            k = (y + v) * 0.5
-                            l = (z + w) * 0.5
-                            frame["Text3D"][t] = (j, k, l)
-                            frame["Force3D"][t] = (x, y, z, u, v, w)
-
-            self._frames[index] = frame
-
-        return frame
+    def _update_emgs(self):
+        """
+        function used to read the emg contained at a specific time instant.
+        """
+        time = self._times[self._actual_frame]
+        for i in self._emg:
+            self._emg[i].set_xdata([time, time])
 
     def _update_figure(self):
         """
         update the actual rendered figure.
         """
-
-        # get the actual frame
-        frame = self._get_frame(self._actual_frame)
-
-        # update the EMG plots
-        time = frame["Time"]
-        for i in range(len(self._emg_vertical_lines)):
-            self._emg_vertical_lines[i].set_xdata([time, time])
-
-        # update the 3D model
-        for track, values in frame.items():
-            """
-            if track == "Marker3D":
-                for lbl, vals in values.items():
-                    if self._marker3D[lbl] is None:
-                        if vals is not None:
-                            ax = self._axis3D.scatter(*vals, color="navy")
-                            self._marker3D[lbl] = ax
-                    else:
-                        if vals is not None:
-                            self._marker3D[lbl]._offsets3d = vals
-                            self._marker3D[lbl]._visible = True
-                        else:
-                            self._marker3D[lbl]._visible = False
-            """
-            if track == "ForcePlatform3D":
-                for lbl, vals in values.items():
-                    if self._force3D[lbl] is None:
-                        if vals is not None:
-                            ax = self._axis3D.quiver(*vals, color="darkgreen")
-                            self._force3D[lbl] = ax
-                    else:
-                        if vals is not None:
-                            self._force3D[lbl]._offsets3d = vals
-                            self._force3D[lbl]._visible = True
-                        else:
-                            self._force3D[lbl]._visible = False
-
-            if track == "Link3D":
-                for lbl, vals in values.items():
-                    if self._link3D[lbl] is None:
-                        if vals is not None:
-                            ax = self._axis3D.plot(*vals, color="darkred")
-                            self._link3D[lbl] = ax[0]
-                            self._link3D[lbl].set_alpha(0.75)
-                    else:
-                        if vals is not None:
-                            self._link3D[lbl].set_data_3d(*vals)
-                            self._link3D[lbl]._visible = True
-                        else:
-                            self._link3D[lbl]._visible = False
-
-            if track == "Text3D":
-                for lbl, vals in values.items():
-                    if self._text3D[lbl] is None:
-                        if vals is not None:
-                            x, y, z = vals
-                            ax = self._axis3D.text(x, y, z, lbl)
-                            self._text3D[lbl] = ax
-                            self._text3D[lbl].set_alpha(0.5)
-                    else:
-                        if vals is not None:
-                            x, y, z = vals
-                            self._text3D[lbl]._x = x
-                            self._text3D[lbl]._y = y
-                            self._text3D[lbl]._z = z
-                            self._text3D[lbl]._visible = True
-                        else:
-                            self._text3D[lbl]._visible = False
+        for t in self._threads:
+            self._threads[t].start()
 
         # update the timer
+        time = self._times[self._actual_frame]
         minutes = time // 60000
         seconds = (time - minutes * 60000) // 1000
         msec = time - minutes * 60000 - seconds * 1000
