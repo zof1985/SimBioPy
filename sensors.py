@@ -919,7 +919,7 @@ class Model3DWidget(qtw.QWidget):
                 self._text3D[t]._y = y
                 self._text3D[t]._z = z
                 self._marker3D[t]._visible = True
-                self._marker3D[t]._offsets3d = (x, y, z)
+                self._marker3D[t]._offsets3d = ([x], [y], [z])
 
     def _update_links(self):
         """
@@ -948,7 +948,7 @@ class Model3DWidget(qtw.QWidget):
         ori = self._data.get_group((time, "ForcePlatform3D", "origin"))
         amp = self._data.get_group((time, "ForcePlatform3D", "origin"))
         xs, ys, zs, ts = self._get_source(ori)
-        us, vs, ws, _ = self._get_source(amp)
+        us, vs, ws, _ = self._get_source(amp * self._force3D_sclr)
         for x, y, z, u, v, w, t in zip(xs, ys, zs, us, vs, ws, ts):
             if np.any(np.isnan(np.concatenate([x, y, z, u, v, w]))):
                 self._force3D[t]._visible = False
