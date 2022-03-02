@@ -641,7 +641,7 @@ class Model3DWidget(qtw.QWidget):
     _font_size = 12
     _button_size = 75
     _play_timer = None
-    _update_rate = 1  # msec
+    _update_rate = 10  # msec
     _is_running = False
     _figure = None
     _axis3D = None
@@ -654,7 +654,7 @@ class Model3DWidget(qtw.QWidget):
     _dpi = 300
     _actual_frame = None
     _frames = None
-    _threads = {}
+    _threads = []
 
     def __init__(self, model, parent=None):
         """
@@ -666,10 +666,6 @@ class Model3DWidget(qtw.QWidget):
         txt = "model must be a Model3D instance."
         assert isinstance(model, Model3D), txt
         self.model = model
-
-        # timer
-        self._play_timer = qtc.QTimer()
-        self._play_timer.timeout.connect(self._move_forward)
 
         # path to the package folder
         self._path = os.path.sep.join([os.getcwd(), "simbiopy"])
@@ -694,9 +690,10 @@ class Model3DWidget(qtw.QWidget):
 
         # slider
         self.slider = qtw.QSlider(qtc.Qt.Horizontal)
-        self.slider.setMinimum = 0
+        self.slider.setValue(0)
+        self.slider.setMinimum(0)
         self.slider.setTickInterval(1)
-        self.slider.valueChanged.connect(self._update_slider)
+        self.slider.valueChanged.connect(self._slider_moved)
 
         # time label
         self.time_label = qtw.QLabel("00:00.000")
@@ -719,9 +716,6 @@ class Model3DWidget(qtw.QWidget):
         opacity_zero.setOpacity(0)
         commands_widget.setGraphicsEffect(opacity_zero)
 
-        # update the figure
-        self._update_data()
-
         # image pane
         self.canvas = FigureCanvasQTAgg(self._figure)
 
@@ -732,17 +726,34 @@ class Model3DWidget(qtw.QWidget):
         self.setLayout(layout)
         self.setGraphicsEffect(opacity_zero)
 
-        # set the threads
-        self._threads = {}
+        # update the figure
+        self._update_data()
+
+        # figure updaters
         if self.model.has_Marker3D():
-            self._threads["Marker3D"] = Thread(target=self._update_markers)
+            t_markers = qtc.QTimer()
+            t_markers.timeout.connect(self._update_markers)
+            self._threads += [t_markers]
         if self.model.has_ForcePlatform3D():
-            th = Thread(target=self._update_forces)
-            self._threads["ForcePlatform3D"] = th
+            t_forces = qtc.QTimer()
+            t_forces.timeout.connect(self._update_forces)
+            self._threads += [t_forces]
         if self.model.has_Link3D():
-            self._threads["Link3D"] = Thread(target=self._update_links)
+            t_links = qtc.QTimer()
+            t_links.timeout.connect(self._update_links)
+            self._threads += [t_links]
         if self.model.has_EmgSensor():
-            self._threads["EmgSensor"] = Thread(target=self._update_emgs)
+            t_emgs = qtc.QTimer()
+            t_emgs.timeout.connect(self._update_emgs)
+            self._threads += [t_emgs]
+        t_timer = qtc.QTimer()
+        t_timer.timeout.connect(self._update_timer)
+        self._threads += [t_timer]
+        self._play_timer = qtc.QTimer()
+        self._play_timer.timeout.connect(self._move_forward)
+        for t in self._threads:
+            t.start()
+        self._update_figure()
 
     def append(self, **objs):
         """
@@ -865,12 +876,109 @@ class Model3DWidget(qtw.QWidget):
         self._stop_player()
         self._move_backward()
 
-    def _update_slider(self):
+    def _slider_moved(self):
         """
         event handler for the slider value update.
         """
         self._actual_frame = self.slider.value()
         self._update_figure()
+
+    def _get_source(self, df):
+        """
+        extract the values from a specific source.
+
+        Parameters
+        ----------
+        data: DataFrame
+            the data from which the info have to be extracted.
+
+        Returns
+        -------
+        x, y, z, labels: array-like
+            4 arrays containing the data of the source.
+        """
+        dd = df.pivot("Label", "Dimension", "Amplitude")
+        xs, ys, zs = dd.values.T
+        ts = dd.index.to_numpy()
+        return xs, ys, zs, ts
+
+    def _update_markers(self):
+        """
+        function used to update the Marker3D data.
+        """
+        time = self._times[self._actual_frame]
+        df = self._data.get_group((time, "Marker3D", "coordinates"))
+        xs, ys, zs, ts = self._get_source(df)
+        for x, y, z, t in zip(xs, ys, zs, ts):
+            if np.any(np.isnan([x, y, z])):
+                self._text3D[t]._visible = False
+                self._marker3D[t]._visible = False
+            else:
+                self._text3D[t]._visible = True
+                self._text3D[t]._x = x
+                self._text3D[t]._y = y
+                self._text3D[t]._z = z
+                self._marker3D[t]._visible = True
+                self._marker3D[t]._offsets3d = (x, y, z)
+
+    def _update_links(self):
+        """
+        function used to update the Link3D data.
+        """
+        time = self._times[self._actual_frame]
+        df0 = self._data.get_group((time, "Link3D", "p0"))
+        df1 = self._data.get_group((time, "Link3D", "p1"))
+        x0, y0, z0, ts = self._get_source(df0)
+        x1, y1, z1, _ = self._get_source(df1)
+        xs = np.vstack([x0, x1]).T
+        ys = np.vstack([y0, y1]).T
+        zs = np.vstack([z0, z1]).T
+        for x, y, z, t in zip(xs, ys, zs, ts):
+            if np.any(np.isnan(np.concatenate([x, y, z]))):
+                self._link3D[t]._visible = False
+            else:
+                self._link3D[t]._visible = True
+                self._link3D[t].set_data_3d(x, y, z)
+
+    def _update_forces(self):
+        """
+        function used to update the ForcePlatform3D data.
+        """
+        time = self._times[self._actual_frame]
+        ori = self._data.get_group((time, "ForcePlatform3D", "origin"))
+        amp = self._data.get_group((time, "ForcePlatform3D", "origin"))
+        xs, ys, zs, ts = self._get_source(ori)
+        us, vs, ws, _ = self._get_source(amp)
+        for x, y, z, u, v, w, t in zip(xs, ys, zs, us, vs, ws, ts):
+            if np.any(np.isnan(np.concatenate([x, y, z, u, v, w]))):
+                self._force3D[t]._visible = False
+                self._text3D[t]._visible = False
+            else:
+                self._force3D[t]._visible = True
+                self._force3D[t].set_data_3d(x, y, z, u, v, z)
+                self._text3D[t]._visible = True
+                self._text3D[t]._x = x
+                self._text3D[t]._y = y
+                self._text3D[t]._z = z
+
+    def _update_emgs(self):
+        """
+        function used to update the emg data.
+        """
+        time = self._times[self._actual_frame]
+        for i in self._emg:
+            self._emg[i].set_xdata([time, time])
+
+    def _update_timer(self):
+        """
+        function used to update the timer.
+        """
+        time = self._times[self._actual_frame]
+        minutes = time // 60000
+        seconds = (time - minutes * 60000) // 1000
+        msec = time - minutes * 60000 - seconds * 1000
+        lbl = "{:02d}:{:02d}.{:03d}".format(minutes, seconds, msec)
+        self.time_label.setText(lbl)
 
     def _update_data(self):
         """
@@ -953,9 +1061,9 @@ class Model3DWidget(qtw.QWidget):
         df1 = df0.loc[df0.isin({"Sensor": ["Marker3D"]}).any(1)]
         for label in np.unique(df1["Label"].values.flatten()):
             ax = self._axis3D.scatter(
-                0,
-                0,
-                0,
+                [0],
+                [0],
+                [0],
                 alpha=1.0,
                 color="navy",
             )
@@ -966,12 +1074,12 @@ class Model3DWidget(qtw.QWidget):
         df1 = df0.loc[df0.isin({"Sensor": ["ForcePlatform3D"]}).any(1)]
         for label in np.unique(df1["Label"].values.flatten()):
             self._force3D[label] = self._axis3D.quiver(
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
+                [0],
+                [0],
+                [0],
+                [0],
+                [0],
+                [0],
                 color="darkgreen",
                 alpha=0.7,
             )
@@ -982,7 +1090,7 @@ class Model3DWidget(qtw.QWidget):
         times = df0.loc[df0.isin(idx).any(1)]["Time"].values.flatten()
         self._times = np.unique(times)
         self._frames = np.arange(len(self._times))
-        self._actual_frame = 0
+        self._actual_frame = self._frames[0]
 
         # add the emg data
         self._emg = {}
@@ -1044,109 +1152,9 @@ class Model3DWidget(qtw.QWidget):
         # update the slider
         self.slider.setMaximum(len(self._frames) - 1)
 
-        # update the figure
-        self._update_figure()
-
-    def _get_source(self, df):
-        """
-        extract the values from a specific source.
-
-        Parameters
-        ----------
-        data: DataFrame
-            the data from which the info have to be extracted.
-
-        Returns
-        -------
-        x, y, z, labels: array-like
-            4 arrays containing the data of the source.
-        """
-        dd = df.pivot("Label", "Dimension", "Amplitude")
-        xs, ys, zs = dd.values.T
-        ts = dd.index.to_numpy()
-        return xs, ys, zs, ts
-
-    def _update_markers(self):
-        """
-        function used to read the markers contained at a specific time instant.
-        """
-        time = self._times[self._actual_frame]
-        df = self._data.get_group((time, "Marker3D", "coordinates"))
-        xs, ys, zs, ts = self._get_source(df)
-        for x, y, z, t in zip(xs, ys, zs, ts):
-            if np.any(np.isnan([x, y, z])):
-                self._text3D[t]._visible = False
-                self._marker3D[t]._visible = False
-            else:
-                self._text3D[t]._visible = True
-                self._text3D[t]._x = x
-                self._text3D[t]._y = y
-                self._text3D[t]._z = z
-                self._marker3D[t]._visible = True
-                self._marker3D[t]._offsets3d = (x, y, z)
-
-    def _update_links(self):
-        """
-        function used to read the links contained at a specific time instant.
-        """
-        time = self._times[self._actual_frame]
-        df0 = self._data.get_group((time, "Link3D", "p0"))
-        df1 = self._data.get_group((time, "Link3D", "p1"))
-        x0, y0, z0, ts = self._get_source(df0)
-        x1, y1, z1, _ = self._get_source(df1)
-        xs = np.vstack([x0, x1]).T
-        ys = np.vstack([y0, y1]).T
-        zs = np.vstack([z0, z1]).T
-        for x, y, z, t in zip(xs, ys, zs, ts):
-            if np.any(np.isnan(np.concatenate([x, y, z]))):
-                self._link3D[t]._visible = False
-            else:
-                self._link3D[t]._visible = True
-                self._link3D[t].set_data_3d(x, y, z)
-
-    def _update_forces(self):
-        """
-        function used to read the forces contained at a specific time instant.
-        """
-        time = self._times[self._actual_frame]
-        ori = self._data.get_group((time, "ForcePlatform3D", "origin"))
-        amp = self._data.get_group((time, "ForcePlatform3D", "origin"))
-        xs, ys, zs, ts = self._get_source(ori)
-        us, vs, ws, _ = self._get_source(amp)
-        for x, y, z, u, v, w, t in zip(xs, ys, zs, us, vs, ws, ts):
-            if np.any(np.isnan(np.concatenate([x, y, z, u, v, w]))):
-                self._force3D[t]._visible = False
-                self._text3D[t]._visible = False
-            else:
-                self._force3D[t]._visible = True
-                self._force3D[t].set_data_3d(x, y, z, u, v, z)
-                self._text3D[t]._visible = True
-                self._text3D[t]._x = x
-                self._text3D[t]._y = y
-                self._text3D[t]._z = z
-
-    def _update_emgs(self):
-        """
-        function used to read the emg contained at a specific time instant.
-        """
-        time = self._times[self._actual_frame]
-        for i in self._emg:
-            self._emg[i].set_xdata([time, time])
-
     def _update_figure(self):
         """
         update the actual rendered figure.
         """
-        for t in self._threads:
-            self._threads[t].start()
-
-        # update the timer
-        time = self._times[self._actual_frame]
-        minutes = time // 60000
-        seconds = (time - minutes * 60000) // 1000
-        msec = time - minutes * 60000 - seconds * 1000
-        lbl = "{:02d}:{:02d}.{:03d}".format(minutes, seconds, msec)
-        self.time_label.setText(lbl)
-
-        # update the figure
         self._figure.canvas.draw()
+        self._figure.canvas.flush_events()
