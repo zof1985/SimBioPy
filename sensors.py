@@ -919,7 +919,7 @@ class Model3DWidget(qtw.QWidget):
                 self._text3D[t]._y = y
                 self._text3D[t]._z = z
                 self._marker3D[t]._visible = True
-                self._marker3D[t]._offsets3d = ([x], [y], [z])
+                self._marker3D[t].set_data_3d(x, y, z)
 
     def _update_links(self):
         """
@@ -1060,14 +1060,15 @@ class Model3DWidget(qtw.QWidget):
         self._marker3D = {}
         df1 = df0.loc[df0.isin({"Sensor": ["Marker3D"]}).any(1)]
         for label in np.unique(df1["Label"].values.flatten()):
-            ax = self._axis3D.scatter(
-                [0],
-                [0],
-                [0],
+            ax = self._axis3D.plot(
+                0,
+                0,
+                0,
+                marker="o",
                 alpha=1.0,
                 color="navy",
             )
-            self._marker3D[label] = ax
+            self._marker3D[label] = ax[0]
 
         # set the force platform objects
         self._force3D = {}
