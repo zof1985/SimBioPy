@@ -629,7 +629,6 @@ class Model3DWidget(qtw.QWidget):
 
     # class objects
     model = None
-    canvas = None
     slider = None
     time_label = None
     play_button = None
@@ -643,7 +642,8 @@ class Model3DWidget(qtw.QWidget):
     _play_timer = None
     _update_rate = 10  # msec
     _is_running = False
-    _figure = None
+    _model3D = None
+    _figureEMG = None
     _axis3D = None
     _marker3D = {}
     _force3D = {}
@@ -670,6 +670,23 @@ class Model3DWidget(qtw.QWidget):
         # path to the package folder
         self._path = os.path.sep.join([os.getcwd(), "simbiopy"])
 
+        # get the time and frames
+        idx = {"Sensor": ["ForcePlatform3D", "Marker3D", "Link3D"]}
+        self._data = self.model.stack()
+        idx = self._data.isin(idx).any(1).values.flatten()
+        if len(idx) > 0:
+            self._times = np.unique(self._data.loc[idx]["Time"].values.flatten())
+        else:
+            self._times = np.unique(self._data["Time"].values.flatten())
+        self._actual_frame = 0
+        frame = {
+            "Marker3D": None,
+            "ForcePlatform3D": None,
+            "Link3D": None,
+            "EmgSensor": None,
+        }
+        self.frames = {i: frame.copy() for i in self._times}
+
         # buttons
         self.backward_button = self._render_button(
             icon=os.path.sep.join([self._path, "icons", "backward.png"]),
@@ -692,6 +709,7 @@ class Model3DWidget(qtw.QWidget):
         self.slider = qtw.QSlider(qtc.Qt.Horizontal)
         self.slider.setValue(0)
         self.slider.setMinimum(0)
+        self.slider.setMaximum(len(self.frames) - 1)
         self.slider.setTickInterval(1)
         self.slider.valueChanged.connect(self._slider_moved)
 
@@ -716,12 +734,185 @@ class Model3DWidget(qtw.QWidget):
         opacity_zero.setOpacity(0)
         commands_widget.setGraphicsEffect(opacity_zero)
 
+        # make the EMG pane
+        if self.model.has_EmgSensor():
+
+            # figure
+            rows = len(self.model.EmgSensor)
+            grid = GridSpec(rows, 1)
+            self._figureEMG = pl.figure(dpi=self._dpi)
+            self._figureEMG.tight_layout()
+            self.canvasEMG = FigureCanvasQTAgg(self._figureEMG)
+
+            # add the emg data
+            self._emg = {}
+            emg_axes = []
+            for i, s in enumerate(self.model.EmgSensor):
+
+                # plot the whole EMG signal
+                ax = self._figureEMG.add_subplot(grid[rows - 1 - i])
+                obj = self.model.EmgSensor[s].amplitude
+                obj = obj.dropna()
+                time = obj.index.to_numpy()
+                amplitude = obj.values.flatten()
+                ax.plot(time, amplitude, linewidth=0.6)
+
+                # plot the title within the figure box
+                xt = time[0]
+                yt = (np.max(amplitude) - np.min(amplitude)) * 1.05
+                yt += np.min(amplitude)
+                ax.text(xt, yt, s.upper(), fontweight="bold")
+
+                # set the x-axis limits and bounds
+                time_rng = self._times[-1] - self._times[0]
+                x_off = time_rng * 0.05
+                ax.set_xlim(self._times[0] - x_off, self._times[-1] + x_off)
+                ax.spines["bottom"].set_bounds(np.min(time), np.max(time))
+
+                # set the y-axis limits
+                amplitude_range = np.max(amplitude) - np.min(amplitude)
+                y_off = amplitude_range * 0.05
+                y_min = np.min(amplitude)
+                y_max = np.max(amplitude)
+                ax.set_ylim(y_min - y_off, y_max + y_off)
+                ax.spines["left"].set_bounds(y_min, y_max)
+
+                # share the x axis
+                if i > 0:
+                    ax.get_shared_x_axes().join(emg_axes[0], ax)
+                    ax.set_xticklabels([])
+
+                # adjust the layout
+                ax.spines["right"].set_visible(False)
+                ax.spines["top"].set_visible(False)
+                if i == 0:
+                    ax.set_xlabel("TIME", weight="bold")
+                else:
+                    ax.spines["bottom"].set_visible(False)
+                    ax.xaxis.set_ticks([])
+
+                # update the emg axes
+                emg_axes += [ax]
+
+                # plot the vertical lines
+                x_line = [self._times[0], self._times[0]]
+                y_line = [np.min(amplitude), np.max(amplitude)]
+                self._emg[s] = ax.plot(x_line, y_line, "--", linewidth=0.5)[0]
+
+            # prepare the emg vertical lines at each frame
+            t = Thread(target=self._read_emg)
+            t.start()
+
+        else:
+
+            # generate an empty widget
+            self.canvasEMG = qtw.QWidget()
+
+        # create the 3D model pane
+        if self.model.has_ForcePlatform3D() or self.model.has_Marker3D():
+
+            # generate the axis
+            self._figure3D = pl.figure(dpi=self._dpi)
+            self._figure3D.tight_layout()
+            axis3D = self._figure3D.add_subplot(projection="3d")
+
+            # set the layout
+            axis3D.view_init(elev=10, azim=45)
+            axis3D.set_xlabel("X", weight="bold")
+            axis3D.set_ylabel("Y", weight="bold")
+            axis3D.set_zlabel("Z", weight="bold")
+
+            # set the axis limits
+            if self.model.has_Marker3D():
+                edges = self._data.loc[self._data.isin({"Sensor": ["Marker3D"]}).any(1)]
+            else:
+                idx = {"Sensor": ["ForcePlatform3D"], "Source": ["origin"]}
+                edges = self._data.loc[
+                    self._data[["Sensor", "Source"]].isin(idx).all(1)
+                ]
+            edges = edges["Amplitude"].values.flatten()
+            maxc = max(0, np.nanmax(edges))
+            minc = min(0, np.nanmin(edges))
+            axis3D.set_xlim(minc, maxc)
+            axis3D.set_ylim(minc, maxc)
+            axis3D.set_zlim(minc, maxc)
+
+            # force amplitude scaler
+            if self.model.has_ForcePlatform3D():
+                max_range = maxc - minc
+                idx = {"Sensor": ["ForcePlatform3D"], "Source": ["amplitude"]}
+                amp = self._data.loc[self._data[["Sensor", "Source"]].isin(idx).all(1)]
+                amplitude = np.nanmax(amp["Amplitude"].values.flatten())
+                force3D_sclr = max_range / amplitude
+            else:
+                force3D_sclr = 1
+
+            # set the text objects
+            df1 = self._data.isin({"Sensor": ["Marker3D", "ForcePlatform3D"]}).any(1)
+            df1 = self._data.loc[df1]
+            self._text3D = {}
+            for label in np.unique(df1["Label"].values.flatten()):
+                ax = axis3D.text(0, 0, 0, label, alpha=0.5)
+                self._text3D[label] = ax
+
+            # set the markers objects
+            self._marker3D = {}
+            df1 = self._data.loc[self._data.isin({"Sensor": ["Marker3D"]}).any(1)]
+            for label in np.unique(df1["Label"].values.flatten()):
+                ax = axis3D.plot(
+                    0,
+                    0,
+                    0,
+                    marker="o",
+                    alpha=1.0,
+                    color="navy",
+                )
+                self._marker3D[label] = ax[0]
+            t_marker = Thread(target=self._read_marker)
+            t_marker.start()
+
+            # set the link objects
+            self._link3D = {}
+            df1 = self._data.loc[self._data.isin({"Sensor": ["Link3D"]}).any(1)]
+            for label in np.unique(df1["Label"].values.flatten()):
+                ax = axis3D.plot(
+                    [0, 0],
+                    [0, 0],
+                    [0, 0],
+                    alpha=0.7,
+                    color="darkred",
+                )
+                self._link3D[label] = ax[0]
+            t_link = Thread(target=self._read_link)
+            t_link.start()
+
+            # set the force platform objects
+            self._force3D = {}
+            df1 = self._data.loc[
+                self._data.isin({"Sensor": ["ForcePlatform3D"]}).any(1)
+            ]
+            for label in np.unique(df1["Label"].values.flatten()):
+                self._force3D[label] = axis3D.quiver(
+                    [0],
+                    [0],
+                    [0],
+                    [0],
+                    [0],
+                    [0],
+                    color="darkgreen",
+                    alpha=0.7,
+                )
+
         # image pane
-        self.canvas = FigureCanvasQTAgg(self._figure)
+        splitter = qtw.QSplitter(qtc.Qt.Vertical)
+        self.model3D = FigureCanvasQTAgg(self._model3D)
+        self.canvasEMG = FigureCanvasQTAgg(self._figureEMG)
+        splitter.addWidget(self.model3D)
+        splitter.addWidget(self.canvasEMG)
 
         # widget layout
         layout = qtw.QVBoxLayout()
-        layout.addWidget(self.canvas)
+        layout.addWidget(splitter)
         layout.addWidget(commands_widget)
         self.setLayout(layout)
         self.setGraphicsEffect(opacity_zero)
@@ -755,17 +946,75 @@ class Model3DWidget(qtw.QWidget):
             t.start()
         self._update_figure()
 
-    def append(self, **objs):
+    def _get_source(self, df):
         """
-        append named objects to this model.
+        extract the values from a specific source.
 
         Parameters
         ----------
-        objs: keyword-named sensor
-            any object being instance of the Sensor class.
+        data: DataFrame
+            the data from which the info have to be extracted.
+
+        Returns
+        -------
+        x, y, z, labels: array-like
+            4 arrays containing the data of the source.
         """
-        self.model.append(**objs)
-        self._update_data()
+        dd = df.pivot("Label", "Dimension", "Amplitude")
+        xs, ys, zs = dd.values.T
+        ts = dd.index.to_numpy()
+        return xs, ys, zs, ts
+
+    def _read_emg(self):
+        """
+        function used to get the positions to be updated on the rendered
+        time frame.
+        """
+        for time in self._times:
+            x_data = [time, time]
+            vals = {i: x_data for i in self._emg}
+            self.frames[time]["EmgSensor"] = vals
+
+    def _read_marker(self):
+        """
+        function used to get the positions to be updated on the rendered
+        time frame.
+        """
+        df0 = self._data.groupby(["Time", "Sensor", "Source"])
+        for time in self._times:
+            time = self._times[self._actual_frame]
+            df = df0.get_group((time, "Marker3D", "coordinates"))
+            xs, ys, zs, ts = self._get_source(df)
+            self.frames[time]["Text3D"] = {}
+            self.frames[time]["Marker3D"] = {}
+            for x, y, z, t in zip(xs, ys, zs, ts):
+                if np.any(np.isnan([x, y, z])):
+                    self.frames[time]["Text3D"][t] = None
+                    self.frames[time]["Marker3D"][t] = None
+                else:
+                    self.frames[time]["Text3D"][t] = (x, y, z)
+                    self.frames[time]["Marker3D"][t] = (x, y, z)
+
+    def _read_link(self):
+        """
+        function used to get the positions to be updated on the rendered
+        time frame.
+        """
+        df = self._data.groupby(["Time", "Sensor", "Source"])
+        for time in self._times:
+            df0 = df.get_group((time, "Link3D", "p0"))
+            df1 = df.get_group((time, "Link3D", "p1"))
+            x0, y0, z0, ts = self._get_source(df0)
+            x1, y1, z1, _ = self._get_source(df1)
+            xs = np.vstack([x0, x1]).T
+            ys = np.vstack([y0, y1]).T
+            zs = np.vstack([z0, z1]).T
+            self.frames[time]["Link3D"] = {}
+            for x, y, z, t in zip(xs, ys, zs, ts):
+                if np.any(np.isnan(np.concatenate([x, y, z]))):
+                    self.frames[time]["Link3D"][t] = None
+                else:
+                    self.frames[time]["Link3D"][t] = (x, y, z)
 
     def is_running(self):
         """
@@ -883,25 +1132,6 @@ class Model3DWidget(qtw.QWidget):
         self._actual_frame = self.slider.value()
         self._update_figure()
 
-    def _get_source(self, df):
-        """
-        extract the values from a specific source.
-
-        Parameters
-        ----------
-        data: DataFrame
-            the data from which the info have to be extracted.
-
-        Returns
-        -------
-        x, y, z, labels: array-like
-            4 arrays containing the data of the source.
-        """
-        dd = df.pivot("Label", "Dimension", "Amplitude")
-        xs, ys, zs = dd.values.T
-        ts = dd.index.to_numpy()
-        return xs, ys, zs, ts
-
     def _update_markers(self):
         """
         function used to update the Marker3D data.
@@ -993,15 +1223,15 @@ class Model3DWidget(qtw.QWidget):
         else:
             cols = 1
         grid = GridSpec(rows, cols)
-        self._figure = pl.figure(dpi=self._dpi)
-        self._figure.tight_layout(rect=(0.025, 0.025, 1, 0.975))
+        self._model3D = pl.figure(dpi=self._dpi)
+        self._model3D.tight_layout(rect=(0.025, 0.025, 1, 0.975))
 
         # generate the 3D axis
         df0 = self.model.stack()
         if self.model.has_ForcePlatform3D() or self.model.has_Marker3D():
 
             # generate the axis
-            self._axis3D = self._figure.add_subplot(
+            self._axis3D = self._model3D.add_subplot(
                 grid[:, :2],
                 projection="3d",
             )
@@ -1101,7 +1331,7 @@ class Model3DWidget(qtw.QWidget):
             for i, s in enumerate(self.model.EmgSensor):
 
                 # plot the whole EMG signal
-                ax = self._figure.add_subplot(grid[n - 1 - i, cols - 1])
+                ax = self._model3D.add_subplot(grid[n - 1 - i, cols - 1])
                 obj = self.model.EmgSensor[s].amplitude
                 obj = obj.dropna()
                 time = obj.index.to_numpy()
@@ -1157,5 +1387,5 @@ class Model3DWidget(qtw.QWidget):
         """
         update the actual rendered figure.
         """
-        self._figure.canvas.draw()
-        self._figure.canvas.flush_events()
+        self._model3D.canvas.draw()
+        self._model3D.canvas.flush_events()
