@@ -11,7 +11,7 @@ from .geometry import *
 #! CLASSES
 
 
-class _Sensor:
+class Sensor:
     """
     general class containing just methods defining that the GeometricObject is
     also a Sensor.
@@ -21,7 +21,7 @@ class _Sensor:
         pass
 
 
-class Marker3D(Point, _Sensor):
+class Marker3D(Point, Sensor):
     """
     generate a 3D object reflecting a marker collected over time in a 3D space.
 
@@ -48,7 +48,7 @@ class Marker3D(Point, _Sensor):
         super(Marker3D, self).__init__(coordinates=amp, unit=unit)
 
 
-class ForcePlatform3D(GeometricObject, _Sensor):
+class ForcePlatform3D(GeometricObject, Sensor):
     """
     generate a 3D object reflecting a force platform whose data have been
     collected over time in a 3D space.
@@ -149,7 +149,7 @@ class ForcePlatform3D(GeometricObject, _Sensor):
         )
 
 
-class Link3D(Segment, _Sensor):
+class Link3D(Segment, Sensor):
     """
     Generate an object reflecting a dimension-less vector in a n-dimensional
     space.
@@ -177,7 +177,7 @@ class Link3D(Segment, _Sensor):
         super(Link3D, self).__init__(p0=v0, p1=v1)
 
 
-class EmgSensor(GeometricMathObject, _Sensor):
+class EmgSensor(GeometricMathObject, Sensor):
     """
     Generate a n-channels EMG sensor instance.
 
@@ -284,7 +284,7 @@ class EmgSensor(GeometricMathObject, _Sensor):
         return EmgSensor(amplitude=self.amplitude @ val)
 
 
-class Imu3D(GeometricMathObject, _Sensor):
+class Imu3D(GeometricMathObject, Sensor):
     """
     generate a 3D object reflecting an Inertial Measurement Unit
     whose data have been collected over time in a 3D space.

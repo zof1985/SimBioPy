@@ -81,7 +81,7 @@ class Model3D:
 
         # check the input data
         txt = "obj must be a Sensor instance."
-        assert isinstance(obj, _Sensor), txt
+        assert isinstance(obj, Sensor), txt
         assert isinstance(name, str), "name must be a string."
 
         # ensure the object will be stored according to its class
