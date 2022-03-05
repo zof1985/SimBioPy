@@ -8,6 +8,7 @@ from io import BufferedReader
 from typing import Tuple
 from .sensors import *
 from .geometry import *
+from .models import *
 import os
 import struct
 import numpy as np
