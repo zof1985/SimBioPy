@@ -346,19 +346,32 @@ class FigureAnimator:
 class ToolButtonWidget(qtw.QToolButton):
     """
     QToolButton subsclass allowing to include a slider.
+
+    Parameters
+    ----------
+    expand_to: str
+        a string denoting the expansion direction of the popup.
+        Any of: ["top", "down", "up", "bottom"].
+
+    parent: QWidget (optional)
+        the parent widget.
     """
 
+    valid_directions = ["top", "down", "up", "bottom"]
     container = None
 
-    def __init__(self, parent=None):
+    def __init__(self, direction="top", parent=None):
         """
         constructor
         """
+
+        # create the object
         super().__init__(parent)
         self.container = qtw.QWidget()
         self.container.setWindowFlags(qtc.Qt.FramelessWindowHint)
         self.container.setWindowModality(qtc.Qt.NonModal)
         self.container.installEventFilter(self)
+        self.setDirection(direction)
 
     @property
     def globalButtonLoc(self):
@@ -385,6 +398,16 @@ class ToolButtonWidget(qtw.QToolButton):
         """
         return self.mapToGlobal(self.parent.rect())
 
+    def setDirection(self, direction):
+        """
+        set the direction for the popup.
+        """
+        # check the input
+        txt = "expand to must be any of {}".format(self.valid_directions)
+        assert isinstance(direction, str), txt
+        assert direction in self.valid_directions, txt
+        self.direction = direction
+
     def isIn(self):
         """
         check whether the mouse is inside the slider/button region.
@@ -400,7 +423,24 @@ class ToolButtonWidget(qtw.QToolButton):
     def enterEvent(self, event):
         if self.container.layout() is not None:
             if not self.container.isVisible():
-                self.container.move(self.globalContainerLoc)
+                butRect = self.rect()
+                cntRect = self.container.rect()
+
+                if self.direction in ["top", "up"]:
+                    loc = (butRect.topLeft() + butRect.topRight()) / 2
+                    loc -= (cntRect.bottomRight() + cntRect.bottomLeft()) / 2
+
+                elif self.direction in ["bottom", "down"]:
+                    loc = (butRect.bottomLeft() + butRect.bottomRight()) / 2
+                    loc -= (cntRect.topRight() + cntRect.topLeft()) / 2
+
+                else:
+                    raise KeyError
+
+                globalParent = self.parent().rect()
+                globalParent = globalParent.translated(self.globalButtonLoc)
+                loc = self.mapToGlobal(loc)
+                self.container.move(loc)
                 self.container.setVisible(True)
 
     def leaveEvent(self, event):
@@ -941,12 +981,13 @@ class Model3DWidget(qtw.QWidget):
         commands_bar.setStyleSheet("spacing: 10px;")
 
         # add the home function
-        self.home_button = self._make_toggle(
+        self.home_button = self._command_button(
             tip="Reset the view to default.",
             icon=os.path.sep.join([self._path, "icons", "home.png"]),
             enabled=True,
             checkable=False,
             fun=self._home_pressed,
+            parent=self,
         )
         commands_bar.addWidget(self.home_button)
 
@@ -954,52 +995,57 @@ class Model3DWidget(qtw.QWidget):
         commands_bar.addSeparator()
 
         # function show/hide markers
-        self.marker_button = self._make_toggle(
+        self.marker_button = self._command_button(
             tip="Show/Hide the Marker3D objects.",
             icon=os.path.sep.join([self._path, "icons", "markers.png"]),
             enabled=model.has_Marker3D(),
             checkable=True,
             fun=self._update_figure,
+            parent=self,
         )
         commands_bar.addWidget(self.marker_button)
 
         # function show/hide forces function
-        self.force_button = self._make_toggle(
+        self.force_button = self._command_button(
             tip="Show/Hide the ForcePlatform3D objects.",
             icon=os.path.sep.join([self._path, "icons", "forces.png"]),
             enabled=model.has_ForcePlatform3D(),
             checkable=True,
             fun=self._update_figure,
+            parent=self,
         )
         commands_bar.addWidget(self.force_button)
 
         # function show/hide links function
-        self.link_button = self._make_toggle(
+        self.link_button = self._command_button(
             tip="Show/Hide the Link3D objects.",
             icon=os.path.sep.join([self._path, "icons", "links.png"]),
             enabled=model.has_Link3D(),
             checkable=True,
             fun=self._update_figure,
+            parent=self,
         )
         commands_bar.addWidget(self.link_button)
 
         # function show/hide labels function
-        self.text_button = self._make_toggle(
+        self.text_button = self._command_button(
             tip="Show/Hide the labels.",
             icon=os.path.sep.join([self._path, "icons", "txt.png"]),
             enabled=model.has_ForcePlatform3D() | model.has_Marker3D(),
             checkable=True,
             fun=self._update_figure,
+            parent=self,
         )
         commands_bar.addWidget(self.text_button)
 
         # function show/hide reference function
-        self.ref_button = self._make_toggle(
+        self.ref_button = self._command_button(
             tip="Show/Hide the reference frame.",
             icon=os.path.sep.join([self._path, "icons", "reference.png"]),
             enabled=True,
             checkable=True,
             fun=self._reference_checked,
+            parent=self,
         )
         commands_bar.addWidget(self.ref_button)
 
@@ -1007,45 +1053,75 @@ class Model3DWidget(qtw.QWidget):
         commands_bar.addSeparator()
 
         # add the move backward function
-        self.backward_button = self._make_toggle(
+        self.backward_button = self._command_button(
             tip="Move backward by 1 frame.",
             icon=os.path.sep.join([self._path, "icons", "backward.png"]),
             enabled=True,
             checkable=False,
             fun=self._backward_pressed,
+            parent=self,
         )
+        self.backward_button.setAutoRepeat(True)
         commands_bar.addWidget(self.backward_button)
 
         # add the play/pause function
-        self.play_button = self._make_toggle(
+        self.play_button = self._command_button(
             tip="Play/Pause.",
             icon=os.path.sep.join([self._path, "icons", "play.png"]),
             enabled=True,
             checkable=False,
             fun=self._play_pressed,
+            parent=self,
         )
         commands_bar.addWidget(self.play_button)
 
         # add the move forward function
-        self.forward_button = self._make_toggle(
+        self.forward_button = self._command_button(
             tip="Move forward by 1 frame.",
             icon=os.path.sep.join([self._path, "icons", "forward.png"]),
             enabled=True,
             checkable=False,
             fun=self._forward_pressed,
+            parent=self,
         )
+        self.forward_button.setAutoRepeat(True)
         commands_bar.addWidget(self.forward_button)
 
         # add another separator
         commands_bar.addSeparator()
 
+        # speed controller
+        self.play_speed_slider = qtw.QSlider()
+        self.play_speed_slider.setMinimum(1)
+        self.play_speed_slider.setMaximum(200)
+        self.play_speed_slider.setTickInterval(1)
+        self.play_speed_slider.setValue(100)
+        self.play_speed_slider.valueChanged.connect(self._speed_slider_moved)
+
+        play_speed_layout = qtw.QVBoxLayout()
+        play_speed_layout.addWidget(self.play_speed_slider)
+
+        self.speed_button = self._command_button(
+            tip="Player speed.",
+            icon=None,
+            enabled=True,
+            checkable=False,
+            fun=None,
+            parent=self,
+        )
+        self.speed_button.setLayout(play_speed_layout)
+        self.speed_button.setToolButtonStyle(qtg.Qt.ToolButtonTextOnly)
+        self.speed_button.setText("100%")
+        commands_bar.addWidget(self.speed_button)
+
         # add the loop function
-        self.repeat_button = self._make_toggle(
+        self.repeat_button = self._command_button(
             tip="Loop the frames.",
             icon=os.path.sep.join([self._path, "icons", "repeat.png"]),
             enabled=True,
             checkable=True,
             fun=None,
+            parent=self,
         )
         commands_bar.addWidget(self.repeat_button)
 
@@ -1075,18 +1151,17 @@ class Model3DWidget(qtw.QWidget):
         commands_bar.addSeparator()
 
         # set the option pane button
-        self.option_button = self._make_toggle(
+        self.option_button = self._command_button(
             tip="Options.",
             icon=os.path.sep.join([self._path, "icons", "options.png"]),
             enabled=True,
             checkable=False,
             fun=None,
+            parent=self,
         )
         commands_bar.addWidget(self.option_button)
 
         # setup the option pane
-        self.play_speed_slider = None
-        self.play_speed_label = None
         self.marker_size_slider = None
         self.marker_size_label = None
         self.marker_color_button = None
@@ -1125,7 +1200,7 @@ class Model3DWidget(qtw.QWidget):
         """
         return self._is_running
 
-    def _make_toggle(self, tip, icon, enabled, checkable, fun):
+    def _command_button(self, tip, icon, enabled, checkable, fun, parent):
         """
         private method used to generate valid buttons for the command bar.
 
@@ -1151,10 +1226,11 @@ class Model3DWidget(qtw.QWidget):
         obj: qtw.QToolButton
             a novel ToolButton object.
         """
-        icon = qtg.QPixmap(icon)
-        icon = icon.scaled(self._button_size, self._button_size)
-        button = ToolButtonWidget()
-        button.setIcon(icon)
+        button = ToolButtonWidget(parent=parent)
+        if icon is not None:
+            icon = qtg.QPixmap(icon)
+            icon = icon.scaled(self._button_size, self._button_size)
+            button.setIcon(icon)
         button.setToolTip(tip)
         button.setEnabled(enabled)
         button.setCheckable(checkable)
@@ -1174,7 +1250,7 @@ class Model3DWidget(qtw.QWidget):
             if self.repeat_button.isChecked():
                 next_frame = 0
             else:
-                next_frame = frame
+                next_frame = self.slider.maximum()
         self.slider.setValue(next_frame)
 
     def _move_backward(self):
@@ -1187,7 +1263,7 @@ class Model3DWidget(qtw.QWidget):
             if self.repeat_button.isChecked():
                 next_frame = self.slider.maximum()
             else:
-                next_frame = frame
+                next_frame = 0
         self.slider.setValue(next_frame)
 
     def _start_player(self):
@@ -1222,6 +1298,8 @@ class Model3DWidget(qtw.QWidget):
         player event handler
         """
         lapsed = (get_time() - self._play_start_time) * 1000 + self._times[0]
+        speed = float(self.speed_button.text()[:-1]) / 100
+        lapsed = lapsed * speed
         if lapsed > self._times[-1] - self._times[0]:
             if self.repeat_button.isChecked():
                 self._play_start_time = get_time()
@@ -1373,3 +1451,10 @@ class Model3DWidget(qtw.QWidget):
         self.slider.setValue(0)
         self._figure3D.canvas.draw()
         self._figureEMG.canvas.draw()
+
+    def _speed_slider_moved(self):
+        """
+        adjust the player speed.
+        """
+        txt = "{:03d}%".format(self.play_speed_slider.value())
+        self.speed_button.setText(txt)
