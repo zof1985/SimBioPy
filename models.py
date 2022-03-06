@@ -15,6 +15,7 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib import use as matplotlib_use
 from mpl_toolkits import mplot3d
+from scipy.spatial.transform import Rotation
 from .utils import *
 from .geometry import *
 from .sensors import *
@@ -30,6 +31,7 @@ pl.rc("xtick", labelsize=3)  # fontsize of the x tick labels
 pl.rc("ytick", labelsize=3)  # fontsize of the y tick labels
 pl.rc("legend", fontsize=3)  # legend fontsize
 pl.rc("figure", titlesize=3)  # fontsize of the figure title
+pl.rc("figure", autolayout=True)
 
 
 #! CLASSES
@@ -341,26 +343,142 @@ class FigureAnimator:
         self.figure.canvas.flush_events()
 
 
+class ToolButtonWidget(qtw.QToolButton):
+    """
+    QToolButton subsclass allowing to include a slider.
+    """
+
+    container = None
+
+    def __init__(self, parent=None):
+        """
+        constructor
+        """
+        super().__init__(parent)
+        self.container = qtw.QWidget()
+        self.container.setWindowFlags(qtc.Qt.FramelessWindowHint)
+        self.container.setWindowModality(qtc.Qt.NonModal)
+        self.container.installEventFilter(self)
+
+    @property
+    def globalButtonLoc(self):
+        """
+        return the rect representing the button
+        """
+        return self.mapToGlobal(self.rect().bottomLeft())
+
+    @property
+    def globalContainerLoc(self):
+        """
+        return the rect representing the button
+        """
+        button = self.rect()
+        container = self.container.rect()
+        but = (button.topLeft() + button.topRight()) / 2
+        cnt = (container.bottomLeft() + container.bottomRight()) / 2
+        return self.mapToGlobal(but - cnt)
+
+    @property
+    def globalParentLoc(self):
+        """
+        return the rect representing the button
+        """
+        return self.mapToGlobal(self.parent.rect())
+
+    def isIn(self):
+        """
+        check whether the mouse is inside the slider/button region.
+        """
+        buttonRect = self.rect().translated(self.globalButtonLoc)
+        pos = qtg.QCursor.pos()
+        if not self.container.isVisible():
+            return buttonRect.contains(pos)
+        region = qtg.QRegion(buttonRect)
+        region |= qtg.QRegion(self.container.geometry())
+        return region.contains(pos)
+
+    def enterEvent(self, event):
+        if self.container.layout() is not None:
+            if not self.container.isVisible():
+                self.container.move(self.globalContainerLoc)
+                self.container.setVisible(True)
+
+    def leaveEvent(self, event):
+        if not self.isIn():
+            self.container.setVisible(False)
+
+    def eventFilter(self, source, event):
+        if source == self.container and event.type() == event.Leave:
+            if not self.isIn():
+                self.container.setVisible(False)
+        return super().eventFilter(source, event)
+
+    def setLayout(self, layout):
+        """
+        set the layout of the container.
+        """
+        self.container.setLayout(layout)
+
+
 class Model3DWidget(qtw.QWidget):
     """
     renderer for a 3D Model.
+
+    Parameters
+    ----------
+    model: simbiopy.models.Model3D
+        the model to be visualized
+
+    vertical_axis: str
+        the label of the dimension corresponding to the vertical axis.
+
+    parent: PySide2.QtWidgets.QWidget
+        the parent widget
     """
 
-    # class objects
+    # options
+    play_speed_slider = None
+    play_speed_label = None
+    marker_size_slider = None
+    marker_size_label = None
+    marker_color_button = None
+    force_size_slider = None
+    force_size_label = None
+    force_color_button = None
+    link_size_slider = None
+    link_size_label = None
+    link_color_button = None
+    text_size_slider = None
+    text_size_label = None
+    text_color_button = None
+    ref_size_slider = None
+    ref_size_label = None
+    ref_color_button = None
+    emg_size_slider = None
+    emg_size_label = None
+    emg_color_button = None
+    emg_vert_size_slider = None
+    emg_vert_size_label = None
+    emg_vert_color_button = None
+
+    # class variables
     dpi = 300
     data = None
     slider = None
+    canvas3D = None
+    canvasEMG = None
     time_label = None
+    home_button = None
+    option_button = None
     play_button = None
     forward_button = None
     backward_button = None
     repeat_button = None
-    canvasEMG = None
-    navigationBarEMG = None
-    canvas3D = None
-    navigationBar3D = None
-    labels_checkbox = None
-    reference_checkbox = None
+    marker_button = None
+    force_button = None
+    link_button = None
+    text_button = None
+    ref_button = None
 
     # private variables
     _times = None
@@ -370,23 +488,34 @@ class Model3DWidget(qtw.QWidget):
     _update_rate = 1  # msec
     _is_running = False
     _figure3D = None
-    _figureEMG = None
     _axis3D = None
+    _figureEMG = None
     _axisEMG = None
     _Marker3D = {}
     _ForcePlatform3D = {}
     _Link3D = {}
     _Text3D = {}
+    _ReferenceFrame3D = {}
     _EmgSensor = {}
     _force3D_sclr = 1
     _actual_frame = None
     _FigureAnimator3D = None
     _FigureAnimatorEMG = None
     _play_start_time = None
-    _reference_frame = None
     _path = None
+    _init_view = {"elev": 10, "azim": 45, "vertical_axis": 2}
+    _limits = None
+    _marker_color = (1, 0, 0, 1)
+    _force_color = (0, 1, 0, 0.7)
+    _link_color = (0, 0, 1, 0.7)
+    _reference_color = (0, 0.5, 0.5, 0.7)
 
-    def __init__(self, model, parent=None):
+    def __init__(
+        self,
+        model,
+        vertical_axis: str = "Y",
+        parent: qtw.QWidget = None,
+    ):
         """
         constructor
         """
@@ -398,6 +527,9 @@ class Model3DWidget(qtw.QWidget):
 
         # path to the package folder
         self._path = os.path.sep.join([os.getcwd(), "simbiopy"])
+
+        # set the actual frame
+        self._actual_frame = 0
 
         # get the time indices
         df0 = model.stack()
@@ -424,7 +556,8 @@ class Model3DWidget(qtw.QWidget):
                     pp = dd.loc[dd.isin([l]).any(1)]
                     pp = pp.pivot(["Time", "Label"], "Dimension", "Amplitude")
                     cols = pp.columns.to_numpy()
-                    pp.columns = pd.Index(["{}{}".format(i, l[1]) for i in cols])
+                    idx = ["{}{}".format(i, l[1]) for i in cols]
+                    pp.columns = pd.Index(idx)
                     out += [pp]
                 out = pd.concat(out, axis=1)
 
@@ -462,56 +595,6 @@ class Model3DWidget(qtw.QWidget):
             raise ValueError("No valid data have been found in 'model'.")
         self.data = dfs
 
-        # buttons
-        self.backward_button = self._render_button(
-            icon=os.path.sep.join([self._path, "icons", "backward.png"]),
-            event_handler=self._backward_pressed,
-        )
-        self.play_button = self._render_button(
-            icon=os.path.sep.join([self._path, "icons", "play.png"]),
-            event_handler=self._play_pressed,
-        )
-        self.forward_button = self._render_button(
-            icon=os.path.sep.join([self._path, "icons", "forward.png"]),
-            event_handler=self._forward_pressed,
-        )
-        self.repeat_button = self._render_button(
-            icon=os.path.sep.join([self._path, "icons", "repeat.png"]),
-        )
-        self.repeat_button.setCheckable(True)
-
-        # slider
-        self.slider = qtw.QSlider(qtc.Qt.Horizontal)
-        self.slider.setValue(0)
-        self.slider.setMinimum(0)
-        self.slider.setMaximum(len(self._times) - 1)
-        self.slider.setTickInterval(1)
-        self.slider.valueChanged.connect(self._slider_moved)
-        self.slider.setFixedHeight(self._button_size)
-
-        # set the timer for the player
-        self._play_timer = qtc.QTimer()
-        self._play_timer.timeout.connect(self._player)
-
-        # time label
-        self.time_label = qtw.QLabel("00:00.000")
-        self.time_label.setFont(qtg.QFont("Arial", self._font_size))
-        self.time_label.setFixedHeight(self._button_size)
-        self.time_label.setFixedWidth(110)
-        self.time_label.setAlignment(qtc.Qt.AlignCenter)
-
-        # commands widget
-        commands_layout = qtw.QHBoxLayout()
-        commands_layout.addWidget(self.backward_button)
-        commands_layout.addWidget(self.play_button)
-        commands_layout.addWidget(self.forward_button)
-        commands_layout.addWidget(self.repeat_button)
-        commands_layout.addWidget(self.time_label)
-        commands_layout.addWidget(self.slider)
-        commands_widget = qtw.QWidget()
-        commands_widget.setLayout(commands_layout)
-        commands_widget.setFixedHeight(self._button_size * 1.5)
-
         # make the EMG pane
         if model.has_EmgSensor():
 
@@ -519,9 +602,13 @@ class Model3DWidget(qtw.QWidget):
             rows = len(self.data["EmgSensor"])
             grid = GridSpec(rows, 1)
             self._figureEMG = pl.figure(dpi=self.dpi)
-            self._figureEMG.tight_layout()
             self.canvasEMG = FigureCanvasQTAgg(self._figureEMG)
-            self.canvasEMG.setAutoFillBackground(True)
+
+            # resizing event handler
+            self._figureEMG.canvas.mpl_connect(
+                "resize_event",
+                self._resize_event,
+            )
 
             # add the emg data
             self._EmgSensor = {}
@@ -547,6 +634,7 @@ class Model3DWidget(qtw.QWidget):
                 x_off = time_rng * 0.05
                 ax.set_xlim(self._times[0] - x_off, self._times[-1] + x_off)
                 ax.spines["bottom"].set_bounds(np.min(time), np.max(time))
+                ax.spines["bottom"].set_linewidth(0.5)
 
                 # set the y-axis limits and bounds
                 amplitude_range = np.max(amplitude) - np.min(amplitude)
@@ -555,6 +643,7 @@ class Model3DWidget(qtw.QWidget):
                 y_max = np.max(amplitude)
                 ax.set_ylim(y_min - y_off, y_max + y_off)
                 ax.spines["left"].set_bounds(y_min, y_max)
+                ax.spines["left"].set_linewidth(0.5)
 
                 # share the x axis
                 if i > 0:
@@ -569,6 +658,15 @@ class Model3DWidget(qtw.QWidget):
                 else:
                     ax.spines["bottom"].set_visible(False)
                     ax.xaxis.set_ticks([])
+
+                # set the ticks params
+                ax.tick_params(
+                    direction="out",
+                    length=1,
+                    width=0.5,
+                    colors="k",
+                    pad=1,
+                )
 
                 # update the emg axes
                 emg_axes += [ax]
@@ -595,23 +693,42 @@ class Model3DWidget(qtw.QWidget):
             # generate an empty widget
             self.canvasEMG = qtw.QWidget()
 
+        # check the vertical axis input
+        if any([i == "Marker3D" for i in list(dfs.keys())]):
+            dim = list(dfs["Marker3D"].values())[0].columns.to_numpy()
+        else:
+            dim = list(dfs["ForcePlatform3D"].values())[0].columns.to_numpy()
+        txt = "vertical_axis not found in model."
+        assert vertical_axis.upper() in dim, txt
+        self._init_view["vertical_axis"] = vertical_axis.lower()
+
         # create the 3D model pane
         if model.has_ForcePlatform3D() or model.has_Marker3D():
 
             # generate the axis
             self._figure3D = pl.figure(dpi=self.dpi)
-            self._figure3D.tight_layout()
             self.canvas3D = FigureCanvasQTAgg(self._figure3D)
-            self.canvas3D.setAutoFillBackground(True)
-            self._axis3D = self._figure3D.add_subplot(projection="3d")
+            self._axis3D = self._figure3D.add_subplot(
+                projection="3d",
+                proj_type="ortho",  # 'persp'
+                adjustable="box",  # 'datalim'
+                facecolor=(1, 1, 1, 0),
+                frame_on=False,
+            )
 
-            # set the pane view
-            self._axis3D.view_init(elev=10, azim=45)
+            # set the view
+            self._axis3D.view_init(**self._init_view)
+
+            # resizing event handler
+            self._figure3D.canvas.mpl_connect(
+                "resize_event",
+                self._resize_event,
+            )
 
             # make the panes transparent
-            self._axis3D.xaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
-            self._axis3D.yaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
-            self._axis3D.zaxis.set_pane_color((1.0, 1.0, 1.0, 0.0))
+            self._axis3D.xaxis.set_pane_color((1, 1, 1, 0))
+            self._axis3D.yaxis.set_pane_color((1, 1, 1, 0))
+            self._axis3D.zaxis.set_pane_color((1, 1, 1, 0))
 
             # make the axis lines transparent
             self._axis3D.xaxis.line.set_color((1, 1, 1, 0))
@@ -635,54 +752,99 @@ class Model3DWidget(qtw.QWidget):
                 edges = [v for v in self.data["ForcePlatform3D"].values()]
                 edges = [v.values[:, :3] for v in edges]
             edges = np.concatenate(edges, axis=0)
-            maxc = max(0, np.nanmax(edges))
-            minc = min(0, np.nanmin(edges))
+            maxc = max(0, np.nanmax(edges) * 1.5)
+            minc = min(0, np.nanmin(edges) * 1.5)
             self._axis3D.set_xlim(minc, maxc)
             self._axis3D.set_ylim(minc, maxc)
             self._axis3D.set_zlim(minc, maxc)
 
-            # generate the reference frame
-            self._reference_frame = [
-                self._axis3D.quiver(
-                    np.array([0, 0, 0]),
-                    np.array([0, 0, 0]),
-                    np.array([0, 0, 0]),
-                    np.array([0.2, 0, 0]) * (maxc - minc),
-                    np.array([0, 0.2, 0]) * (maxc - minc),
-                    np.array([0, 0, 0.2]) * (maxc - minc),
-                    color="gold",
-                    animated=True,
-                    length=1,
-                    linewidth=0.5,
-                ),
-                self._axis3D.text(
-                    (maxc - minc) * 0.1,
-                    0,
-                    0,
-                    "X",
-                    size=3,
-                    color="gold",
-                    animated=True,
-                ),
-                self._axis3D.text(
-                    0,
-                    (maxc - minc) * 0.1,
-                    0,
-                    "Y",
-                    size=3,
-                    color="gold",
-                    animated=True,
-                ),
-                self._axis3D.text(
-                    0,
-                    0,
-                    (maxc - minc) * 0.1,
-                    "Z",
-                    size=3,
-                    color="gold",
-                    animated=True,
-                ),
-            ]
+            # set the initial limits
+            self._limits = (minc, maxc)
+
+            # plot the reference frame
+            self._ReferenceFrame3D = {
+                "X": {
+                    "Versor": self._axis3D.quiver(
+                        0,
+                        0,
+                        0,
+                        0.15 * (maxc - minc),
+                        0,
+                        0,
+                        color="gold",
+                        animated=True,
+                        length=1,
+                        linewidth=0.5,
+                        zorder=3,
+                    ),
+                    "Text": self._axis3D.text(
+                        0.2 * (maxc - minc),
+                        0,
+                        0,
+                        "X",
+                        size=3,
+                        color="red",
+                        animated=True,
+                        zorder=2,
+                        ha="center",
+                        va="center",
+                    ),
+                },
+                "Y": {
+                    "Versor": self._axis3D.quiver(
+                        0,
+                        0,
+                        0,
+                        0,
+                        0.15 * (maxc - minc),
+                        0,
+                        color="gold",
+                        animated=True,
+                        length=1,
+                        linewidth=0.5,
+                        zorder=3,
+                    ),
+                    "Text": self._axis3D.text(
+                        0,
+                        0.2 * (maxc - minc),
+                        0,
+                        "Y",
+                        size=3,
+                        color="red",
+                        animated=True,
+                        zorder=2,
+                        ha="center",
+                        va="center",
+                    ),
+                },
+                "Z": {
+                    "Versor": self._axis3D.quiver(
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0.15 * (maxc - minc),
+                        color="gold",
+                        animated=True,
+                        length=1,
+                        linewidth=0.5,
+                        zorder=3,
+                    ),
+                    "Text": self._axis3D.text(
+                        0,
+                        0,
+                        0.2 * (maxc - minc),
+                        "Z",
+                        size=3,
+                        color="red",
+                        animated=True,
+                        zorder=2,
+                        ha="center",
+                        va="center",
+                    ),
+                },
+            }
 
             # force amplitude scaler
             if model.has_ForcePlatform3D():
@@ -709,7 +871,7 @@ class Model3DWidget(qtw.QWidget):
                             0,
                             0,
                             0,
-                            l,
+                            "{:25s}".format(l),
                             alpha=1.0,
                             size=3,
                             animated=True,
@@ -733,7 +895,7 @@ class Model3DWidget(qtw.QWidget):
                             0,
                             0,
                             0,
-                            l,
+                            "{:25s}".format(l),
                             alpha=1.0,
                             size=3,
                             animated=True,
@@ -753,11 +915,12 @@ class Model3DWidget(qtw.QWidget):
                         )[0]
 
             # setup the Figure Animator
-            artists = [i for i in self._reference_frame]
-            artists += [i for i in self._Marker3D.values()]
+            artists = [i for i in self._Marker3D.values()]
             artists += [i for i in self._ForcePlatform3D.values()]
             artists += [i for i in self._Text3D.values()]
             artists += [i for i in self._Link3D.values()]
+            for ax in self._ReferenceFrame3D.values():
+                artists += [val for val in ax.values()]
             self._FigureAnimator3D = FigureAnimator(
                 figure=self._figure3D,
                 artists=artists,
@@ -768,44 +931,193 @@ class Model3DWidget(qtw.QWidget):
             # generate an empty widget
             self.canvas3D = qtw.QWidget()
 
-        # 3D pane
-        pane_3d = qtw.QWidget()
-        if self._figure3D is not None:
-
-            self.labels_checkbox = qtw.QCheckBox()
-            self.labels_checkbox.setChecked(True)
-            self.labels_checkbox.setText("Print Labels")
-            self.labels_checkbox.stateChanged.connect(self._update_figure)
-
-            self.reference_checkbox = qtw.QCheckBox()
-            self.reference_checkbox.setChecked(True)
-            self.reference_checkbox.setText("Show reference")
-            self.reference_checkbox.stateChanged.connect(self._update_reference)
-
-            top_bar = qtw.QWidget()
-            top_bar_layout = qtw.QHBoxLayout()
-            top_bar_layout.addWidget(self.reference_checkbox)
-            top_bar_layout.addWidget(self.labels_checkbox)
-            top_bar.setLayout(top_bar_layout)
-
-            pane_3d_layout = qtw.QVBoxLayout()
-            pane_3d_layout.addWidget(top_bar)
-            pane_3d_layout.addWidget(self.canvas3D)
-            pane_3d.setLayout(pane_3d_layout)
-
-        # image pane
+        # wrap the two figures into a splitted view
         splitter = qtw.QSplitter(qtc.Qt.Horizontal)
-        splitter.addWidget(pane_3d)
+        splitter.addWidget(self.canvas3D)
         splitter.addWidget(self.canvasEMG)
+
+        # create a commands bar
+        commands_bar = qtw.QToolBar()
+        commands_bar.setStyleSheet("spacing: 10px;")
+
+        # add the home function
+        self.home_button = self._make_toggle(
+            tip="Reset the view to default.",
+            icon=os.path.sep.join([self._path, "icons", "home.png"]),
+            enabled=True,
+            checkable=False,
+            fun=self._home_pressed,
+        )
+        commands_bar.addWidget(self.home_button)
+
+        # add a separator
+        commands_bar.addSeparator()
+
+        # function show/hide markers
+        self.marker_button = self._make_toggle(
+            tip="Show/Hide the Marker3D objects.",
+            icon=os.path.sep.join([self._path, "icons", "markers.png"]),
+            enabled=model.has_Marker3D(),
+            checkable=True,
+            fun=self._update_figure,
+        )
+        commands_bar.addWidget(self.marker_button)
+
+        # function show/hide forces function
+        self.force_button = self._make_toggle(
+            tip="Show/Hide the ForcePlatform3D objects.",
+            icon=os.path.sep.join([self._path, "icons", "forces.png"]),
+            enabled=model.has_ForcePlatform3D(),
+            checkable=True,
+            fun=self._update_figure,
+        )
+        commands_bar.addWidget(self.force_button)
+
+        # function show/hide links function
+        self.link_button = self._make_toggle(
+            tip="Show/Hide the Link3D objects.",
+            icon=os.path.sep.join([self._path, "icons", "links.png"]),
+            enabled=model.has_Link3D(),
+            checkable=True,
+            fun=self._update_figure,
+        )
+        commands_bar.addWidget(self.link_button)
+
+        # function show/hide labels function
+        self.text_button = self._make_toggle(
+            tip="Show/Hide the labels.",
+            icon=os.path.sep.join([self._path, "icons", "txt.png"]),
+            enabled=model.has_ForcePlatform3D() | model.has_Marker3D(),
+            checkable=True,
+            fun=self._update_figure,
+        )
+        commands_bar.addWidget(self.text_button)
+
+        # function show/hide reference function
+        self.ref_button = self._make_toggle(
+            tip="Show/Hide the reference frame.",
+            icon=os.path.sep.join([self._path, "icons", "reference.png"]),
+            enabled=True,
+            checkable=True,
+            fun=self._reference_checked,
+        )
+        commands_bar.addWidget(self.ref_button)
+
+        # add a separator
+        commands_bar.addSeparator()
+
+        # add the move backward function
+        self.backward_button = self._make_toggle(
+            tip="Move backward by 1 frame.",
+            icon=os.path.sep.join([self._path, "icons", "backward.png"]),
+            enabled=True,
+            checkable=False,
+            fun=self._backward_pressed,
+        )
+        commands_bar.addWidget(self.backward_button)
+
+        # add the play/pause function
+        self.play_button = self._make_toggle(
+            tip="Play/Pause.",
+            icon=os.path.sep.join([self._path, "icons", "play.png"]),
+            enabled=True,
+            checkable=False,
+            fun=self._play_pressed,
+        )
+        commands_bar.addWidget(self.play_button)
+
+        # add the move forward function
+        self.forward_button = self._make_toggle(
+            tip="Move forward by 1 frame.",
+            icon=os.path.sep.join([self._path, "icons", "forward.png"]),
+            enabled=True,
+            checkable=False,
+            fun=self._forward_pressed,
+        )
+        commands_bar.addWidget(self.forward_button)
+
+        # add another separator
+        commands_bar.addSeparator()
+
+        # add the loop function
+        self.repeat_button = self._make_toggle(
+            tip="Loop the frames.",
+            icon=os.path.sep.join([self._path, "icons", "repeat.png"]),
+            enabled=True,
+            checkable=True,
+            fun=None,
+        )
+        commands_bar.addWidget(self.repeat_button)
+
+        # add the time label
+        self.time_label = qtw.QLabel("00:00.000")
+        self.time_label.setFont(qtg.QFont("Arial", self._font_size))
+        self.time_label.setFixedHeight(self._button_size)
+        self.time_label.setFixedWidth(110)
+        self.time_label.setAlignment(qtc.Qt.AlignCenter)
+        commands_bar.addWidget(self.time_label)
+
+        # add the time slider
+        self.slider = qtw.QSlider(qtc.Qt.Horizontal)
+        self.slider.setValue(0)
+        self.slider.setMinimum(0)
+        self.slider.setMaximum(len(self._times) - 1)
+        self.slider.setTickInterval(1)
+        self.slider.valueChanged.connect(self._slider_moved)
+        self.slider.setFixedHeight(self._button_size)
+        commands_bar.addWidget(self.slider)
+
+        # set the timer for the player
+        self._play_timer = qtc.QTimer()
+        self._play_timer.timeout.connect(self._player)
+
+        # add another separator
+        commands_bar.addSeparator()
+
+        # set the option pane button
+        self.option_button = self._make_toggle(
+            tip="Options.",
+            icon=os.path.sep.join([self._path, "icons", "options.png"]),
+            enabled=True,
+            checkable=False,
+            fun=None,
+        )
+        commands_bar.addWidget(self.option_button)
+
+        # setup the option pane
+        self.play_speed_slider = None
+        self.play_speed_label = None
+        self.marker_size_slider = None
+        self.marker_size_label = None
+        self.marker_color_button = None
+        self.force_size_slider = None
+        self.force_size_label = None
+        self.force_color_button = None
+        self.link_size_slider = None
+        self.link_size_label = None
+        self.link_color_button = None
+        self.text_size_slider = None
+        self.text_size_label = None
+        self.text_color_button = None
+        self.ref_size_slider = None
+        self.ref_size_label = None
+        self.ref_color_button = None
+        self.emg_size_slider = None
+        self.emg_size_label = None
+        self.emg_color_button = None
+        self.emg_vert_size_slider = None
+        self.emg_vert_size_label = None
+        self.emg_vert_color_button = None
 
         # widget layout
         layout = qtw.QVBoxLayout()
         layout.addWidget(splitter)
-        layout.addWidget(commands_widget)
+        layout.addWidget(commands_bar)
         self.setLayout(layout)
 
-        # set the actual frame
-        self._actual_frame = 0
+        # set the starting view
+        self._home_pressed()
+        self._update_figure()
 
     def is_running(self):
         """
@@ -813,34 +1125,43 @@ class Model3DWidget(qtw.QWidget):
         """
         return self._is_running
 
-    def _render_button(self, icon, event_handler=None):
+    def _make_toggle(self, tip, icon, enabled, checkable, fun):
         """
-        private method used to generate valid buttons for this widget.
+        private method used to generate valid buttons for the command bar.
 
         Parameters
         ----------
         icon: str
             the path to the image used for the button
 
-        event_handler: function
-            the method to be passed as event handler for having the
-            button being pressed.
+        tip: str
+            a tip appearing pointing over the action
+
+        enabled: bool
+            should the button be enabled?
+
+        checkable: bool
+            should the button be checkable
+
+        fun: function
+            the button press handler.
 
         Returns
         -------
-        obj: qtw.QPushButton
-            a novel PushButton object.
+        obj: qtw.QToolButton
+            a novel ToolButton object.
         """
-        button = qtw.QPushButton("")
-        button.setFixedHeight(self._button_size)
-        button.setFixedWidth(self._button_size)
-        button.setFont(qtg.QFont("Arial", 0))
-        pixmap = qtg.QPixmap(icon)
-        pixmap = pixmap.scaled(self._button_size, self._button_size)
-        qicon = qtg.QIcon(pixmap)
-        button.setIcon(qicon)
-        if event_handler is not None:
-            button.clicked.connect(event_handler)
+        icon = qtg.QPixmap(icon)
+        icon = icon.scaled(self._button_size, self._button_size)
+        button = ToolButtonWidget()
+        button.setIcon(icon)
+        button.setToolTip(tip)
+        button.setEnabled(enabled)
+        button.setCheckable(checkable)
+        if checkable:
+            button.setChecked(True)
+        if fun is not None:
+            button.clicked.connect(fun)
         return button
 
     def _move_forward(self):
@@ -881,6 +1202,7 @@ class Model3DWidget(qtw.QWidget):
         pxmap = pxmap.scaled(self._button_size, self._button_size)
         icon = qtg.QIcon(pxmap)
         self.play_button.setIcon(icon)
+        self.play_button.setStatusTip("Pause.")
 
     def _stop_player(self):
         """
@@ -893,6 +1215,7 @@ class Model3DWidget(qtw.QWidget):
         pxmap = pxmap.scaled(self._button_size, self._button_size)
         icon = qtg.QIcon(pxmap)
         self.play_button.setIcon(icon)
+        self.play_button.setStatusTip("Play.")
 
     def _player(self):
         """
@@ -900,33 +1223,14 @@ class Model3DWidget(qtw.QWidget):
         """
         lapsed = (get_time() - self._play_start_time) * 1000 + self._times[0]
         if lapsed > self._times[-1] - self._times[0]:
-            self._play_start_time = get_time()
-            self.slider.setValue(0)
+            if self.repeat_button.isChecked():
+                self._play_start_time = get_time()
+                self.slider.setValue(0)
+            else:
+                self._stop_player()
+                self.slider.setValue(self.slider.maximum())
         else:
             self.slider.setValue(np.argmin(abs(self._times - lapsed)))
-
-    def _play_pressed(self):
-        """
-        method handling the play button press events.
-        """
-        if self.is_running():
-            self._stop_player()
-        else:
-            self._start_player()
-
-    def _forward_pressed(self):
-        """
-        method handling the forward button press events.
-        """
-        self._stop_player()
-        self._move_forward()
-
-    def _backward_pressed(self):
-        """
-        method handling the forward button press events.
-        """
-        self._stop_player()
-        self._move_backward()
 
     def _slider_moved(self):
         """
@@ -955,13 +1259,17 @@ class Model3DWidget(qtw.QWidget):
                 if sns == "ForcePlatform3D":
                     x, y, z, u, v, w, s = df.loc[time].values
                     self._ForcePlatform3D[t].set_data_3d(x, y, z, u, v, w)
-                    self._ForcePlatform3D[t]._alpha = s
                     self._Text3D[t]._x = x
                     self._Text3D[t]._y = y
                     self._Text3D[t]._z = z
-                    if self.labels_checkbox.isChecked():
-                        self._Text3D[t]._alpha = 1
+                    if self.force_button.isChecked():
+                        self._ForcePlatform3D[t]._alpha = s
+                        if self.text_button.isChecked():
+                            self._Text3D[t]._alpha = s
+                        else:
+                            self._Text3D[t]._alpha = 0
                     else:
+                        self._ForcePlatform3D[t]._alpha = 0
                         self._Text3D[t]._alpha = 0
 
                 elif sns == "Link3D":
@@ -971,18 +1279,25 @@ class Model3DWidget(qtw.QWidget):
                         np.array([y, v]),
                         np.array([z, w]),
                     )
-                    self._Link3D[t]._alpha = s
+                    if self.link_button.isChecked():
+                        self._Link3D[t]._alpha = s
+                    else:
+                        self._Link3D[t]._alpha = 0
 
                 elif sns == "Marker3D":
                     x, y, z, s = df.loc[time].values
                     self._Marker3D[t].set_data_3d(x, y, z)
-                    self._Marker3D[t]._alpha = s
                     self._Text3D[t]._x = x
                     self._Text3D[t]._y = y
                     self._Text3D[t]._z = z
-                    if self.labels_checkbox.isChecked():
-                        self._Text3D[t]._alpha = 1
+                    if self.marker_button.isChecked():
+                        self._Marker3D[t]._alpha = s
+                        if self.text_button.isChecked():
+                            self._Text3D[t]._alpha = s
+                        else:
+                            self._Text3D[t]._alpha = 0
                     else:
+                        self._Marker3D[t]._alpha = 0
                         self._Text3D[t]._alpha = 0
 
                 elif sns == "EmgSensor":
@@ -996,14 +1311,65 @@ class Model3DWidget(qtw.QWidget):
         if self._figureEMG is not None:
             self._FigureAnimatorEMG.update()
 
-    def _update_reference(self):
+    def _reference_checked(self):
         """
-        update the reference frame visibility.
+        handler for the reference button.
         """
-        # adjust the reference frame
-        for i in range(len(self._reference_frame)):
-            if self.reference_checkbox.isChecked():
-                self._reference_frame[i].set_color("gold")
+        # update the reference frame
+        for n in self._ReferenceFrame3D:
+            if self.ref_button.isChecked():
+                self._ReferenceFrame3D[n]["Text"].set_color("red")
+                self._ReferenceFrame3D[n]["Versor"].set_color("gold")
             else:
-                self._reference_frame[i].set_color((1, 1, 1, 0))
+                self._ReferenceFrame3D[n]["Text"].set_color((1, 1, 1, 0))
+                self._ReferenceFrame3D[n]["Versor"].set_color((1, 1, 1, 0))
         self._update_figure()
+
+    def _resize_event(self, event):
+        """
+        handler for a figure resize event.
+        """
+        if self._figure3D is not None:
+            self._figure3D.tight_layout()
+            self._figure3D.canvas.draw()
+
+        if self._figureEMG is not None:
+            self._figureEMG.tight_layout()
+            self._figureEMG.canvas.draw()
+
+    def _play_pressed(self):
+        """
+        method handling the play button press events.
+        """
+        if self.is_running():
+            self._stop_player()
+        else:
+            self._start_player()
+
+    def _forward_pressed(self):
+        """
+        method handling the forward button press events.
+        """
+        self._stop_player()
+        self._move_forward()
+
+    def _backward_pressed(self):
+        """
+        method handling the forward button press events.
+        """
+        self._stop_player()
+        self._move_backward()
+
+    def _home_pressed(self):
+        """
+        method handling the home button press events.
+        """
+        self._stop_player()
+        self._axis3D.elev = self._init_view["elev"]
+        self._axis3D.azim = self._init_view["azim"]
+        self._axis3D.set_xlim(*self._limits)
+        self._axis3D.set_ylim(*self._limits)
+        self._axis3D.set_zlim(*self._limits)
+        self.slider.setValue(0)
+        self._figure3D.canvas.draw()
+        self._figureEMG.canvas.draw()
