@@ -15,7 +15,6 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib import use as matplotlib_use
 from mpl_toolkits import mplot3d
-from scipy.spatial.transform import Rotation
 from .utils import *
 from .geometry import *
 from .sensors import *
@@ -460,6 +459,107 @@ class ToolButtonWidget(qtw.QToolButton):
         self.container.setLayout(layout)
 
 
+class OptionPane(qtw.QWidget):
+    """
+    make a line option.
+
+    Parameters
+    ----------
+    label: str
+        the name of the option.
+
+    min_value: float
+        the minimum acceptable value.
+
+    max_value: float
+        the maximum acceptable value.
+
+    step_value: float
+        the step increments accepted.
+
+    default_value: float
+        the starting value.
+
+    default_color: str or tuple
+        the default color.
+    """
+
+    # class variables
+    label = None
+    valueSlider = None
+    valueBox = None
+    colorBox = None
+    font_size = None
+    object_size = None
+
+    def __init__(
+        self,
+        label="",
+        min_value=1,
+        max_value=100,
+        step_value=1,
+        default_value=1,
+        default_color="red",
+        font_size=12,
+        object_size=35,
+    ):
+        """
+        constructor
+        """
+        super().__init__()
+
+        # sizes
+        self.font_size = font_size
+        self.object_size = object_size
+
+        # label
+        self.label = qtw.QLabel(label)
+        self.label.setFont(qtg.QFont("Arial", self._font_size))
+        self.label.setFixedHeight(self.object_size)
+        self.label.setAlignment(qtc.Qt.AlignLeft)
+
+        # slider
+        self.valueSlider = qtw.QSlider(qtc.Qt.Horizontal)
+        self.valueSlider.setMinimum(min_value)
+        self.valueSlider.setMaximum(max_value)
+        self.valueSlider.setTickInterval(step_value)
+        self.valueSlider.setValue(default_value)
+        self.valueSlider.setFixedHeight(self.object_size)
+        self.valueSlider.setFixedWidth(self.object_size * 5)
+        self.valueSlider.valueChanged.connect(self._speed_slider_moved)
+        self.valueSlider.setStyleSheet("border: none;")
+
+        # spinbox
+        self.valueBox = qtw.QSpinBox()
+        self.valueBox.setFont(qtg.QFont("Arial", self._font_size))
+        self.valueBox.setFixedHeight(self.object_size)
+        self.valueBox.setFixedWidth(self.object_size * 2)
+        self.valueBox.setMinimum(min_value)
+        self.valueBox.setMaximum(max_value)
+        self.valueBox.setStepIncrement(step_value)
+        self.valueBox.setValue(default_value)
+        self.valueBox.setStyleSheet("border: none;")
+
+        # color
+        self.colorBox = qtw.QPushButton()
+        self.colorBox.setFixedHeight(self.object_size)
+        self.colorBox.setFixedWidth(self.object_size)
+        txt = "background-color: {}".format(default_color)
+        self.colorBox.setStyleSheet(txt)
+        self.colorBox.setFlat(True)
+
+        # option pane
+        layout = qtw.QHBoxLayout()
+        layout.addWidget(label)
+        layout.addWidget(self.valueSlider)
+        layout.addWidget(self.valueBox)
+        layout.addWidget(self.colorBox)
+        layout.setStyleSheet("spacing: 10px;")
+        self.setLayout(layout)
+
+        # connections
+
+
 class Model3DWidget(qtw.QWidget):
     """
     renderer for a 3D Model.
@@ -477,8 +577,6 @@ class Model3DWidget(qtw.QWidget):
     """
 
     # options
-    play_speed_slider = None
-    play_speed_label = None
     marker_size_slider = None
     marker_size_label = None
     marker_color_button = None
@@ -510,6 +608,7 @@ class Model3DWidget(qtw.QWidget):
     time_label = None
     home_button = None
     option_button = None
+    speed_button = None
     play_button = None
     forward_button = None
     backward_button = None
@@ -981,111 +1080,102 @@ class Model3DWidget(qtw.QWidget):
         commands_bar.setStyleSheet("spacing: 10px;")
 
         # add the home function
-        self.home_button = self._command_button(
+        self.home_button = self._command_action(
             tip="Reset the view to default.",
             icon=os.path.sep.join([self._path, "icons", "home.png"]),
             enabled=True,
             checkable=False,
             fun=self._home_pressed,
-            parent=self,
         )
-        commands_bar.addWidget(self.home_button)
+        commands_bar.addAction(self.home_button)
 
         # add a separator
         commands_bar.addSeparator()
 
         # function show/hide markers
-        self.marker_button = self._command_button(
+        self.marker_button = self._command_action(
             tip="Show/Hide the Marker3D objects.",
             icon=os.path.sep.join([self._path, "icons", "markers.png"]),
             enabled=model.has_Marker3D(),
             checkable=True,
             fun=self._update_figure,
-            parent=self,
         )
-        commands_bar.addWidget(self.marker_button)
+        commands_bar.addAction(self.marker_button)
 
         # function show/hide forces function
-        self.force_button = self._command_button(
+        self.force_button = self._command_action(
             tip="Show/Hide the ForcePlatform3D objects.",
             icon=os.path.sep.join([self._path, "icons", "forces.png"]),
             enabled=model.has_ForcePlatform3D(),
             checkable=True,
             fun=self._update_figure,
-            parent=self,
         )
-        commands_bar.addWidget(self.force_button)
+        commands_bar.addAction(self.force_button)
 
         # function show/hide links function
-        self.link_button = self._command_button(
+        self.link_button = self._command_action(
             tip="Show/Hide the Link3D objects.",
             icon=os.path.sep.join([self._path, "icons", "links.png"]),
             enabled=model.has_Link3D(),
             checkable=True,
             fun=self._update_figure,
-            parent=self,
         )
-        commands_bar.addWidget(self.link_button)
+        commands_bar.addAction(self.link_button)
 
         # function show/hide labels function
-        self.text_button = self._command_button(
+        self.text_button = self._command_action(
             tip="Show/Hide the labels.",
             icon=os.path.sep.join([self._path, "icons", "txt.png"]),
             enabled=model.has_ForcePlatform3D() | model.has_Marker3D(),
             checkable=True,
             fun=self._update_figure,
-            parent=self,
         )
-        commands_bar.addWidget(self.text_button)
+        commands_bar.addAction(self.text_button)
 
         # function show/hide reference function
-        self.ref_button = self._command_button(
+        self.ref_button = self._command_action(
             tip="Show/Hide the reference frame.",
             icon=os.path.sep.join([self._path, "icons", "reference.png"]),
             enabled=True,
             checkable=True,
             fun=self._reference_checked,
-            parent=self,
         )
-        commands_bar.addWidget(self.ref_button)
+        commands_bar.addAction(self.ref_button)
 
         # add a separator
         commands_bar.addSeparator()
 
         # add the move backward function
-        self.backward_button = self._command_button(
+        self.backward_button = self._command_action(
             tip="Move backward by 1 frame.",
             icon=os.path.sep.join([self._path, "icons", "backward.png"]),
             enabled=True,
             checkable=False,
             fun=self._backward_pressed,
-            parent=self,
         )
         self.backward_button.setAutoRepeat(True)
-        commands_bar.addWidget(self.backward_button)
+        commands_bar.addAction(self.backward_button)
 
         # add the play/pause function
-        self.play_button = self._command_button(
+        self.play_button = self._command_action(
             tip="Play/Pause.",
             icon=os.path.sep.join([self._path, "icons", "play.png"]),
             enabled=True,
             checkable=False,
             fun=self._play_pressed,
-            parent=self,
         )
-        commands_bar.addWidget(self.play_button)
+        commands_bar.addAction(self.play_button)
 
         # add the move forward function
-        self.forward_button = self._command_button(
+        self.forward_button = self._command_action(
             tip="Move forward by 1 frame.",
             icon=os.path.sep.join([self._path, "icons", "forward.png"]),
             enabled=True,
             checkable=False,
             fun=self._forward_pressed,
-            parent=self,
         )
         self.forward_button.setAutoRepeat(True)
-        commands_bar.addWidget(self.forward_button)
+        commands_bar.addAction(self.forward_button)
 
         # add another separator
         commands_bar.addSeparator()
@@ -1101,35 +1191,32 @@ class Model3DWidget(qtw.QWidget):
         play_speed_layout = qtw.QVBoxLayout()
         play_speed_layout.addWidget(self.play_speed_slider)
 
-        self.speed_button = self._command_button(
-            tip="Player speed.",
-            icon=None,
-            enabled=True,
-            checkable=False,
-            fun=None,
-            parent=self,
-        )
-        self.speed_button.setLayout(play_speed_layout)
-        self.speed_button.setToolButtonStyle(qtg.Qt.ToolButtonTextOnly)
-        self.speed_button.setText("100%")
+        self.speed_button = qtw.QSpinBox()
+        self.speed_button.setFont(qtg.QFont("Arial", self._font_size))
+        self.speed_button.setFixedHeight(self._button_size)
+        self.speed_button.setFixedWidth(self._button_size * 2)
+        self.speed_button.setMinimum(1)
+        self.speed_button.setMaximum(500)
+        self.speed_button.setValue(100)
+        self.speed_button.setSuffix("%")
+        self.speed_button.setStyleSheet("border: none;")
         commands_bar.addWidget(self.speed_button)
 
         # add the loop function
-        self.repeat_button = self._command_button(
+        self.repeat_button = self._command_action(
             tip="Loop the frames.",
             icon=os.path.sep.join([self._path, "icons", "repeat.png"]),
             enabled=True,
             checkable=True,
             fun=None,
-            parent=self,
         )
-        commands_bar.addWidget(self.repeat_button)
+        commands_bar.addAction(self.repeat_button)
 
         # add the time label
         self.time_label = qtw.QLabel("00:00.000")
         self.time_label.setFont(qtg.QFont("Arial", self._font_size))
         self.time_label.setFixedHeight(self._button_size)
-        self.time_label.setFixedWidth(110)
+        self.time_label.setFixedWidth(self._button_size * 3)
         self.time_label.setAlignment(qtc.Qt.AlignCenter)
         commands_bar.addWidget(self.time_label)
 
@@ -1150,19 +1237,27 @@ class Model3DWidget(qtw.QWidget):
         # add another separator
         commands_bar.addSeparator()
 
-        # set the option pane button
-        self.option_button = self._command_button(
-            tip="Options.",
-            icon=os.path.sep.join([self._path, "icons", "options.png"]),
-            enabled=True,
-            checkable=False,
-            fun=None,
-            parent=self,
-        )
-        commands_bar.addWidget(self.option_button)
-
         # setup the option pane
-        self.marker_size_slider = None
+        marker_opt_pane = qtw.QWidget()
+
+        # spinner
+        self.marker_size_box = qtw.QSpinBox()
+        self.marker_size_box.setFont(qtg.QFont("Arial", self._font_size))
+        self.marker_size_box.setFixedHeight(self._button_size)
+        self.marker_size_box.setFixedWidth(self._button_size * 2)
+        self.marker_size_box.setMinimum(0.1)
+        self.marker_size_box.setMaximum(20)
+        self.marker_size_box.setStepIncrement(0.1)
+        self.marker_size_box.setValue(1.0)
+        self.marker_size_box.setStyleSheet("border: none;")
+
+        self.marker_size_slider = qtw.QSlider()
+        self.marker_size_slider.setMinimum(0.1)
+        self.marker_size_slider.setMaximum(20)
+        self.marker_size_slider.setTickInterval(0.1)
+        self.marker_size_slider.setValue(1.0)
+        self.marker_size_slider.valueChanged.connect(self._speed_slider_moved)
+
         self.marker_size_label = None
         self.marker_color_button = None
         self.force_size_slider = None
@@ -1184,6 +1279,16 @@ class Model3DWidget(qtw.QWidget):
         self.emg_vert_size_label = None
         self.emg_vert_color_button = None
 
+        # set the option pane button
+        self.option_button = self._command_action(
+            tip="Options.",
+            icon=os.path.sep.join([self._path, "icons", "options.png"]),
+            enabled=True,
+            checkable=False,
+            fun=None,
+        )
+        commands_bar.addWidget(self.option_button)
+
         # widget layout
         layout = qtw.QVBoxLayout()
         layout.addWidget(splitter)
@@ -1200,7 +1305,7 @@ class Model3DWidget(qtw.QWidget):
         """
         return self._is_running
 
-    def _command_button(self, tip, icon, enabled, checkable, fun, parent):
+    def _command_action(self, tip, icon, enabled, checkable, fun):
         """
         private method used to generate valid buttons for the command bar.
 
@@ -1226,7 +1331,7 @@ class Model3DWidget(qtw.QWidget):
         obj: qtw.QToolButton
             a novel ToolButton object.
         """
-        button = ToolButtonWidget(parent=parent)
+        button = qtw.QAction()
         if icon is not None:
             icon = qtg.QPixmap(icon)
             icon = icon.scaled(self._button_size, self._button_size)
@@ -1237,8 +1342,66 @@ class Model3DWidget(qtw.QWidget):
         if checkable:
             button.setChecked(True)
         if fun is not None:
-            button.clicked.connect(fun)
+            button.triggered.connect(fun)
         return button
+
+    def _make_option(
+        self,
+        label,
+        min_value,
+        max_value,
+        step_value,
+        default_value,
+        default_color,  # qtg.QColor(128, 0, 0)
+    ):
+        """
+        check
+        """
+        # label
+        label = qtw.QLabel(label)
+        label.setFont(qtg.QFont("Arial", self._font_size))
+        label.setFixedHeight(self._button_size)
+        label.setAlignment(qtc.Qt.AlignLeft)
+
+        # slider
+        slider = qtw.QSlider(qtc.Qt.Horizontal)
+        slider.setMinimum(min_value)
+        slider.setMaximum(max_value)
+        slider.setTickInterval(step_value)
+        slider.setValue(default_value)
+        slider.setFixedHeight(self._button_size)
+        slider.setFixedWidth(self._button_size * 5)
+        slider.valueChanged.connect(self._speed_slider_moved)
+        slider.setStyleSheet("border: none;")
+
+        # spinbox
+        box = qtw.QSpinBox()
+        box.setFont(qtg.QFont("Arial", self._font_size))
+        box.setFixedHeight(self._button_size)
+        box.setFixedWidth(self._button_size * 2)
+        box.setMinimum(min_value)
+        box.setMaximum(max_value)
+        box.setStepIncrement(step_value)
+        box.setValue(default_value)
+        box.setStyleSheet("border: none;")
+
+        # color
+        col = qtw.QWidget()
+        col.setFixedHeight(self._button_size)
+        col.setFixedWidth(self._button_size)
+        palette = col.palette()
+        palette.setColor(qtg.QPalette.Window, default_color)
+        col.setPalette(palette)
+        col.setAutoFillBackground(True)
+        col.setStyleSheet("border: none;")
+
+        # option pane
+        layout = qtw.QHBoxLayout()
+        layout.addWidget(label)
+        layout.addWidget(slider)
+        layout.addWidget(box)
+        layout.addWidget(col)
+        layout.setStyleSheet("spacing: 10px;")
 
     def _move_forward(self):
         """
@@ -1451,10 +1614,3 @@ class Model3DWidget(qtw.QWidget):
         self.slider.setValue(0)
         self._figure3D.canvas.draw()
         self._figureEMG.canvas.draw()
-
-    def _speed_slider_moved(self):
-        """
-        adjust the player speed.
-        """
-        txt = "{:03d}%".format(self.play_speed_slider.value())
-        self.speed_button.setText(txt)
