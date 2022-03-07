@@ -1345,64 +1345,6 @@ class Model3DWidget(qtw.QWidget):
             button.triggered.connect(fun)
         return button
 
-    def _make_option(
-        self,
-        label,
-        min_value,
-        max_value,
-        step_value,
-        default_value,
-        default_color,  # qtg.QColor(128, 0, 0)
-    ):
-        """
-        check
-        """
-        # label
-        label = qtw.QLabel(label)
-        label.setFont(qtg.QFont("Arial", self._font_size))
-        label.setFixedHeight(self._button_size)
-        label.setAlignment(qtc.Qt.AlignLeft)
-
-        # slider
-        slider = qtw.QSlider(qtc.Qt.Horizontal)
-        slider.setMinimum(min_value)
-        slider.setMaximum(max_value)
-        slider.setTickInterval(step_value)
-        slider.setValue(default_value)
-        slider.setFixedHeight(self._button_size)
-        slider.setFixedWidth(self._button_size * 5)
-        slider.valueChanged.connect(self._speed_slider_moved)
-        slider.setStyleSheet("border: none;")
-
-        # spinbox
-        box = qtw.QSpinBox()
-        box.setFont(qtg.QFont("Arial", self._font_size))
-        box.setFixedHeight(self._button_size)
-        box.setFixedWidth(self._button_size * 2)
-        box.setMinimum(min_value)
-        box.setMaximum(max_value)
-        box.setStepIncrement(step_value)
-        box.setValue(default_value)
-        box.setStyleSheet("border: none;")
-
-        # color
-        col = qtw.QWidget()
-        col.setFixedHeight(self._button_size)
-        col.setFixedWidth(self._button_size)
-        palette = col.palette()
-        palette.setColor(qtg.QPalette.Window, default_color)
-        col.setPalette(palette)
-        col.setAutoFillBackground(True)
-        col.setStyleSheet("border: none;")
-
-        # option pane
-        layout = qtw.QHBoxLayout()
-        layout.addWidget(label)
-        layout.addWidget(slider)
-        layout.addWidget(box)
-        layout.addWidget(col)
-        layout.setStyleSheet("spacing: 10px;")
-
     def _move_forward(self):
         """
         function handling the press of the play button.
