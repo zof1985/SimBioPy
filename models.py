@@ -491,6 +491,11 @@ class OptionPane(qtw.QWidget):
     colorBox = None
     font_size = None
     object_size = None
+    _colorRGB = None
+
+    # signals
+    colorChanged = qtc.Signal()
+    valueChanged = qtc.Signal()
 
     def __init__(
         self,
@@ -499,7 +504,7 @@ class OptionPane(qtw.QWidget):
         max_value=100,
         step_value=1,
         default_value=1,
-        default_color="red",
+        default_color=(255, 0, 0, 255),
         font_size=12,
         object_size=35,
     ):
@@ -514,7 +519,7 @@ class OptionPane(qtw.QWidget):
 
         # label
         self.label = qtw.QLabel(label)
-        self.label.setFont(qtg.QFont("Arial", self._font_size))
+        self.label.setFont(qtg.QFont("Arial", self.font_size))
         self.label.setFixedHeight(self.object_size)
         self.label.setAlignment(qtc.Qt.AlignLeft)
 
@@ -526,17 +531,16 @@ class OptionPane(qtw.QWidget):
         self.valueSlider.setValue(default_value)
         self.valueSlider.setFixedHeight(self.object_size)
         self.valueSlider.setFixedWidth(self.object_size * 5)
-        self.valueSlider.valueChanged.connect(self._speed_slider_moved)
         self.valueSlider.setStyleSheet("border: none;")
 
         # spinbox
         self.valueBox = qtw.QSpinBox()
-        self.valueBox.setFont(qtg.QFont("Arial", self._font_size))
+        self.valueBox.setFont(qtg.QFont("Arial", self.font_size))
         self.valueBox.setFixedHeight(self.object_size)
         self.valueBox.setFixedWidth(self.object_size * 2)
         self.valueBox.setMinimum(min_value)
         self.valueBox.setMaximum(max_value)
-        self.valueBox.setStepIncrement(step_value)
+        self.valueBox.setSingleStep(step_value)
         self.valueBox.setValue(default_value)
         self.valueBox.setStyleSheet("border: none;")
 
@@ -544,20 +548,86 @@ class OptionPane(qtw.QWidget):
         self.colorBox = qtw.QPushButton()
         self.colorBox.setFixedHeight(self.object_size)
         self.colorBox.setFixedWidth(self.object_size)
-        txt = "background-color: {}".format(default_color)
-        self.colorBox.setStyleSheet(txt)
         self.colorBox.setFlat(True)
+        self.setColor(default_color)
 
         # option pane
         layout = qtw.QHBoxLayout()
-        layout.addWidget(label)
+        layout.addWidget(self.label)
         layout.addWidget(self.valueSlider)
         layout.addWidget(self.valueBox)
         layout.addWidget(self.colorBox)
-        layout.setStyleSheet("spacing: 10px;")
+        layout.setSpacing(10)
         self.setLayout(layout)
 
         # connections
+        self.valueBox.valueChanged.connect(self.adjust_slider)
+        self.valueSlider.valueChanged.connect(self.adjust_box)
+        self.colorBox.clicked.connect(self.select_color)
+
+    def value(self):
+        """
+        return the actual value stored.
+        """
+        return self.valueBox.value()
+
+    def color(self):
+        """
+        return the actual color stored.
+        """
+        return self._colorRGB
+
+    def adjust_slider(self):
+        """
+        adjust the slider value according to the spinbox value.
+        """
+        if self.valueSlider.value() != self.valueBox.value():
+            self.valueSlider.setValue(self.valueBox.value())
+            self.valueChanged.emit()
+
+    def adjust_box(self):
+        """
+        adjust the spinbox value according to the slider value.
+        """
+        if self.valueSlider.value() != self.valueBox.value():
+            self.valueBox.setValue(self.valueSlider.value())
+            self.valueChanged.emit()
+
+    def setColor(self, rgba):
+        """
+        set the required rgba color.
+
+        Parameters
+        ----------
+        rgba: tuple
+            the 4 elements tuple defining a color.
+        """
+        txt = "'color' must be a tuple or list of 4 elements "
+        txt += "each in the 0-255 range."
+        assert isinstance(rgba, (tuple, list)), txt
+        assert len(rgba) == 4, txt
+        if isinstance(rgba, list):
+            rgba = tuple(rgba)
+        txt = "background-color: rgba{};".format(rgba)
+        self.colorBox.setStyleSheet(txt)
+        self._colorRGB = rgba
+        self.colorChanged.emit()
+
+    def select_color(self):
+        """
+        select and set the desired color.
+        """
+        actual_color = qtg.QColor(*self._colorRGB)
+        try:
+            color = qtg.QColorDialog.getColor(
+                initial=actual_color,
+                options=[qtg.QColorDialog.ShowAlphaChannel],
+            )
+            if color.isValid():
+                self._colorRGB = color.rgba()
+                self.setColor(self._colorRGB)
+        except Exception:
+            pass
 
 
 class Model3DWidget(qtw.QWidget):
@@ -577,27 +647,14 @@ class Model3DWidget(qtw.QWidget):
     """
 
     # options
-    marker_size_slider = None
-    marker_size_label = None
-    marker_color_button = None
-    force_size_slider = None
-    force_size_label = None
-    force_color_button = None
-    link_size_slider = None
-    link_size_label = None
-    link_color_button = None
-    text_size_slider = None
-    text_size_label = None
-    text_color_button = None
-    ref_size_slider = None
-    ref_size_label = None
-    ref_color_button = None
-    emg_size_slider = None
-    emg_size_label = None
-    emg_color_button = None
-    emg_vert_size_slider = None
-    emg_vert_size_label = None
-    emg_vert_color_button = None
+    marker_options = None
+    force_options = None
+    link_options = None
+    text_options = None
+    reference_options = None
+    emg_signal_options = None
+    emg_bar_options = None
+    options_pane = None
 
     # class variables
     dpi = 300
@@ -608,7 +665,7 @@ class Model3DWidget(qtw.QWidget):
     time_label = None
     home_button = None
     option_button = None
-    speed_button = None
+    speed_box = None
     play_button = None
     forward_button = None
     backward_button = None
@@ -617,7 +674,7 @@ class Model3DWidget(qtw.QWidget):
     force_button = None
     link_button = None
     text_button = None
-    ref_button = None
+    reference_button = None
 
     # private variables
     _times = None
@@ -644,10 +701,13 @@ class Model3DWidget(qtw.QWidget):
     _path = None
     _init_view = {"elev": 10, "azim": 45, "vertical_axis": 2}
     _limits = None
-    _marker_color = (1, 0, 0, 1)
-    _force_color = (0, 1, 0, 0.7)
-    _link_color = (0, 0, 1, 0.7)
-    _reference_color = (0, 0.5, 0.5, 0.7)
+    _marker_color = (255, 0, 0, 1)
+    _force_color = (0, 255, 0, 0.7)
+    _link_color = (0, 0, 255, 0.7)
+    _text_color = (0, 0, 0, 1)
+    _reference_color = (0, 125, 125, 0.5)
+    _emg_signal_color = (125, 125, 0, 1)
+    _emg_bar_color = (125, 0, 125, 0.1)
 
     def __init__(
         self,
@@ -1080,73 +1140,73 @@ class Model3DWidget(qtw.QWidget):
         commands_bar.setStyleSheet("spacing: 10px;")
 
         # add the home function
-        self.home_button = self._command_action(
+        self.home_button = self._command_button(
             tip="Reset the view to default.",
             icon=os.path.sep.join([self._path, "icons", "home.png"]),
             enabled=True,
             checkable=False,
             fun=self._home_pressed,
         )
-        commands_bar.addAction(self.home_button)
+        commands_bar.addWidget(self.home_button)
 
         # add a separator
         commands_bar.addSeparator()
 
         # function show/hide markers
-        self.marker_button = self._command_action(
+        self.marker_button = self._command_button(
             tip="Show/Hide the Marker3D objects.",
             icon=os.path.sep.join([self._path, "icons", "markers.png"]),
             enabled=model.has_Marker3D(),
             checkable=True,
             fun=self._update_figure,
         )
-        commands_bar.addAction(self.marker_button)
+        commands_bar.addWidget(self.marker_button)
 
         # function show/hide forces function
-        self.force_button = self._command_action(
+        self.force_button = self._command_button(
             tip="Show/Hide the ForcePlatform3D objects.",
             icon=os.path.sep.join([self._path, "icons", "forces.png"]),
             enabled=model.has_ForcePlatform3D(),
             checkable=True,
             fun=self._update_figure,
         )
-        commands_bar.addAction(self.force_button)
+        commands_bar.addWidget(self.force_button)
 
         # function show/hide links function
-        self.link_button = self._command_action(
+        self.link_button = self._command_button(
             tip="Show/Hide the Link3D objects.",
             icon=os.path.sep.join([self._path, "icons", "links.png"]),
             enabled=model.has_Link3D(),
             checkable=True,
             fun=self._update_figure,
         )
-        commands_bar.addAction(self.link_button)
+        commands_bar.addWidget(self.link_button)
 
         # function show/hide labels function
-        self.text_button = self._command_action(
+        self.text_button = self._command_button(
             tip="Show/Hide the labels.",
             icon=os.path.sep.join([self._path, "icons", "txt.png"]),
             enabled=model.has_ForcePlatform3D() | model.has_Marker3D(),
             checkable=True,
             fun=self._update_figure,
         )
-        commands_bar.addAction(self.text_button)
+        commands_bar.addWidget(self.text_button)
 
         # function show/hide reference function
-        self.ref_button = self._command_action(
+        self.reference_button = self._command_button(
             tip="Show/Hide the reference frame.",
             icon=os.path.sep.join([self._path, "icons", "reference.png"]),
             enabled=True,
             checkable=True,
-            fun=self._reference_checked,
+            fun=self._reference_pressed,
         )
-        commands_bar.addAction(self.ref_button)
+        commands_bar.addWidget(self.reference_button)
 
         # add a separator
         commands_bar.addSeparator()
 
         # add the move backward function
-        self.backward_button = self._command_action(
+        self.backward_button = self._command_button(
             tip="Move backward by 1 frame.",
             icon=os.path.sep.join([self._path, "icons", "backward.png"]),
             enabled=True,
@@ -1154,20 +1214,20 @@ class Model3DWidget(qtw.QWidget):
             fun=self._backward_pressed,
         )
         self.backward_button.setAutoRepeat(True)
-        commands_bar.addAction(self.backward_button)
+        commands_bar.addWidget(self.backward_button)
 
         # add the play/pause function
-        self.play_button = self._command_action(
+        self.play_button = self._command_button(
             tip="Play/Pause.",
             icon=os.path.sep.join([self._path, "icons", "play.png"]),
             enabled=True,
             checkable=False,
             fun=self._play_pressed,
         )
-        commands_bar.addAction(self.play_button)
+        commands_bar.addWidget(self.play_button)
 
         # add the move forward function
-        self.forward_button = self._command_action(
+        self.forward_button = self._command_button(
             tip="Move forward by 1 frame.",
             icon=os.path.sep.join([self._path, "icons", "forward.png"]),
             enabled=True,
@@ -1175,42 +1235,33 @@ class Model3DWidget(qtw.QWidget):
             fun=self._forward_pressed,
         )
         self.forward_button.setAutoRepeat(True)
-        commands_bar.addAction(self.forward_button)
+        commands_bar.addWidget(self.forward_button)
 
         # add another separator
         commands_bar.addSeparator()
 
         # speed controller
-        self.play_speed_slider = qtw.QSlider()
-        self.play_speed_slider.setMinimum(1)
-        self.play_speed_slider.setMaximum(200)
-        self.play_speed_slider.setTickInterval(1)
-        self.play_speed_slider.setValue(100)
-        self.play_speed_slider.valueChanged.connect(self._speed_slider_moved)
-
-        play_speed_layout = qtw.QVBoxLayout()
-        play_speed_layout.addWidget(self.play_speed_slider)
-
-        self.speed_button = qtw.QSpinBox()
-        self.speed_button.setFont(qtg.QFont("Arial", self._font_size))
-        self.speed_button.setFixedHeight(self._button_size)
-        self.speed_button.setFixedWidth(self._button_size * 2)
-        self.speed_button.setMinimum(1)
-        self.speed_button.setMaximum(500)
-        self.speed_button.setValue(100)
-        self.speed_button.setSuffix("%")
-        self.speed_button.setStyleSheet("border: none;")
-        commands_bar.addWidget(self.speed_button)
+        self.speed_box = qtw.QSpinBox()
+        self.speed_box.setFont(qtg.QFont("Arial", self._font_size))
+        self.speed_box.setFixedHeight(self._button_size)
+        self.speed_box.setFixedWidth(self._button_size * 2)
+        self.speed_box.setToolTip("Speed control.")
+        self.speed_box.setMinimum(1)
+        self.speed_box.setMaximum(500)
+        self.speed_box.setValue(100)
+        self.speed_box.setSuffix("%")
+        self.speed_box.setStyleSheet("border: none;")
+        commands_bar.addWidget(self.speed_box)
 
         # add the loop function
-        self.repeat_button = self._command_action(
+        self.repeat_button = self._command_button(
             tip="Loop the frames.",
             icon=os.path.sep.join([self._path, "icons", "repeat.png"]),
             enabled=True,
             checkable=True,
             fun=None,
         )
-        commands_bar.addAction(self.repeat_button)
+        commands_bar.addWidget(self.repeat_button)
 
         # add the time label
         self.time_label = qtw.QLabel("00:00.000")
@@ -1237,56 +1288,135 @@ class Model3DWidget(qtw.QWidget):
         # add another separator
         commands_bar.addSeparator()
 
-        # setup the option pane
-        marker_opt_pane = qtw.QWidget()
+        # marker options
+        self.marker_options = OptionPane(
+            label="Markers",
+            min_value=0.1,
+            max_value=10,
+            step_value=0.1,
+            default_value=1,
+            default_color=self._marker_color,
+            font_size=self._font_size,
+            object_size=self._button_size,
+        )
+        self.marker_options.valueChanged.connect(self._adjust_markers)
+        self.marker_options.colorChanged.connect(self._adjust_markers)
+        self.marker_options.setEnabled(self.marker_button.isEnabled())
 
-        # spinner
-        self.marker_size_box = qtw.QSpinBox()
-        self.marker_size_box.setFont(qtg.QFont("Arial", self._font_size))
-        self.marker_size_box.setFixedHeight(self._button_size)
-        self.marker_size_box.setFixedWidth(self._button_size * 2)
-        self.marker_size_box.setMinimum(0.1)
-        self.marker_size_box.setMaximum(20)
-        self.marker_size_box.setStepIncrement(0.1)
-        self.marker_size_box.setValue(1.0)
-        self.marker_size_box.setStyleSheet("border: none;")
+        # force options
+        self.force_options = OptionPane(
+            label="Forces",
+            min_value=0.1,
+            max_value=10,
+            step_value=0.1,
+            default_value=0.5,
+            default_color=self._force_color,
+            font_size=self._font_size,
+            object_size=self._button_size,
+        )
+        self.force_options.valueChanged.connect(self._adjust_forces)
+        self.force_options.colorChanged.connect(self._adjust_forces)
+        self.force_options.setEnabled(self.force_button.isEnabled())
 
-        self.marker_size_slider = qtw.QSlider()
-        self.marker_size_slider.setMinimum(0.1)
-        self.marker_size_slider.setMaximum(20)
-        self.marker_size_slider.setTickInterval(0.1)
-        self.marker_size_slider.setValue(1.0)
-        self.marker_size_slider.valueChanged.connect(self._speed_slider_moved)
+        # link options
+        self.link_options = OptionPane(
+            label="Links",
+            min_value=0.1,
+            max_value=10,
+            step_value=0.1,
+            default_value=0.5,
+            default_color=self._link_color,
+            font_size=self._font_size,
+            object_size=self._button_size,
+        )
+        self.link_options.valueChanged.connect(self._adjust_links)
+        self.link_options.colorChanged.connect(self._adjust_links)
+        self.link_options.setEnabled(self.link_button.isEnabled())
 
-        self.marker_size_label = None
-        self.marker_color_button = None
-        self.force_size_slider = None
-        self.force_size_label = None
-        self.force_color_button = None
-        self.link_size_slider = None
-        self.link_size_label = None
-        self.link_color_button = None
-        self.text_size_slider = None
-        self.text_size_label = None
-        self.text_color_button = None
-        self.ref_size_slider = None
-        self.ref_size_label = None
-        self.ref_color_button = None
-        self.emg_size_slider = None
-        self.emg_size_label = None
-        self.emg_color_button = None
-        self.emg_vert_size_slider = None
-        self.emg_vert_size_label = None
-        self.emg_vert_color_button = None
+        # text options
+        self.text_options = OptionPane(
+            label="Labels",
+            min_value=0.1,
+            max_value=10,
+            step_value=0.1,
+            default_value=3,
+            default_color=self._text_color,
+            font_size=self._font_size,
+            object_size=self._button_size,
+        )
+        self.text_options.valueChanged.connect(self._adjust_labels)
+        self.text_options.colorChanged.connect(self._adjust_labels)
+        self.text_options.setEnabled(self.text_button.isEnabled())
+
+        # reference options
+        self.reference_options = OptionPane(
+            label="Reference frame",
+            min_value=0.1,
+            max_value=10,
+            step_value=0.1,
+            default_value=1,
+            default_color=self._reference_color,
+            font_size=self._font_size,
+            object_size=self._button_size,
+        )
+        self.reference_options.valueChanged.connect(self._adjust_references)
+        self.reference_options.colorChanged.connect(self._adjust_references)
+        self.reference_options.setEnabled(self.reference_button.isEnabled())
+
+        # emg signal options
+        self.emg_signal_options = OptionPane(
+            label="EMG Signals",
+            min_value=0.1,
+            max_value=10,
+            step_value=0.1,
+            default_value=0.5,
+            default_color=self._emg_signal_color,
+            font_size=self._font_size,
+            object_size=self._button_size,
+        )
+        self.emg_signal_options.valueChanged.connect(self._adjust_emg_signals)
+        self.emg_signal_options.colorChanged.connect(self._adjust_emg_signals)
+        self.emg_signal_options.setEnabled(model.has_EmgSensor())
+
+        # emg bar options
+        self.emg_bar_options = OptionPane(
+            label="EMG Bars",
+            min_value=0.1,
+            max_value=10,
+            step_value=0.1,
+            default_value=0.3,
+            default_color=self._emg_bar_color,
+            font_size=self._font_size,
+            object_size=self._button_size,
+        )
+        self.emg_bar_options.valueChanged.connect(self._adjust_emg_bars)
+        self.emg_bar_options.colorChanged.connect(self._adjust_emg_bars)
+        self.emg_bar_options.setEnabled(model.has_EmgSensor())
+
+        # options pane
+        options_layout = qtw.QGridLayout()
+        options_layout.setSpacing(10)
+        options_layout.addWidget(self.marker_options, 1, 1)
+        options_layout.addWidget(self.force_options, 2, 1)
+        options_layout.addWidget(self.link_options, 3, 1)
+        options_layout.addWidget(self.reference_options, 1, 2)
+        options_layout.addWidget(self.emg_signal_options, 2, 2)
+        options_layout.addWidget(self.emg_bar_options, 3, 2)
+        self.options_pane = qtw.QWidget()
+        self.options_pane.setWindowFlags(qtc.Qt.FramelessWindowHint)
+        self.options_pane.setWindowModality(qtc.Qt.NonModal)
+        self.options_pane.setLayout(options_layout)
+        self.options_pane.setVisible(False)
 
         # set the option pane button
-        self.option_button = self._command_action(
+        self.option_button = self._command_button(
             tip="Options.",
             icon=os.path.sep.join([self._path, "icons", "options.png"]),
             enabled=True,
-            checkable=False,
-            fun=None,
+            checkable=True,
+            fun=self._options_pressed,
         )
+        self.option_button.setChecked(False)
         commands_bar.addWidget(self.option_button)
 
         # widget layout
@@ -1305,7 +1435,7 @@ class Model3DWidget(qtw.QWidget):
         """
         return self._is_running
 
-    def _command_action(self, tip, icon, enabled, checkable, fun):
+    def _command_button(self, tip, icon, enabled, checkable, fun):
         """
         private method used to generate valid buttons for the command bar.
 
@@ -1328,10 +1458,11 @@ class Model3DWidget(qtw.QWidget):
 
         Returns
         -------
-        obj: qtw.QToolButton
-            a novel ToolButton object.
+        obj: qtw.QPushButton
+            a novel PushButton object.
         """
-        button = qtw.QAction()
+        button = qtw.QPushButton()
+        button.setFlat(True)
         if icon is not None:
             icon = qtg.QPixmap(icon)
             icon = icon.scaled(self._button_size, self._button_size)
@@ -1342,7 +1473,7 @@ class Model3DWidget(qtw.QWidget):
         if checkable:
             button.setChecked(True)
         if fun is not None:
-            button.triggered.connect(fun)
+            button.clicked.connect(fun)
         return button
 
     def _move_forward(self):
@@ -1403,7 +1534,7 @@ class Model3DWidget(qtw.QWidget):
         player event handler
         """
         lapsed = (get_time() - self._play_start_time) * 1000 + self._times[0]
-        speed = float(self.speed_button.text()[:-1]) / 100
+        speed = float(self.speed_box.text()[:-1]) / 100
         lapsed = lapsed * speed
         if lapsed > self._times[-1] - self._times[0]:
             if self.repeat_button.isChecked():
@@ -1421,6 +1552,18 @@ class Model3DWidget(qtw.QWidget):
         """
         self._actual_frame = self.slider.value()
         self._update_figure()
+
+    def _resize_event(self, event):
+        """
+        handler for a figure resize event.
+        """
+        if self._figure3D is not None:
+            self._figure3D.tight_layout()
+            self._figure3D.canvas.draw()
+
+        if self._figureEMG is not None:
+            self._figureEMG.tight_layout()
+            self._figureEMG.canvas.draw()
 
     def _update_figure(self):
         """
@@ -1494,31 +1637,19 @@ class Model3DWidget(qtw.QWidget):
         if self._figureEMG is not None:
             self._FigureAnimatorEMG.update()
 
-    def _reference_checked(self):
+    def _reference_pressed(self):
         """
         handler for the reference button.
         """
         # update the reference frame
         for n in self._ReferenceFrame3D:
-            if self.ref_button.isChecked():
+            if self.reference_button.isChecked():
                 self._ReferenceFrame3D[n]["Text"].set_color("red")
                 self._ReferenceFrame3D[n]["Versor"].set_color("gold")
             else:
                 self._ReferenceFrame3D[n]["Text"].set_color((1, 1, 1, 0))
                 self._ReferenceFrame3D[n]["Versor"].set_color((1, 1, 1, 0))
         self._update_figure()
-
-    def _resize_event(self, event):
-        """
-        handler for a figure resize event.
-        """
-        if self._figure3D is not None:
-            self._figure3D.tight_layout()
-            self._figure3D.canvas.draw()
-
-        if self._figureEMG is not None:
-            self._figureEMG.tight_layout()
-            self._figureEMG.canvas.draw()
 
     def _play_pressed(self):
         """
@@ -1556,3 +1687,66 @@ class Model3DWidget(qtw.QWidget):
         self.slider.setValue(0)
         self._figure3D.canvas.draw()
         self._figureEMG.canvas.draw()
+
+    def _options_pressed(self):
+        """
+        method handling the options button press events.
+        """
+        if self.option_button.isChecked():
+            butRect = self.option_button.rect()
+            cntRect = self.options_pane.rect()
+            loc = butRect.topRight()
+            loc -= cntRect.bottomRight()
+            loc = self.option_button.mapToGlobal(loc)
+            self.options_pane.move(loc)
+            self.options_pane.setVisible(True)
+        else:
+            self.options_pane.setVisible(False)
+
+    def _adjust_speed(self):
+        """
+        adjust the player speed.
+        """
+        self.speed_box.setValue(self.speed_slider.value())
+
+    def _adjust_markers(self):
+        """
+        adjust the markers appearance.
+        """
+        pass
+
+    def _adjust_forces(self):
+        """
+        adjust the forces appearance.
+        """
+        pass
+
+    def _adjust_links(self):
+        """
+        adjust the links appearance.
+        """
+        pass
+
+    def _adjust_references(self):
+        """
+        adjust the reference frame appearance.
+        """
+        pass
+
+    def _adjust_labels(self):
+        """
+        adjust the text appearance.
+        """
+        pass
+
+    def _adjust_emg_signals(self):
+        """
+        adjust the emg signals appearance.
+        """
+        pass
+
+    def _adjust_emg_bars(self):
+        """
+        adjust the emg bars appearance.
+        """
+        pass
