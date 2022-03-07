@@ -3,6 +3,7 @@
 
 #! IMPORTS
 
+
 import os
 import warnings
 import numpy as np
@@ -21,6 +22,7 @@ from .sensors import *
 
 
 #! MATPLOTLIB OPTIONS
+
 
 matplotlib_use("Qt5Agg")
 pl.rc("font", size=3)  # controls default text sizes
@@ -342,123 +344,6 @@ class FigureAnimator:
         self.figure.canvas.flush_events()
 
 
-class ToolButtonWidget(qtw.QToolButton):
-    """
-    QToolButton subsclass allowing to include a slider.
-
-    Parameters
-    ----------
-    expand_to: str
-        a string denoting the expansion direction of the popup.
-        Any of: ["top", "down", "up", "bottom"].
-
-    parent: QWidget (optional)
-        the parent widget.
-    """
-
-    valid_directions = ["top", "down", "up", "bottom"]
-    container = None
-
-    def __init__(self, direction="top", parent=None):
-        """
-        constructor
-        """
-
-        # create the object
-        super().__init__(parent)
-        self.container = qtw.QWidget()
-        self.container.setWindowFlags(qtc.Qt.FramelessWindowHint)
-        self.container.setWindowModality(qtc.Qt.NonModal)
-        self.container.installEventFilter(self)
-        self.setDirection(direction)
-
-    @property
-    def globalButtonLoc(self):
-        """
-        return the rect representing the button
-        """
-        return self.mapToGlobal(self.rect().bottomLeft())
-
-    @property
-    def globalContainerLoc(self):
-        """
-        return the rect representing the button
-        """
-        button = self.rect()
-        container = self.container.rect()
-        but = (button.topLeft() + button.topRight()) / 2
-        cnt = (container.bottomLeft() + container.bottomRight()) / 2
-        return self.mapToGlobal(but - cnt)
-
-    @property
-    def globalParentLoc(self):
-        """
-        return the rect representing the button
-        """
-        return self.mapToGlobal(self.parent.rect())
-
-    def setDirection(self, direction):
-        """
-        set the direction for the popup.
-        """
-        # check the input
-        txt = "expand to must be any of {}".format(self.valid_directions)
-        assert isinstance(direction, str), txt
-        assert direction in self.valid_directions, txt
-        self.direction = direction
-
-    def isIn(self):
-        """
-        check whether the mouse is inside the slider/button region.
-        """
-        buttonRect = self.rect().translated(self.globalButtonLoc)
-        pos = qtg.QCursor.pos()
-        if not self.container.isVisible():
-            return buttonRect.contains(pos)
-        region = qtg.QRegion(buttonRect)
-        region |= qtg.QRegion(self.container.geometry())
-        return region.contains(pos)
-
-    def enterEvent(self, event):
-        if self.container.layout() is not None:
-            if not self.container.isVisible():
-                butRect = self.rect()
-                cntRect = self.container.rect()
-
-                if self.direction in ["top", "up"]:
-                    loc = (butRect.topLeft() + butRect.topRight()) / 2
-                    loc -= (cntRect.bottomRight() + cntRect.bottomLeft()) / 2
-
-                elif self.direction in ["bottom", "down"]:
-                    loc = (butRect.bottomLeft() + butRect.bottomRight()) / 2
-                    loc -= (cntRect.topRight() + cntRect.topLeft()) / 2
-
-                else:
-                    raise KeyError
-
-                globalParent = self.parent().rect()
-                globalParent = globalParent.translated(self.globalButtonLoc)
-                loc = self.mapToGlobal(loc)
-                self.container.move(loc)
-                self.container.setVisible(True)
-
-    def leaveEvent(self, event):
-        if not self.isIn():
-            self.container.setVisible(False)
-
-    def eventFilter(self, source, event):
-        if source == self.container and event.type() == event.Leave:
-            if not self.isIn():
-                self.container.setVisible(False)
-        return super().eventFilter(source, event)
-
-    def setLayout(self, layout):
-        """
-        set the layout of the container.
-        """
-        self.container.setLayout(layout)
-
-
 class OptionPane(qtw.QWidget):
     """
     make a line option.
@@ -491,7 +376,7 @@ class OptionPane(qtw.QWidget):
     colorBox = None
     font_size = None
     object_size = None
-    _colorRGB = None
+    _color = None
 
     # signals
     colorChanged = qtc.Signal()
@@ -521,20 +406,21 @@ class OptionPane(qtw.QWidget):
         self.label = qtw.QLabel(label)
         self.label.setFont(qtg.QFont("Arial", self.font_size))
         self.label.setFixedHeight(self.object_size)
-        self.label.setAlignment(qtc.Qt.AlignLeft)
+        self.label.setAlignment(qtc.Qt.AlignRight | qtc.Qt.AlignVCenter)
 
         # slider
         self.valueSlider = qtw.QSlider(qtc.Qt.Horizontal)
-        self.valueSlider.setMinimum(min_value)
-        self.valueSlider.setMaximum(max_value)
-        self.valueSlider.setTickInterval(step_value)
-        self.valueSlider.setValue(default_value)
+        self.valueSlider.setMinimum(min_value * 10)
+        self.valueSlider.setMaximum(max_value * 10)
+        self.valueSlider.setTickInterval(step_value * 10)
+        self.valueSlider.setValue(default_value * 10)
         self.valueSlider.setFixedHeight(self.object_size)
         self.valueSlider.setFixedWidth(self.object_size * 5)
         self.valueSlider.setStyleSheet("border: none;")
 
         # spinbox
-        self.valueBox = qtw.QSpinBox()
+        self.valueBox = qtw.QDoubleSpinBox()
+        self.valueBox.setDecimals(1)
         self.valueBox.setFont(qtg.QFont("Arial", self.font_size))
         self.valueBox.setFixedHeight(self.object_size)
         self.valueBox.setFixedWidth(self.object_size * 2)
@@ -548,7 +434,8 @@ class OptionPane(qtw.QWidget):
         self.colorBox = qtw.QPushButton()
         self.colorBox.setFixedHeight(self.object_size)
         self.colorBox.setFixedWidth(self.object_size)
-        self.colorBox.setFlat(True)
+        self.colorBox.setAutoFillBackground(True)
+        self.colorBox.setStyleSheet("border: 0px;")
         self.setColor(default_color)
 
         # option pane
@@ -575,22 +462,21 @@ class OptionPane(qtw.QWidget):
         """
         return the actual color stored.
         """
-        return self._colorRGB
+        return self._color.getRgbF()
 
     def adjust_slider(self):
         """
         adjust the slider value according to the spinbox value.
         """
         if self.valueSlider.value() != self.valueBox.value():
-            self.valueSlider.setValue(self.valueBox.value())
-            self.valueChanged.emit()
+            self.valueSlider.setValue(self.valueBox.value() * 10)
 
     def adjust_box(self):
         """
         adjust the spinbox value according to the slider value.
         """
         if self.valueSlider.value() != self.valueBox.value():
-            self.valueBox.setValue(self.valueSlider.value())
+            self.valueBox.setValue(self.valueSlider.value() / 10)
             self.valueChanged.emit()
 
     def setColor(self, rgba):
@@ -602,30 +488,36 @@ class OptionPane(qtw.QWidget):
         rgba: tuple
             the 4 elements tuple defining a color.
         """
-        txt = "'color' must be a tuple or list of 4 elements "
-        txt += "each in the 0-255 range."
-        assert isinstance(rgba, (tuple, list)), txt
-        assert len(rgba) == 4, txt
-        if isinstance(rgba, list):
-            rgba = tuple(rgba)
-        txt = "background-color: rgba{};".format(rgba)
+
+        # check the input
+        txt = "'color' must be a QColor object or a tuple/list of 4 elements "
+        txt += "each in the 0-1 range."
+        assert isinstance(rgba, (tuple, list, qtg.QColor)), txt
+        if not isinstance(rgba, qtg.QColor):
+            assert len(rgba) == 4, txt
+            assert all([0 <= i <= 1 for i in rgba]), txt
+            if isinstance(rgba, list):
+                rgba = tuple(rgba)
+            rgba = qtg.QColor.fromRgbF(*rgba)
+
+        # create the QColor object
+        self._color = rgba
+        values = tuple((np.array(self._color.getRgbF()) * 255).astype(int))
+        txt = "background-color: rgba{};".format(values)
         self.colorBox.setStyleSheet(txt)
-        self._colorRGB = rgba
         self.colorChanged.emit()
 
     def select_color(self):
         """
         select and set the desired color.
         """
-        actual_color = qtg.QColor(*self._colorRGB)
         try:
-            color = qtg.QColorDialog.getColor(
-                initial=actual_color,
-                options=[qtg.QColorDialog.ShowAlphaChannel],
+            color = qtw.QColorDialog.getColor(
+                initial=self._color,
+                options=qtw.QColorDialog.ShowAlphaChannel,
             )
             if color.isValid():
-                self._colorRGB = color.rgba()
-                self.setColor(self._colorRGB)
+                self.setColor(color)
         except Exception:
             pass
 
@@ -646,7 +538,7 @@ class Model3DWidget(qtw.QWidget):
         the parent widget
     """
 
-    # options
+    # options pane
     marker_options = None
     force_options = None
     link_options = None
@@ -656,27 +548,29 @@ class Model3DWidget(qtw.QWidget):
     emg_bar_options = None
     options_pane = None
 
-    # class variables
-    dpi = 300
-    data = None
-    slider = None
-    canvas3D = None
-    canvasEMG = None
-    time_label = None
+    # command bar
     home_button = None
-    option_button = None
-    speed_box = None
-    play_button = None
-    forward_button = None
-    backward_button = None
-    repeat_button = None
     marker_button = None
     force_button = None
     link_button = None
     text_button = None
     reference_button = None
+    backward_button = None
+    play_button = None
+    forward_button = None
+    speed_box = None
+    repeat_button = None
+    time_label = None
+    progress_slider = None
+    option_button = None
+
+    # class variables
+    data = None
+    canvas3D = None
+    canvasEMG = None
 
     # private variables
+    _dpi = 300
     _times = None
     _font_size = 12
     _button_size = 35
@@ -701,13 +595,13 @@ class Model3DWidget(qtw.QWidget):
     _path = None
     _init_view = {"elev": 10, "azim": 45, "vertical_axis": 2}
     _limits = None
-    _marker_color = (255, 0, 0, 1)
-    _force_color = (0, 255, 0, 0.7)
-    _link_color = (0, 0, 255, 0.7)
-    _text_color = (0, 0, 0, 1)
-    _reference_color = (0, 125, 125, 0.5)
-    _emg_signal_color = (125, 125, 0, 1)
-    _emg_bar_color = (125, 0, 125, 0.1)
+    _marker_color = (1, 0, 0, 1)
+    _force_color = (0, 1, 0, 0.7)
+    _link_color = (0, 0, 1, 0.7)
+    _text_color = (0, 0, 0, 0.5)
+    _reference_color = (0, 0.5, 0.5, 0.5)
+    _emg_signal_color = (0.5, 0.5, 0, 1)
+    _emg_bar_color = (0.5, 0, 0.5, 1)
 
     def __init__(
         self,
@@ -800,7 +694,7 @@ class Model3DWidget(qtw.QWidget):
             # figure
             rows = len(self.data["EmgSensor"])
             grid = GridSpec(rows, 1)
-            self._figureEMG = pl.figure(dpi=self.dpi)
+            self._figureEMG = pl.figure(dpi=self._dpi)
             self.canvasEMG = FigureCanvasQTAgg(self._figureEMG)
 
             # resizing event handler
@@ -811,8 +705,9 @@ class Model3DWidget(qtw.QWidget):
 
             # add the emg data
             self._EmgSensor = {}
-            emg_axes = []
+            axes = []
             for i, s in enumerate(model.EmgSensor):
+                self._EmgSensor[s] = {}
 
                 # plot the whole EMG signal
                 ax = self._figureEMG.add_subplot(grid[rows - 1 - i])
@@ -820,7 +715,8 @@ class Model3DWidget(qtw.QWidget):
                 obj = obj.dropna()
                 time = obj.index.to_numpy()
                 amplitude = obj.values.flatten()
-                ax.plot(time, amplitude, linewidth=0.5)
+                line = ax.plot(time, amplitude, linewidth=0.5)
+                self._EmgSensor[s]["Signal"] = line[0]
 
                 # plot the title within the figure box
                 xt = time[0]
@@ -846,7 +742,7 @@ class Model3DWidget(qtw.QWidget):
 
                 # share the x axis
                 if i > 0:
-                    ax.get_shared_x_axes().join(emg_axes[0], ax)
+                    ax.get_shared_x_axes().join(axes[0], ax)
                     ax.set_xticklabels([])
 
                 # adjust the layout
@@ -867,13 +763,10 @@ class Model3DWidget(qtw.QWidget):
                     pad=1,
                 )
 
-                # update the emg axes
-                emg_axes += [ax]
-
                 # plot the vertical lines
                 x_line = [self._times[0], self._times[0]]
                 y_line = [np.min(amplitude), np.max(amplitude)]
-                self._EmgSensor[s] = ax.plot(
+                self._EmgSensor[s]["Bar"] = ax.plot(
                     x_line,
                     y_line,
                     "--",
@@ -881,10 +774,15 @@ class Model3DWidget(qtw.QWidget):
                     animated=True,
                 )[0]
 
+                # store the axis
+                axes += [ax]
+
             # setup the figure animator object
+            artists = [i["Bar"] for i in self._EmgSensor.values()]
+            artists += [i["Signal"] for i in self._EmgSensor.values()]
             self._FigureAnimatorEMG = FigureAnimator(
                 figure=self._figureEMG,
-                artists=[i for i in self._EmgSensor.values()],
+                artists=artists,
             )
 
         else:
@@ -905,7 +803,7 @@ class Model3DWidget(qtw.QWidget):
         if model.has_ForcePlatform3D() or model.has_Marker3D():
 
             # generate the axis
-            self._figure3D = pl.figure(dpi=self.dpi)
+            self._figure3D = pl.figure(dpi=self._dpi)
             self.canvas3D = FigureCanvasQTAgg(self._figure3D)
             self._axis3D = self._figure3D.add_subplot(
                 projection="3d",
@@ -1272,14 +1170,14 @@ class Model3DWidget(qtw.QWidget):
         commands_bar.addWidget(self.time_label)
 
         # add the time slider
-        self.slider = qtw.QSlider(qtc.Qt.Horizontal)
-        self.slider.setValue(0)
-        self.slider.setMinimum(0)
-        self.slider.setMaximum(len(self._times) - 1)
-        self.slider.setTickInterval(1)
-        self.slider.valueChanged.connect(self._slider_moved)
-        self.slider.setFixedHeight(self._button_size)
-        commands_bar.addWidget(self.slider)
+        self.progress_slider = qtw.QSlider(qtc.Qt.Horizontal)
+        self.progress_slider.setValue(0)
+        self.progress_slider.setMinimum(0)
+        self.progress_slider.setMaximum(len(self._times) - 1)
+        self.progress_slider.setTickInterval(1)
+        self.progress_slider.valueChanged.connect(self._slider_moved)
+        self.progress_slider.setFixedHeight(self._button_size)
+        commands_bar.addWidget(self.progress_slider)
 
         # set the timer for the player
         self._play_timer = qtc.QTimer()
@@ -1402,11 +1300,10 @@ class Model3DWidget(qtw.QWidget):
         options_layout.addWidget(self.reference_options, 1, 2)
         options_layout.addWidget(self.emg_signal_options, 2, 2)
         options_layout.addWidget(self.emg_bar_options, 3, 2)
-        self.options_pane = qtw.QWidget()
+        self.options_pane = qtw.QWidget(parent=self.option_button)
         self.options_pane.setWindowFlags(qtc.Qt.FramelessWindowHint)
         self.options_pane.setWindowModality(qtc.Qt.NonModal)
         self.options_pane.setLayout(options_layout)
-        self.options_pane.setVisible(False)
 
         # set the option pane button
         self.option_button = self._command_button(
@@ -1424,10 +1321,30 @@ class Model3DWidget(qtw.QWidget):
         layout.addWidget(splitter)
         layout.addWidget(commands_bar)
         self.setLayout(layout)
+        self.installEventFilter(self)
 
         # set the starting view
         self._home_pressed()
         self._update_figure()
+        self.options_pane.show()
+        self.options_pane.hide()
+        self._adjust_emg_bars()
+        self._adjust_emg_signals()
+        self._adjust_forces()
+        self._adjust_labels()
+        self._adjust_markers()
+        self._adjust_references()
+        self._adjust_links()
+
+    def eventFilter(self, source, event):
+        """
+        handle events
+        """
+        if self.option_button.isChecked():
+            self._adjust_options_pane_position()
+            self.options_pane.setFocus()
+            self.options_pane.activateWindow()
+        return super().eventFilter(source, event)
 
     def is_running(self):
         """
@@ -1470,37 +1387,48 @@ class Model3DWidget(qtw.QWidget):
         button.setToolTip(tip)
         button.setEnabled(enabled)
         button.setCheckable(checkable)
-        if checkable:
+        if checkable and enabled:
             button.setChecked(True)
         if fun is not None:
             button.clicked.connect(fun)
         return button
 
+    def _move_option_pane(self):
+        """
+        private method used to move the option pane with the main widget.
+        """
+        butRect = self.option_button.rect()
+        cntRect = self.options_pane.rect()
+        loc = butRect.topRight()
+        loc -= cntRect.bottomRight()
+        loc = self.option_button.mapToGlobal(loc)
+        self.options_pane.move(loc)
+
     def _move_forward(self):
         """
         function handling the press of the play button.
         """
-        frame = self.slider.value()
+        frame = self.progress_slider.value()
         next_frame = frame + 1
-        if next_frame > self.slider.maximum():
+        if next_frame > self.progress_slider.maximum():
             if self.repeat_button.isChecked():
                 next_frame = 0
             else:
-                next_frame = self.slider.maximum()
-        self.slider.setValue(next_frame)
+                next_frame = self.progress_slider.maximum()
+        self.progress_slider.setValue(next_frame)
 
     def _move_backward(self):
         """
         function handling the press of the play button.
         """
-        frame = self.slider.value()
+        frame = self.progress_slider.value()
         next_frame = frame - 1
         if next_frame < 0:
             if self.repeat_button.isChecked():
-                next_frame = self.slider.maximum()
+                next_frame = self.progress_slider.maximum()
             else:
                 next_frame = 0
-        self.slider.setValue(next_frame)
+        self.progress_slider.setValue(next_frame)
 
     def _start_player(self):
         """
@@ -1539,18 +1467,18 @@ class Model3DWidget(qtw.QWidget):
         if lapsed > self._times[-1] - self._times[0]:
             if self.repeat_button.isChecked():
                 self._play_start_time = get_time()
-                self.slider.setValue(0)
+                self.progress_slider.setValue(0)
             else:
                 self._stop_player()
-                self.slider.setValue(self.slider.maximum())
+                self.progress_slider.setValue(self.progress_slider.maximum())
         else:
-            self.slider.setValue(np.argmin(abs(self._times - lapsed)))
+            self.progress_slider.setValue(np.argmin(abs(self._times - lapsed)))
 
     def _slider_moved(self):
         """
         event handler for the slider value update.
         """
-        self._actual_frame = self.slider.value()
+        self._actual_frame = self.progress_slider.value()
         self._update_figure()
 
     def _resize_event(self, event):
@@ -1589,9 +1517,11 @@ class Model3DWidget(qtw.QWidget):
                     self._Text3D[t]._y = y
                     self._Text3D[t]._z = z
                     if self.force_button.isChecked():
-                        self._ForcePlatform3D[t]._alpha = s
+                        force_alpha = self.force_options.color()[-1]
+                        self._ForcePlatform3D[t]._alpha = s * force_alpha
                         if self.text_button.isChecked():
-                            self._Text3D[t]._alpha = s
+                            text_alpha = self.text_options.color()[-1]
+                            self._Text3D[t]._alpha = s * text_alpha
                         else:
                             self._Text3D[t]._alpha = 0
                     else:
@@ -1606,7 +1536,8 @@ class Model3DWidget(qtw.QWidget):
                         np.array([z, w]),
                     )
                     if self.link_button.isChecked():
-                        self._Link3D[t]._alpha = s
+                        link_alpha = self.link_options.color()[-1]
+                        self._Link3D[t]._alpha = s * link_alpha
                     else:
                         self._Link3D[t]._alpha = 0
 
@@ -1617,9 +1548,11 @@ class Model3DWidget(qtw.QWidget):
                     self._Text3D[t]._y = y
                     self._Text3D[t]._z = z
                     if self.marker_button.isChecked():
-                        self._Marker3D[t]._alpha = s
+                        marker_alpha = self.marker_options.color()[-1]
+                        self._Marker3D[t]._alpha = s * marker_alpha
                         if self.text_button.isChecked():
-                            self._Text3D[t]._alpha = s
+                            text_alpha = self.text_options.color()[-1]
+                            self._Text3D[t]._alpha = s * text_alpha
                         else:
                             self._Text3D[t]._alpha = 0
                     else:
@@ -1628,7 +1561,7 @@ class Model3DWidget(qtw.QWidget):
 
                 elif sns == "EmgSensor":
                     x, y, s = df.loc[time].values
-                    self._EmgSensor[t].set_xdata([x, y])
+                    self._EmgSensor[t]["Bar"].set_xdata([x, y])
 
         # update the figures
         if self._figure3D is not None:
@@ -1642,13 +1575,14 @@ class Model3DWidget(qtw.QWidget):
         handler for the reference button.
         """
         # update the reference frame
+        alpha = self.reference_options.color()[-1]
         for n in self._ReferenceFrame3D:
             if self.reference_button.isChecked():
-                self._ReferenceFrame3D[n]["Text"].set_color("red")
-                self._ReferenceFrame3D[n]["Versor"].set_color("gold")
+                self._ReferenceFrame3D[n]["Text"].set_alpha(alpha)
+                self._ReferenceFrame3D[n]["Versor"].set_alpha(alpha)
             else:
-                self._ReferenceFrame3D[n]["Text"].set_color((1, 1, 1, 0))
-                self._ReferenceFrame3D[n]["Versor"].set_color((1, 1, 1, 0))
+                self._ReferenceFrame3D[n]["Text"].set_alpha(0)
+                self._ReferenceFrame3D[n]["Versor"].set_alpha(0)
         self._update_figure()
 
     def _play_pressed(self):
@@ -1684,7 +1618,7 @@ class Model3DWidget(qtw.QWidget):
         self._axis3D.set_xlim(*self._limits)
         self._axis3D.set_ylim(*self._limits)
         self._axis3D.set_zlim(*self._limits)
-        self.slider.setValue(0)
+        self.progress_slider.setValue(0)
         self._figure3D.canvas.draw()
         self._figureEMG.canvas.draw()
 
@@ -1692,16 +1626,19 @@ class Model3DWidget(qtw.QWidget):
         """
         method handling the options button press events.
         """
-        if self.option_button.isChecked():
-            butRect = self.option_button.rect()
-            cntRect = self.options_pane.rect()
-            loc = butRect.topRight()
-            loc -= cntRect.bottomRight()
-            loc = self.option_button.mapToGlobal(loc)
-            self.options_pane.move(loc)
-            self.options_pane.setVisible(True)
-        else:
-            self.options_pane.setVisible(False)
+        self._stop_player()
+        self.options_pane.setVisible(self.option_button.isChecked())
+
+    def _adjust_options_pane_position(self):
+        """
+        method handling the location of the options pane
+        """
+        butRect = self.option_button.rect()
+        cntRect = self.options_pane.rect()
+        loc = butRect.topRight()
+        loc -= cntRect.bottomRight()
+        loc = self.option_button.mapToGlobal(loc)
+        self.options_pane.move(loc)
 
     def _adjust_speed(self):
         """
@@ -1713,40 +1650,87 @@ class Model3DWidget(qtw.QWidget):
         """
         adjust the markers appearance.
         """
-        pass
+        for n in self._Marker3D:
+            self._Marker3D[n].set_color(self.marker_options.color())
+            self._Marker3D[n].set_ms(self.marker_options.value())
+        self._update_figure()
 
     def _adjust_forces(self):
         """
         adjust the forces appearance.
         """
-        pass
+        for n in self._ForcePlatform3D:
+            self._ForcePlatform3D[n].set_color(self.force_options.color())
+            self._ForcePlatform3D[n].set_linewidth(self.force_options.value())
+        self._update_figure()
 
     def _adjust_links(self):
         """
         adjust the links appearance.
         """
-        pass
+        for n in self._Link3D:
+            self._Link3D[n].set_color(self.link_options.color())
+            self._Link3D[n].set_linewidth(self.link_options.value())
+        self._update_figure()
 
     def _adjust_references(self):
         """
         adjust the reference frame appearance.
         """
-        pass
+        col = self.reference_options.color()
+        val = self.reference_options.value()
+        for n in self._ReferenceFrame3D:
+            self._ReferenceFrame3D[n]["Text"].set_color(col)
+            self._ReferenceFrame3D[n]["Versor"].set_color(col)
+            self._ReferenceFrame3D[n]["Versor"].set_linewidth(val)
+            if not self.reference_button.isChecked():
+                self._ReferenceFrame3D[n]["Text"].set_alpha(0)
+                self._ReferenceFrame3D[n]["Versor"].set_alpha(0)
+        self._update_figure()
 
     def _adjust_labels(self):
         """
         adjust the text appearance.
         """
-        pass
+        val = self.text_options.value()
+        col = self.text_options.color()
+
+        # adjust labels
+        for n in self._Text3D:
+            self._Text3D[n].set_size(val)
+            self._Text3D[n].set_color(col)
+            markers = list(self._Marker3D.keys())
+            forces = list(self._ForcePlatform3D.keys())
+            if n in markers and not self.marker_button.isChecked():
+                self._Text3D[n].set_alpha(0)
+            elif n in forces and not self.force_button.isChecked():
+                self._Text3D[n].set_alpha(0)
+
+        # adjust reference frame axis labels
+        for n in self._ReferenceFrame3D:
+            self._ReferenceFrame3D[n]["Text"].set_size(val)
+
+        # update
+        self._update_figure()
 
     def _adjust_emg_signals(self):
         """
         adjust the emg signals appearance.
         """
-        pass
+        col = self.emg_signal_options.color()
+        val = self.emg_signal_options.value()
+        for n in self._EmgSensor:
+            self._EmgSensor[n]["Signal"].set_color(col)
+            self._EmgSensor[n]["Signal"].set_linewidth(val)
+        self._update_figure()
 
     def _adjust_emg_bars(self):
         """
         adjust the emg bars appearance.
         """
-        pass
+        col = self.emg_bar_options.color()
+        val = self.emg_bar_options.value()
+        for n in self._EmgSensor:
+            self._EmgSensor[n]["Bar"].set_color(col)
+            self._EmgSensor[n]["Bar"].set_linewidth(val)
+        self._update_figure()
