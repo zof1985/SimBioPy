@@ -353,6 +353,9 @@ class OptionPane(qtw.QWidget):
     label: str
         the name of the option.
 
+    zorder: int
+        the order of visualization of each object.
+
     min_value: float
         the minimum acceptable value.
 
@@ -371,20 +374,23 @@ class OptionPane(qtw.QWidget):
 
     # class variables
     label = None
-    valueSlider = None
-    valueBox = None
+    sizeSlider = None
+    sizeBox = None
     colorBox = None
     font_size = None
     object_size = None
+    zorderBox = None
     _color = None
 
     # signals
+    zorderChanged = qtc.Signal()
     colorChanged = qtc.Signal()
     valueChanged = qtc.Signal()
 
     def __init__(
         self,
         label="",
+        zorder=0,
         min_value=1,
         max_value=100,
         step_value=1,
@@ -404,33 +410,90 @@ class OptionPane(qtw.QWidget):
 
         # label
         self.label = qtw.QLabel(label)
-        self.label.setFont(qtg.QFont("Arial", self.font_size))
+        label_font = qtg.QFont("Arial", self.font_size)
+        label_font.setBold(True)
+        self.label.setFont(label_font)
         self.label.setFixedHeight(self.object_size)
-        self.label.setAlignment(qtc.Qt.AlignRight | qtc.Qt.AlignVCenter)
+        self.label.setAlignment(qtc.Qt.AlignLeft | qtc.Qt.AlignBottom)
 
-        # slider
-        self.valueSlider = qtw.QSlider(qtc.Qt.Horizontal)
-        self.valueSlider.setMinimum(min_value * 10)
-        self.valueSlider.setMaximum(max_value * 10)
-        self.valueSlider.setTickInterval(step_value * 10)
-        self.valueSlider.setValue(default_value * 10)
-        self.valueSlider.setFixedHeight(self.object_size)
-        self.valueSlider.setFixedWidth(self.object_size * 5)
-        self.valueSlider.setStyleSheet("border: none;")
+        # zorder label
+        zorder_label = qtw.QLabel("Z Order")
+        object_font = qtg.QFont("Arial", max(1, self.font_size - 2))
+        zorder_label.setFont(object_font)
+        zorder_label.setFixedHeight(self.object_size)
+        zorder_label.setAlignment(qtc.Qt.AlignCenter | qtc.Qt.AlignBottom)
+
+        # zorder box
+        self.zorderBox = self.sizeBox = qtw.QSpinBox()
+        self.zorderBox.setFont(object_font)
+        self.zorderBox.setFixedHeight(self.object_size)
+        self.zorderBox.setFixedWidth(self.object_size * 2)
+        self.zorderBox.setMinimum(0)
+        self.zorderBox.setMaximum(10)
+        self.zorderBox.setSingleStep(1)
+        self.zorderBox.setValue(zorder)
+        self.zorderBox.setStyleSheet("border: none;")
+
+        # zorder pane
+        zorder_layout = qtw.QVBoxLayout()
+        zorder_layout.setSpacing(0)
+        zorder_layout.setContentsMargins(0, 0, 0, 0)
+        zorder_layout.addWidget(zorder_label)
+        zorder_layout.addWidget(self.zorderBox)
+        zorder_widget = qtw.QWidget()
+        zorder_widget.setLayout(zorder_layout)
+
+        # size label
+        size_label = qtw.QLabel("Size")
+        size_label.setFont(object_font)
+        size_label.setFixedHeight(self.object_size)
+        size_label.setAlignment(qtc.Qt.AlignCenter | qtc.Qt.AlignBottom)
+
+        # size slider
+        self.sizeSlider = qtw.QSlider(qtc.Qt.Horizontal)
+        self.sizeSlider.setMinimum(min_value * 10)
+        self.sizeSlider.setMaximum(max_value * 10)
+        self.sizeSlider.setTickInterval(step_value * 10)
+        self.sizeSlider.setValue(default_value * 10)
+        self.sizeSlider.setFixedHeight(self.object_size)
+        self.sizeSlider.setFixedWidth(self.object_size * 5)
+        self.sizeSlider.setStyleSheet("border: none;")
 
         # spinbox
-        self.valueBox = qtw.QDoubleSpinBox()
-        self.valueBox.setDecimals(1)
-        self.valueBox.setFont(qtg.QFont("Arial", self.font_size))
-        self.valueBox.setFixedHeight(self.object_size)
-        self.valueBox.setFixedWidth(self.object_size * 2)
-        self.valueBox.setMinimum(min_value)
-        self.valueBox.setMaximum(max_value)
-        self.valueBox.setSingleStep(step_value)
-        self.valueBox.setValue(default_value)
-        self.valueBox.setStyleSheet("border: none;")
+        self.sizeBox = qtw.QDoubleSpinBox()
+        self.sizeBox.setDecimals(1)
+        self.sizeBox.setFont(object_font)
+        self.sizeBox.setFixedHeight(self.object_size)
+        self.sizeBox.setFixedWidth(self.object_size * 2)
+        self.sizeBox.setMinimum(min_value)
+        self.sizeBox.setMaximum(max_value)
+        self.sizeBox.setSingleStep(step_value)
+        self.sizeBox.setValue(default_value)
+        self.sizeBox.setStyleSheet("border: none;")
 
-        # color
+        # size pane
+        size_layout1 = qtw.QHBoxLayout()
+        size_layout1.setSpacing(0)
+        size_layout1.setContentsMargins(0, 0, 0, 0)
+        size_layout1.addWidget(self.sizeSlider)
+        size_layout1.addWidget(self.sizeBox)
+        size_widget1 = qtw.QWidget()
+        size_widget1.setLayout(size_layout1)
+        size_layout2 = qtw.QVBoxLayout()
+        size_layout2.setSpacing(0)
+        size_layout2.setContentsMargins(0, 0, 0, 0)
+        size_layout2.addWidget(size_label)
+        size_layout2.addWidget(size_widget1)
+        size_widget2 = qtw.QWidget()
+        size_widget2.setLayout(size_layout2)
+
+        # color label
+        color_label = qtw.QLabel("Color")
+        color_label.setFont(object_font)
+        color_label.setFixedHeight(self.object_size)
+        color_label.setAlignment(qtc.Qt.AlignCenter | qtc.Qt.AlignBottom)
+
+        # color box
         self.colorBox = qtw.QPushButton()
         self.colorBox.setFixedHeight(self.object_size)
         self.colorBox.setFixedWidth(self.object_size)
@@ -438,25 +501,48 @@ class OptionPane(qtw.QWidget):
         self.colorBox.setStyleSheet("border: 0px;")
         self.setColor(default_color)
 
+        # color pane
+        color_layout = qtw.QVBoxLayout()
+        color_layout.setSpacing(0)
+        color_layout.setContentsMargins(0, 0, 0, 0)
+        color_layout.addWidget(color_label)
+        color_layout.addWidget(self.colorBox)
+        color_widget = qtw.QWidget()
+        color_widget.setLayout(color_layout)
+
         # option pane
-        layout = qtw.QHBoxLayout()
+        data_layout = qtw.QHBoxLayout()
+        data_layout.addWidget(color_widget)
+        data_layout.addWidget(size_widget2)
+        data_layout.addWidget(zorder_widget)
+        data_layout.setSpacing(10)
+        data_layout.setContentsMargins(0, 0, 0, 0)
+        data_widget = qtw.QWidget()
+        data_widget.setLayout(data_layout)
+        layout = qtw.QVBoxLayout()
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.label)
-        layout.addWidget(self.valueSlider)
-        layout.addWidget(self.valueBox)
-        layout.addWidget(self.colorBox)
-        layout.setSpacing(10)
+        layout.addWidget(data_widget)
         self.setLayout(layout)
 
         # connections
-        self.valueBox.valueChanged.connect(self.adjust_slider)
-        self.valueSlider.valueChanged.connect(self.adjust_box)
-        self.colorBox.clicked.connect(self.select_color)
+        self.sizeBox.valueChanged.connect(self.adjustSizeSlider)
+        self.sizeSlider.valueChanged.connect(self.adjustSizeBox)
+        self.colorBox.clicked.connect(self.adjustColor)
+        self.zorderBox.valueChanged.connect(self.adjustZOrderBox)
 
-    def value(self):
+    def zorder(self):
         """
-        return the actual value stored.
+        return the actual stored zorder.
         """
-        return self.valueBox.value()
+        return self.zorderBox.value()
+
+    def size(self):
+        """
+        return the actual stored size.
+        """
+        return self.sizeBox.value()
 
     def color(self):
         """
@@ -464,20 +550,40 @@ class OptionPane(qtw.QWidget):
         """
         return self._color.getRgbF()
 
-    def adjust_slider(self):
+    def adjustSizeSlider(self):
         """
         adjust the slider value according to the spinbox value.
         """
-        if self.valueSlider.value() != self.valueBox.value():
-            self.valueSlider.setValue(self.valueBox.value() * 10)
+        if self.sizeSlider.value() != self.sizeBox.value():
+            self.sizeSlider.setValue(self.sizeBox.value() * 10)
 
-    def adjust_box(self):
+    def adjustSizeBox(self):
         """
         adjust the spinbox value according to the slider value.
         """
-        if self.valueSlider.value() != self.valueBox.value():
-            self.valueBox.setValue(self.valueSlider.value() / 10)
+        if self.sizeSlider.value() != self.sizeBox.value():
+            self.sizeBox.setValue(self.sizeSlider.value() / 10)
             self.valueChanged.emit()
+
+    def adjustZOrderBox(self):
+        """
+        handle changes in the zorderBox.
+        """
+        self.zorderChanged.emit()
+
+    def adjustColor(self):
+        """
+        select and set the desired color.
+        """
+        try:
+            color = qtw.QColorDialog.getColor(
+                initial=self._color,
+                options=qtw.QColorDialog.ShowAlphaChannel,
+            )
+            if color.isValid():
+                self.setColor(color)
+        except Exception:
+            pass
 
     def setColor(self, rgba):
         """
@@ -506,20 +612,6 @@ class OptionPane(qtw.QWidget):
         txt = "background-color: rgba{};".format(values)
         self.colorBox.setStyleSheet(txt)
         self.colorChanged.emit()
-
-    def select_color(self):
-        """
-        select and set the desired color.
-        """
-        try:
-            color = qtw.QColorDialog.getColor(
-                initial=self._color,
-                options=qtw.QColorDialog.ShowAlphaChannel,
-            )
-            if color.isValid():
-                self.setColor(color)
-        except Exception:
-            pass
 
 
 class Model3DWidget(qtw.QWidget):
@@ -1194,11 +1286,12 @@ class Model3DWidget(qtw.QWidget):
             step_value=0.1,
             default_value=1,
             default_color=self._marker_color,
-            font_size=self._font_size,
-            object_size=self._button_size,
+            font_size=self._font_size - 2,
+            object_size=20,
         )
         self.marker_options.valueChanged.connect(self._adjust_markers)
         self.marker_options.colorChanged.connect(self._adjust_markers)
+        self.marker_options.zorderChanged.connect(self._adjust_markers)
         self.marker_options.setEnabled(self.marker_button.isEnabled())
 
         # force options
@@ -1209,11 +1302,12 @@ class Model3DWidget(qtw.QWidget):
             step_value=0.1,
             default_value=0.5,
             default_color=self._force_color,
-            font_size=self._font_size,
-            object_size=self._button_size,
+            font_size=self._font_size - 2,
+            object_size=20,
         )
         self.force_options.valueChanged.connect(self._adjust_forces)
         self.force_options.colorChanged.connect(self._adjust_forces)
+        self.force_options.zorderChanged.connect(self._adjust_forces)
         self.force_options.setEnabled(self.force_button.isEnabled())
 
         # link options
@@ -1224,11 +1318,12 @@ class Model3DWidget(qtw.QWidget):
             step_value=0.1,
             default_value=0.5,
             default_color=self._link_color,
-            font_size=self._font_size,
-            object_size=self._button_size,
+            font_size=self._font_size - 2,
+            object_size=20,
         )
         self.link_options.valueChanged.connect(self._adjust_links)
         self.link_options.colorChanged.connect(self._adjust_links)
+        self.link_options.zorderChanged.connect(self._adjust_links)
         self.link_options.setEnabled(self.link_button.isEnabled())
 
         # text options
@@ -1239,11 +1334,12 @@ class Model3DWidget(qtw.QWidget):
             step_value=0.1,
             default_value=3,
             default_color=self._text_color,
-            font_size=self._font_size,
-            object_size=self._button_size,
+            font_size=self._font_size - 2,
+            object_size=20,
         )
         self.text_options.valueChanged.connect(self._adjust_labels)
         self.text_options.colorChanged.connect(self._adjust_labels)
+        self.text_options.zorderChanged.connect(self._adjust_labels)
         self.text_options.setEnabled(self.text_button.isEnabled())
 
         # reference options
@@ -1254,11 +1350,12 @@ class Model3DWidget(qtw.QWidget):
             step_value=0.1,
             default_value=1,
             default_color=self._reference_color,
-            font_size=self._font_size,
-            object_size=self._button_size,
+            font_size=self._font_size - 2,
+            object_size=20,
         )
         self.reference_options.valueChanged.connect(self._adjust_references)
         self.reference_options.colorChanged.connect(self._adjust_references)
+        self.reference_options.zorderChanged.connect(self._adjust_references)
         self.reference_options.setEnabled(self.reference_button.isEnabled())
 
         # emg signal options
@@ -1269,11 +1366,12 @@ class Model3DWidget(qtw.QWidget):
             step_value=0.1,
             default_value=0.5,
             default_color=self._emg_signal_color,
-            font_size=self._font_size,
-            object_size=self._button_size,
+            font_size=self._font_size - 2,
+            object_size=20,
         )
         self.emg_signal_options.valueChanged.connect(self._adjust_emg_signals)
         self.emg_signal_options.colorChanged.connect(self._adjust_emg_signals)
+        self.emg_signal_options.zorderChanged.connect(self._adjust_emg_signals)
         self.emg_signal_options.setEnabled(model.has_EmgSensor())
 
         # emg bar options
@@ -1284,11 +1382,12 @@ class Model3DWidget(qtw.QWidget):
             step_value=0.1,
             default_value=0.3,
             default_color=self._emg_bar_color,
-            font_size=self._font_size,
-            object_size=self._button_size,
+            font_size=self._font_size - 2,
+            object_size=20,
         )
         self.emg_bar_options.valueChanged.connect(self._adjust_emg_bars)
         self.emg_bar_options.colorChanged.connect(self._adjust_emg_bars)
+        self.emg_bar_options.zorderChanged.connect(self._adjust_emg_bars)
         self.emg_bar_options.setEnabled(model.has_EmgSensor())
 
         # options pane
@@ -1297,7 +1396,8 @@ class Model3DWidget(qtw.QWidget):
         options_layout.addWidget(self.marker_options, 1, 1)
         options_layout.addWidget(self.force_options, 2, 1)
         options_layout.addWidget(self.link_options, 3, 1)
-        options_layout.addWidget(self.reference_options, 1, 2)
+        options_layout.addWidget(self.reference_options, 4, 1)
+        options_layout.addWidget(self.text_options, 1, 2)
         options_layout.addWidget(self.emg_signal_options, 2, 2)
         options_layout.addWidget(self.emg_bar_options, 3, 2)
         self.options_pane = qtw.QWidget(parent=self.option_button)
@@ -1393,17 +1493,6 @@ class Model3DWidget(qtw.QWidget):
             button.clicked.connect(fun)
         return button
 
-    def _move_option_pane(self):
-        """
-        private method used to move the option pane with the main widget.
-        """
-        butRect = self.option_button.rect()
-        cntRect = self.options_pane.rect()
-        loc = butRect.topRight()
-        loc -= cntRect.bottomRight()
-        loc = self.option_button.mapToGlobal(loc)
-        self.options_pane.move(loc)
-
     def _move_forward(self):
         """
         function handling the press of the play button.
@@ -1478,6 +1567,10 @@ class Model3DWidget(qtw.QWidget):
         """
         event handler for the slider value update.
         """
+        # handle the options
+        self.option_button.setChecked(False)
+
+        # handle the slider
         self._actual_frame = self.progress_slider.value()
         self._update_figure()
 
@@ -1574,6 +1667,9 @@ class Model3DWidget(qtw.QWidget):
         """
         handler for the reference button.
         """
+        # handle the options
+        self.option_button.setChecked(False)
+
         # update the reference frame
         alpha = self.reference_options.color()[-1]
         for n in self._ReferenceFrame3D:
@@ -1589,6 +1685,10 @@ class Model3DWidget(qtw.QWidget):
         """
         method handling the play button press events.
         """
+        # handle the options
+        self.option_button.setChecked(False)
+
+        # handle the player
         if self.is_running():
             self._stop_player()
         else:
@@ -1598,6 +1698,10 @@ class Model3DWidget(qtw.QWidget):
         """
         method handling the forward button press events.
         """
+        # handle the options
+        self.option_button.setChecked(False)
+
+        # handle the button
         self._stop_player()
         self._move_forward()
 
@@ -1605,6 +1709,10 @@ class Model3DWidget(qtw.QWidget):
         """
         method handling the forward button press events.
         """
+        # handle the options
+        self.option_button.setChecked(False)
+
+        # handle the button
         self._stop_player()
         self._move_backward()
 
@@ -1612,6 +1720,10 @@ class Model3DWidget(qtw.QWidget):
         """
         method handling the home button press events.
         """
+        # handle the options
+        self.option_button.setChecked(False)
+
+        # handle the button
         self._stop_player()
         self._axis3D.elev = self._init_view["elev"]
         self._axis3D.azim = self._init_view["azim"]
@@ -1652,7 +1764,8 @@ class Model3DWidget(qtw.QWidget):
         """
         for n in self._Marker3D:
             self._Marker3D[n].set_color(self.marker_options.color())
-            self._Marker3D[n].set_ms(self.marker_options.value())
+            self._Marker3D[n].set_ms(self.marker_options.size())
+            self._Marker3D[n].zorder = self.marker_options.zorder()
         self._update_figure()
 
     def _adjust_forces(self):
@@ -1661,7 +1774,8 @@ class Model3DWidget(qtw.QWidget):
         """
         for n in self._ForcePlatform3D:
             self._ForcePlatform3D[n].set_color(self.force_options.color())
-            self._ForcePlatform3D[n].set_linewidth(self.force_options.value())
+            self._ForcePlatform3D[n].set_linewidth(self.force_options.size())
+            self._ForcePlatform3D[n].zorder = self.force_options.zorder()
         self._update_figure()
 
     def _adjust_links(self):
@@ -1670,7 +1784,8 @@ class Model3DWidget(qtw.QWidget):
         """
         for n in self._Link3D:
             self._Link3D[n].set_color(self.link_options.color())
-            self._Link3D[n].set_linewidth(self.link_options.value())
+            self._Link3D[n].set_linewidth(self.link_options.size())
+            self._Link3D[n].zorder = self.link_options.zorder()
         self._update_figure()
 
     def _adjust_references(self):
@@ -1678,11 +1793,14 @@ class Model3DWidget(qtw.QWidget):
         adjust the reference frame appearance.
         """
         col = self.reference_options.color()
-        val = self.reference_options.value()
+        val = self.reference_options.size()
+        order = self.reference_options.zorder()
         for n in self._ReferenceFrame3D:
             self._ReferenceFrame3D[n]["Text"].set_color(col)
+            self._ReferenceFrame3D[n]["Text"].zorder = order
             self._ReferenceFrame3D[n]["Versor"].set_color(col)
             self._ReferenceFrame3D[n]["Versor"].set_linewidth(val)
+            self._ReferenceFrame3D[n]["Versor"].zorder = order
             if not self.reference_button.isChecked():
                 self._ReferenceFrame3D[n]["Text"].set_alpha(0)
                 self._ReferenceFrame3D[n]["Versor"].set_alpha(0)
@@ -1692,13 +1810,15 @@ class Model3DWidget(qtw.QWidget):
         """
         adjust the text appearance.
         """
-        val = self.text_options.value()
+        val = self.text_options.size()
         col = self.text_options.color()
+        order = self.text_options.zorder()
 
         # adjust labels
         for n in self._Text3D:
             self._Text3D[n].set_size(val)
             self._Text3D[n].set_color(col)
+            self._Text3D[n].zorder = order
             markers = list(self._Marker3D.keys())
             forces = list(self._ForcePlatform3D.keys())
             if n in markers and not self.marker_button.isChecked():
@@ -1718,10 +1838,12 @@ class Model3DWidget(qtw.QWidget):
         adjust the emg signals appearance.
         """
         col = self.emg_signal_options.color()
-        val = self.emg_signal_options.value()
+        val = self.emg_signal_options.size()
+        order = self.emg_signal_options.zorder()
         for n in self._EmgSensor:
             self._EmgSensor[n]["Signal"].set_color(col)
             self._EmgSensor[n]["Signal"].set_linewidth(val)
+            self._EmgSensor[n]["Signal"].zorder = order
         self._update_figure()
 
     def _adjust_emg_bars(self):
@@ -1729,8 +1851,10 @@ class Model3DWidget(qtw.QWidget):
         adjust the emg bars appearance.
         """
         col = self.emg_bar_options.color()
-        val = self.emg_bar_options.value()
+        val = self.emg_bar_options.size()
+        order = self.emg_bar_options.zorder()
         for n in self._EmgSensor:
             self._EmgSensor[n]["Bar"].set_color(col)
             self._EmgSensor[n]["Bar"].set_linewidth(val)
+            self._EmgSensor[n]["Bar"].zorder = order
         self._update_figure()
