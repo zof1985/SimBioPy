@@ -344,7 +344,7 @@ class FigureAnimator:
         self.figure.canvas.flush_events()
 
 
-class OptionPane(qtw.QWidget):
+class OptionGroup(qtw.QGroupBox):
     """
     make a line option.
 
@@ -390,12 +390,12 @@ class OptionPane(qtw.QWidget):
     def __init__(
         self,
         label="",
-        zorder=0,
         min_value=1,
         max_value=100,
         step_value=1,
         default_value=1,
         default_color=(255, 0, 0, 255),
+        default_zorder=0,
         font_size=12,
         object_size=35,
     ):
@@ -407,14 +407,6 @@ class OptionPane(qtw.QWidget):
         # sizes
         self.font_size = font_size
         self.object_size = object_size
-
-        # label
-        self.label = qtw.QLabel(label)
-        label_font = qtg.QFont("Arial", self.font_size)
-        label_font.setBold(True)
-        self.label.setFont(label_font)
-        self.label.setFixedHeight(self.object_size)
-        self.label.setAlignment(qtc.Qt.AlignLeft | qtc.Qt.AlignBottom)
 
         # zorder label
         zorder_label = qtw.QLabel("Z Order")
@@ -431,7 +423,7 @@ class OptionPane(qtw.QWidget):
         self.zorderBox.setMinimum(0)
         self.zorderBox.setMaximum(10)
         self.zorderBox.setSingleStep(1)
-        self.zorderBox.setValue(zorder)
+        self.zorderBox.setValue(default_zorder)
         self.zorderBox.setStyleSheet("border: none;")
 
         # zorder pane
@@ -511,20 +503,14 @@ class OptionPane(qtw.QWidget):
         color_widget.setLayout(color_layout)
 
         # option pane
-        data_layout = qtw.QHBoxLayout()
-        data_layout.addWidget(color_widget)
-        data_layout.addWidget(size_widget2)
-        data_layout.addWidget(zorder_widget)
-        data_layout.setSpacing(10)
-        data_layout.setContentsMargins(0, 0, 0, 0)
-        data_widget = qtw.QWidget()
-        data_widget.setLayout(data_layout)
-        layout = qtw.QVBoxLayout()
-        layout.setSpacing(0)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.label)
-        layout.addWidget(data_widget)
+        layout = qtw.QHBoxLayout()
+        layout.addWidget(color_widget)
+        layout.addWidget(size_widget2)
+        layout.addWidget(zorder_widget)
+        layout.setSpacing(10)
+        layout.setContentsMargins(2, 0, 2, 2)
         self.setLayout(layout)
+        self.setTitle(label)
 
         # connections
         self.sizeBox.valueChanged.connect(self.adjustSizeSlider)
@@ -642,6 +628,7 @@ class Model3DWidget(qtw.QWidget):
 
     # command bar
     home_button = None
+    media_action = None
     marker_button = None
     force_button = None
     link_button = None
@@ -655,6 +642,48 @@ class Model3DWidget(qtw.QWidget):
     time_label = None
     progress_slider = None
     option_button = None
+
+    # default settings
+    _default_view = {
+        "elev": 10,
+        "azim": 45,
+        "vertical_axis": "y",
+    }
+    _default_marker = {
+        "color": (1, 0, 0, 1),
+        "markersize": 1.0,
+        "zorder": 1,
+    }
+    _default_force = {
+        "color": (0, 1, 0, 0.7),
+        "linewidth": 0.5,
+        "zorder": 2,
+    }
+    _default_link = {
+        "color": (0, 0, 1, 0.7),
+        "linewidth": 0.5,
+        "zorder": 3,
+    }
+    _default_text = {
+        "color": (0, 0, 0, 0.5),
+        "size": 3,
+        "zorder": 0,
+    }
+    _default_ref = {
+        "color": (1, 0.5, 0, 1),
+        "linewidth": 0.5,
+        "zorder": 0,
+    }
+    _default_emg_signal = {
+        "color": (0, 0.5, 1, 0.7),
+        "linewidth": 0.1,
+        "zorder": 1,
+    }
+    _default_emg_bar = {
+        "color": (1, 0, 0.5, 1),
+        "linewidth": 0.5,
+        "zorder": 0,
+    }
 
     # class variables
     data = None
@@ -685,15 +714,7 @@ class Model3DWidget(qtw.QWidget):
     _FigureAnimatorEMG = None
     _play_start_time = None
     _path = None
-    _init_view = {"elev": 10, "azim": 45, "vertical_axis": 2}
     _limits = None
-    _marker_color = (1, 0, 0, 1)
-    _force_color = (0, 1, 0, 0.7)
-    _link_color = (0, 0, 1, 0.7)
-    _text_color = (0, 0, 0, 0.5)
-    _reference_color = (0, 0.5, 0.5, 0.5)
-    _emg_signal_color = (0.5, 0.5, 0, 1)
-    _emg_bar_color = (0.5, 0, 0.5, 1)
 
     def __init__(
         self,
@@ -889,7 +910,7 @@ class Model3DWidget(qtw.QWidget):
             dim = list(dfs["ForcePlatform3D"].values())[0].columns.to_numpy()
         txt = "vertical_axis not found in model."
         assert vertical_axis.upper() in dim, txt
-        self._init_view["vertical_axis"] = vertical_axis.lower()
+        self._default_view["vertical_axis"] = vertical_axis.lower()
 
         # create the 3D model pane
         if model.has_ForcePlatform3D() or model.has_Marker3D():
@@ -901,12 +922,11 @@ class Model3DWidget(qtw.QWidget):
                 projection="3d",
                 proj_type="ortho",  # 'persp'
                 adjustable="box",  # 'datalim'
-                facecolor=(1, 1, 1, 0),
                 frame_on=False,
             )
 
             # set the view
-            self._axis3D.view_init(**self._init_view)
+            self._axis3D.view_init(**self._default_view)
 
             # resizing event handler
             self._figure3D.canvas.mpl_connect(
@@ -951,6 +971,8 @@ class Model3DWidget(qtw.QWidget):
             self._limits = (minc, maxc)
 
             # plot the reference frame
+            ref_text = self._default_text.copy()
+            ref_text["color"] = self._default_ref["color"]
             self._ReferenceFrame3D = {
                 "X": {
                     "Versor": self._axis3D.quiver(
@@ -960,23 +982,19 @@ class Model3DWidget(qtw.QWidget):
                         0.15 * (maxc - minc),
                         0,
                         0,
-                        color="gold",
                         animated=True,
                         length=1,
-                        linewidth=0.5,
-                        zorder=3,
+                        **self._default_ref,
                     ),
                     "Text": self._axis3D.text(
                         0.2 * (maxc - minc),
                         0,
                         0,
                         "X",
-                        size=3,
-                        color="red",
                         animated=True,
-                        zorder=2,
                         ha="center",
                         va="center",
+                        **ref_text,
                     ),
                 },
                 "Y": {
@@ -987,23 +1005,19 @@ class Model3DWidget(qtw.QWidget):
                         0,
                         0.15 * (maxc - minc),
                         0,
-                        color="gold",
                         animated=True,
                         length=1,
-                        linewidth=0.5,
-                        zorder=3,
+                        **self._default_ref,
                     ),
                     "Text": self._axis3D.text(
                         0,
                         0.2 * (maxc - minc),
                         0,
                         "Y",
-                        size=3,
-                        color="red",
                         animated=True,
-                        zorder=2,
                         ha="center",
                         va="center",
+                        **ref_text,
                     ),
                 },
                 "Z": {
@@ -1014,23 +1028,19 @@ class Model3DWidget(qtw.QWidget):
                         0,
                         0,
                         0.15 * (maxc - minc),
-                        color="gold",
                         animated=True,
                         length=1,
-                        linewidth=0.5,
-                        zorder=3,
+                        **self._default_ref,
                     ),
                     "Text": self._axis3D.text(
                         0,
                         0,
                         0.2 * (maxc - minc),
                         "Z",
-                        size=3,
-                        color="red",
                         animated=True,
-                        zorder=2,
                         ha="center",
                         va="center",
+                        **ref_text,
                     ),
                 },
             }
@@ -1050,21 +1060,16 @@ class Model3DWidget(qtw.QWidget):
                             0,
                             0,
                             marker="o",
-                            alpha=0.5,
-                            markersize=2,
-                            color="navy",
                             animated=True,
-                            zorder=2,
+                            **self._default_marker,
                         )[0]
                         self._Text3D[l] = self._axis3D.text(
                             0,
                             0,
                             0,
                             "{:25s}".format(l),
-                            alpha=1.0,
-                            size=3,
                             animated=True,
-                            zorder=1,
+                            **self._default_text,
                         )
 
                     elif sns == "ForcePlatform3D":
@@ -1075,20 +1080,16 @@ class Model3DWidget(qtw.QWidget):
                             0,
                             0,
                             0,
-                            alpha=0.5,
-                            color="darkgreen",
                             animated=True,
-                            zorder=3,
+                            **self._default_force,
                         )[0]
                         self._Text3D[l] = self._axis3D.text(
                             0,
                             0,
                             0,
                             "{:25s}".format(l),
-                            alpha=1.0,
-                            size=3,
                             animated=True,
-                            zorder=1,
+                            **self._default_text,
                         )
 
                     elif sns == "Link3D":
@@ -1096,11 +1097,8 @@ class Model3DWidget(qtw.QWidget):
                             np.array([0, 0]),
                             np.array([0, 0]),
                             np.array([0, 0]),
-                            alpha=0.3,
-                            color="darkred",
-                            linewidth=1,
                             animated=True,
-                            zorder=3,
+                            **self._default_link,
                         )[0]
 
             # setup the Figure Animator
@@ -1139,6 +1137,15 @@ class Model3DWidget(qtw.QWidget):
         )
         commands_bar.addWidget(self.home_button)
 
+        # multimedia action button
+        media_icon = os.path.sep.join([self._path, "icons", "media.png"])
+        media_icon = self._makeIcon(media_icon)
+        self.media_action = qtw.QAction(media_icon, "", None)
+        self.media_action.triggered.connect(self._media_action_pressed)
+        self.media_action.setToolTip("Exporting options.")
+        self.media_action.setEnabled(False)  #! DEBUG
+        commands_bar.addAction(self.media_action)
+
         # add a separator
         commands_bar.addSeparator()
 
@@ -1148,7 +1155,7 @@ class Model3DWidget(qtw.QWidget):
             icon=os.path.sep.join([self._path, "icons", "markers.png"]),
             enabled=model.has_Marker3D(),
             checkable=True,
-            fun=self._update_figure,
+            fun=self._marker_button_pressed,
         )
         commands_bar.addWidget(self.marker_button)
 
@@ -1158,7 +1165,7 @@ class Model3DWidget(qtw.QWidget):
             icon=os.path.sep.join([self._path, "icons", "forces.png"]),
             enabled=model.has_ForcePlatform3D(),
             checkable=True,
-            fun=self._update_figure,
+            fun=self._force_button_pressed,
         )
         commands_bar.addWidget(self.force_button)
 
@@ -1168,7 +1175,7 @@ class Model3DWidget(qtw.QWidget):
             icon=os.path.sep.join([self._path, "icons", "links.png"]),
             enabled=model.has_Link3D(),
             checkable=True,
-            fun=self._update_figure,
+            fun=self._link_button_pressed,
         )
         commands_bar.addWidget(self.link_button)
 
@@ -1178,7 +1185,7 @@ class Model3DWidget(qtw.QWidget):
             icon=os.path.sep.join([self._path, "icons", "txt.png"]),
             enabled=model.has_ForcePlatform3D() | model.has_Marker3D(),
             checkable=True,
-            fun=self._update_figure,
+            fun=self._text_button_pressed,
         )
         commands_bar.addWidget(self.text_button)
 
@@ -1227,9 +1234,6 @@ class Model3DWidget(qtw.QWidget):
         self.forward_button.setAutoRepeat(True)
         commands_bar.addWidget(self.forward_button)
 
-        # add another separator
-        commands_bar.addSeparator()
-
         # speed controller
         self.speed_box = qtw.QSpinBox()
         self.speed_box.setFont(qtg.QFont("Arial", self._font_size))
@@ -1249,9 +1253,12 @@ class Model3DWidget(qtw.QWidget):
             icon=os.path.sep.join([self._path, "icons", "repeat.png"]),
             enabled=True,
             checkable=True,
-            fun=None,
+            fun=self._loop_pressed,
         )
         commands_bar.addWidget(self.repeat_button)
+
+        # add another separator
+        commands_bar.addSeparator()
 
         # add the time label
         self.time_label = qtw.QLabel("00:00.000")
@@ -1279,15 +1286,16 @@ class Model3DWidget(qtw.QWidget):
         commands_bar.addSeparator()
 
         # marker options
-        self.marker_options = OptionPane(
+        self.marker_options = OptionGroup(
             label="Markers",
             min_value=0.1,
-            max_value=10,
+            max_value=5,
             step_value=0.1,
-            default_value=1,
-            default_color=self._marker_color,
             font_size=self._font_size - 2,
             object_size=20,
+            default_value=self._default_marker["markersize"],
+            default_color=self._default_marker["color"],
+            default_zorder=self._default_marker["zorder"],
         )
         self.marker_options.valueChanged.connect(self._adjust_markers)
         self.marker_options.colorChanged.connect(self._adjust_markers)
@@ -1295,15 +1303,16 @@ class Model3DWidget(qtw.QWidget):
         self.marker_options.setEnabled(self.marker_button.isEnabled())
 
         # force options
-        self.force_options = OptionPane(
+        self.force_options = OptionGroup(
             label="Forces",
             min_value=0.1,
-            max_value=10,
+            max_value=5,
             step_value=0.1,
-            default_value=0.5,
-            default_color=self._force_color,
             font_size=self._font_size - 2,
             object_size=20,
+            default_value=self._default_force["linewidth"],
+            default_color=self._default_force["color"],
+            default_zorder=self._default_force["zorder"],
         )
         self.force_options.valueChanged.connect(self._adjust_forces)
         self.force_options.colorChanged.connect(self._adjust_forces)
@@ -1311,15 +1320,16 @@ class Model3DWidget(qtw.QWidget):
         self.force_options.setEnabled(self.force_button.isEnabled())
 
         # link options
-        self.link_options = OptionPane(
+        self.link_options = OptionGroup(
             label="Links",
             min_value=0.1,
-            max_value=10,
+            max_value=5,
             step_value=0.1,
-            default_value=0.5,
-            default_color=self._link_color,
             font_size=self._font_size - 2,
             object_size=20,
+            default_value=self._default_link["linewidth"],
+            default_color=self._default_link["color"],
+            default_zorder=self._default_link["zorder"],
         )
         self.link_options.valueChanged.connect(self._adjust_links)
         self.link_options.colorChanged.connect(self._adjust_links)
@@ -1327,15 +1337,16 @@ class Model3DWidget(qtw.QWidget):
         self.link_options.setEnabled(self.link_button.isEnabled())
 
         # text options
-        self.text_options = OptionPane(
+        self.text_options = OptionGroup(
             label="Labels",
             min_value=0.1,
             max_value=10,
             step_value=0.1,
-            default_value=3,
-            default_color=self._text_color,
             font_size=self._font_size - 2,
             object_size=20,
+            default_value=self._default_text["size"],
+            default_color=self._default_text["color"],
+            default_zorder=self._default_text["zorder"],
         )
         self.text_options.valueChanged.connect(self._adjust_labels)
         self.text_options.colorChanged.connect(self._adjust_labels)
@@ -1343,15 +1354,16 @@ class Model3DWidget(qtw.QWidget):
         self.text_options.setEnabled(self.text_button.isEnabled())
 
         # reference options
-        self.reference_options = OptionPane(
+        self.reference_options = OptionGroup(
             label="Reference frame",
             min_value=0.1,
             max_value=10,
             step_value=0.1,
-            default_value=1,
-            default_color=self._reference_color,
             font_size=self._font_size - 2,
             object_size=20,
+            default_value=self._default_ref["linewidth"],
+            default_color=self._default_ref["color"],
+            default_zorder=self._default_ref["zorder"],
         )
         self.reference_options.valueChanged.connect(self._adjust_references)
         self.reference_options.colorChanged.connect(self._adjust_references)
@@ -1359,15 +1371,16 @@ class Model3DWidget(qtw.QWidget):
         self.reference_options.setEnabled(self.reference_button.isEnabled())
 
         # emg signal options
-        self.emg_signal_options = OptionPane(
+        self.emg_signal_options = OptionGroup(
             label="EMG Signals",
             min_value=0.1,
             max_value=10,
             step_value=0.1,
-            default_value=0.5,
-            default_color=self._emg_signal_color,
             font_size=self._font_size - 2,
             object_size=20,
+            default_value=self._default_emg_signal["linewidth"],
+            default_color=self._default_emg_signal["color"],
+            default_zorder=self._default_emg_signal["zorder"],
         )
         self.emg_signal_options.valueChanged.connect(self._adjust_emg_signals)
         self.emg_signal_options.colorChanged.connect(self._adjust_emg_signals)
@@ -1375,15 +1388,16 @@ class Model3DWidget(qtw.QWidget):
         self.emg_signal_options.setEnabled(model.has_EmgSensor())
 
         # emg bar options
-        self.emg_bar_options = OptionPane(
+        self.emg_bar_options = OptionGroup(
             label="EMG Bars",
             min_value=0.1,
             max_value=10,
             step_value=0.1,
-            default_value=0.3,
-            default_color=self._emg_bar_color,
             font_size=self._font_size - 2,
             object_size=20,
+            default_value=self._default_emg_bar["linewidth"],
+            default_color=self._default_emg_bar["color"],
+            default_zorder=self._default_emg_bar["zorder"],
         )
         self.emg_bar_options.valueChanged.connect(self._adjust_emg_bars)
         self.emg_bar_options.colorChanged.connect(self._adjust_emg_bars)
@@ -1400,15 +1414,17 @@ class Model3DWidget(qtw.QWidget):
         options_layout.addWidget(self.text_options, 1, 2)
         options_layout.addWidget(self.emg_signal_options, 2, 2)
         options_layout.addWidget(self.emg_bar_options, 3, 2)
-        self.options_pane = qtw.QWidget(parent=self.option_button)
+        self.options_pane = qtw.QDialog(parent=self.option_button)
         self.options_pane.setWindowFlags(qtc.Qt.FramelessWindowHint)
         self.options_pane.setWindowModality(qtc.Qt.NonModal)
         self.options_pane.setLayout(options_layout)
+        options_icon = os.path.sep.join([self._path, "icons", "options.png"])
+        self.setWindowIcon(self._makeIcon(options_icon))
 
         # set the option pane button
         self.option_button = self._command_button(
             tip="Options.",
-            icon=os.path.sep.join([self._path, "icons", "options.png"]),
+            icon=options_icon,
             enabled=True,
             checkable=True,
             fun=self._options_pressed,
@@ -1422,6 +1438,9 @@ class Model3DWidget(qtw.QWidget):
         layout.addWidget(commands_bar)
         self.setLayout(layout)
         self.installEventFilter(self)
+        self.setWindowTitle("Model3DWidget")
+        icon_path = os.path.sep.join([self._path, "icons", "main.png"])
+        self.setWindowIcon(self._makeIcon(icon_path))
 
         # set the starting view
         self._home_pressed()
@@ -1435,6 +1454,13 @@ class Model3DWidget(qtw.QWidget):
         self._adjust_markers()
         self._adjust_references()
         self._adjust_links()
+
+    def _makeIcon(self, file):
+        """
+        internal function used to build icons from png file.
+        """
+        pix = qtg.QPixmap(file).scaled(self._button_size, self._button_size)
+        return qtg.QIcon(pix)
 
     def eventFilter(self, source, event):
         """
@@ -1480,17 +1506,17 @@ class Model3DWidget(qtw.QWidget):
         """
         button = qtw.QPushButton()
         button.setFlat(True)
-        if icon is not None:
-            icon = qtg.QPixmap(icon)
-            icon = icon.scaled(self._button_size, self._button_size)
-            button.setIcon(icon)
         button.setToolTip(tip)
         button.setEnabled(enabled)
         button.setCheckable(checkable)
+        button.setFixedHeight(self._button_size)
+        button.setFixedWidth(self._button_size)
         if checkable and enabled:
             button.setChecked(True)
         if fun is not None:
             button.clicked.connect(fun)
+        if icon is not None:
+            button.setIcon(self._makeIcon(icon))
         return button
 
     def _move_forward(self):
@@ -1569,6 +1595,7 @@ class Model3DWidget(qtw.QWidget):
         """
         # handle the options
         self.option_button.setChecked(False)
+        self.options_pane.hide()
 
         # handle the slider
         self._actual_frame = self.progress_slider.value()
@@ -1669,6 +1696,7 @@ class Model3DWidget(qtw.QWidget):
         """
         # handle the options
         self.option_button.setChecked(False)
+        self.options_pane.hide()
 
         # update the reference frame
         alpha = self.reference_options.color()[-1]
@@ -1687,6 +1715,7 @@ class Model3DWidget(qtw.QWidget):
         """
         # handle the options
         self.option_button.setChecked(False)
+        self.options_pane.hide()
 
         # handle the player
         if self.is_running():
@@ -1700,6 +1729,7 @@ class Model3DWidget(qtw.QWidget):
         """
         # handle the options
         self.option_button.setChecked(False)
+        self.options_pane.hide()
 
         # handle the button
         self._stop_player()
@@ -1711,6 +1741,7 @@ class Model3DWidget(qtw.QWidget):
         """
         # handle the options
         self.option_button.setChecked(False)
+        self.options_pane.hide()
 
         # handle the button
         self._stop_player()
@@ -1722,11 +1753,12 @@ class Model3DWidget(qtw.QWidget):
         """
         # handle the options
         self.option_button.setChecked(False)
+        self.options_pane.hide()
 
         # handle the button
         self._stop_player()
-        self._axis3D.elev = self._init_view["elev"]
-        self._axis3D.azim = self._init_view["azim"]
+        self._axis3D.elev = self._default_view["elev"]
+        self._axis3D.azim = self._default_view["azim"]
         self._axis3D.set_xlim(*self._limits)
         self._axis3D.set_ylim(*self._limits)
         self._axis3D.set_zlim(*self._limits)
@@ -1734,12 +1766,70 @@ class Model3DWidget(qtw.QWidget):
         self._figure3D.canvas.draw()
         self._figureEMG.canvas.draw()
 
+    def _media_action_pressed(self):
+        """
+        handle the pressure of the media action button.
+        """
+        self.option_button.setChecked(False)
+        self.options_pane.hide()
+
     def _options_pressed(self):
         """
         method handling the options button press events.
         """
         self._stop_player()
         self.options_pane.setVisible(self.option_button.isChecked())
+
+    def _loop_pressed(self):
+        """
+        method handling the loop button press events.
+        """
+        self.option_button.setChecked(False)
+        self.options_pane.hide()
+
+    def _marker_button_pressed(self):
+        """
+        handle the marker button interaction.
+        """
+        # handle the options
+        self.option_button.setChecked(False)
+        self.options_pane.hide()
+
+        # update the figure
+        self._update_figure()
+
+    def _force_button_pressed(self):
+        """
+        handle the force button interaction.
+        """
+        # handle the options
+        self.option_button.setChecked(False)
+        self.options_pane.hide()
+
+        # update the figure
+        self._update_figure()
+
+    def _link_button_pressed(self):
+        """
+        handle the link button interaction.
+        """
+        # handle the options
+        self.option_button.setChecked(False)
+        self.options_pane.hide()
+
+        # update the figure
+        self._update_figure()
+
+    def _text_button_pressed(self):
+        """
+        handle the text button interaction.
+        """
+        # handle the options
+        self.option_button.setChecked(False)
+        self.options_pane.hide()
+
+        # update the figure
+        self._update_figure()
 
     def _adjust_options_pane_position(self):
         """
@@ -1756,6 +1846,11 @@ class Model3DWidget(qtw.QWidget):
         """
         adjust the player speed.
         """
+        # handle the options
+        self.option_button.setChecked(False)
+        self.options_pane.hide()
+
+        # adjust the speed
         self.speed_box.setValue(self.speed_slider.value())
 
     def _adjust_markers(self):
