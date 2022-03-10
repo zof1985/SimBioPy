@@ -119,9 +119,9 @@ class ForcePlatform3D(GeometricObject, Sensor):
 
         # check the size
         txt = "only 3D data can be provided."
-        assert frz.ndim == 3, txt
-        assert mnt.ndim == 3, txt
-        assert ori.ndim == 3, txt
+        assert frz.shape[1] == 3, txt
+        assert mnt.shape[1] == 3, txt
+        assert ori.shape[1] == 3, txt
         frz = self._get_data(
             data=frz,
             index=index,

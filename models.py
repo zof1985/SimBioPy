@@ -5,9 +5,11 @@
 
 
 import os
+import sys
 import warnings
 import numpy as np
 import pandas as pd
+import itertools as it
 import PySide2.QtWidgets as qtw
 import PySide2.QtCore as qtc
 import PySide2.QtGui as qtg
@@ -16,9 +18,9 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib import use as matplotlib_use
 from mpl_toolkits import mplot3d
-from .utils import *
 from .geometry import *
 from .sensors import *
+from .utils import *
 
 
 #! MATPLOTLIB OPTIONS
@@ -232,6 +234,27 @@ class Model3D:
                 df.insert(0, "Sensor", np.tile(sns, df.shape[0]))
                 out += [df]
         return pd.concat(out, axis=0, ignore_index=True)
+
+    def plot(self, high_dpi: bool = True) -> None:
+        """
+        plot the actual model.
+
+        Parameters
+        ----------
+        high_dpi: bool
+            enable high dpi scaling.
+        """
+        # highdpi scaling
+        if high_dpi:
+            qtw.QApplication.setAttribute(qtc.Qt.AA_EnableHighDpiScaling, True)
+            qtw.QApplication.setAttribute(qtc.Qt.AA_UseHighDpiPixmaps, True)
+
+        # app generation
+        app = qtw.QApplication(sys.argv)
+        widget = Model3DWidget(self)
+        widget.show()
+        # sys.exit(app.exec_())
+        app.exec_()
 
     @classmethod
     def unstack(cls, df: pd.DataFrame):
@@ -705,16 +728,16 @@ class Model3DWidget(qtw.QWidget):
     _Marker3D = {}
     _ForcePlatform3D = {}
     _Link3D = {}
-    _Text3D = {}
     _ReferenceFrame3D = {}
     _EmgSensor = {}
-    _force3D_sclr = 1
     _actual_frame = None
     _FigureAnimator3D = None
     _FigureAnimatorEMG = None
     _play_start_time = None
     _path = None
     _limits = None
+    _arrow_angle = 15  # degrees
+    _arrow_length = 0.1  # 10% of the quiver length
 
     def __init__(
         self,
@@ -737,68 +760,79 @@ class Model3DWidget(qtw.QWidget):
         # set the actual frame
         self._actual_frame = 0
 
-        # get the time indices
-        df0 = model.stack()
-        df3d = {"Sensor": ["Marker3D", "ForcePlatform3D", "Link3D"]}
-        df3d = df0.loc[df0.isin(df3d).any(1)]
-        self._times = np.unique(df3d["Time"].values.flatten())
-
         # get the data
         dfs = {}
-        for sns in np.unique(df0["Sensor"].values.flatten()):
-            dd = df0.loc[df0.isin([sns]).any(1)]
+        cols = ["X", "Y", "Z"]
+        m = np.array([i == vertical_axis for i in cols])
+        m = m.astype(int)
+        ix = np.where(m == 1)[0]
+        times = []
 
-            if sns == "ForcePlatform3D":
-                ori = dd.loc[dd.isin(["origin"]).any(1)]
-                ori = ori.pivot(["Time", "Label"], "Dimension", "Amplitude")
-                amp = dd.loc[dd.isin(["amplitude"]).any(1)]
-                amp = amp.pivot(["Time", "Label"], "Dimension", "Amplitude")
-                amp.columns = pd.Index(["U", "V", "W"])
-                out = pd.concat([ori, amp], axis=1)
+        # markers
+        if model.has_Marker3D():
+            dfs["Marker3D"] = {}
+            max_coords = 1
+            times = []
+            for i, v in model.Marker3D.items():
+                dfs["Marker3D"][i] = v.pivot()
+                new_coords = np.nanmax(v.coordinates.values.T[ix])
+                max_coords = max(max_coords, new_coords)
+                times += [v.index]
+        else:
+            max_coords = 1
 
-            elif sns == "Link3D":
-                out = []
-                for l in ["p0", "p1"]:
-                    pp = dd.loc[dd.isin([l]).any(1)]
-                    pp = pp.pivot(["Time", "Label"], "Dimension", "Amplitude")
-                    cols = pp.columns.to_numpy()
-                    idx = ["{}{}".format(i, l[1]) for i in cols]
-                    pp.columns = pd.Index(idx)
-                    out += [pp]
-                out = pd.concat(out, axis=1)
+        # links
+        if model.has_Link3D():
+            dfs["Link3D"] = {i: v.pivot() for i, v in model.Link3D.items()}
 
-            elif sns == "Marker3D":
-                out = dd.pivot(["Time", "Label"], "Dimension", "Amplitude")
+        # forces
+        if model.has_ForcePlatform3D():
+            dfs["ForcePlatform3D"] = {}
 
-            elif sns == "EmgSensor":
-                out = dd.pivot(["Time", "Label"], "Dimension", "Amplitude")
-                time = np.atleast_2d(out.index.to_frame()["Time"].values).T
-                out = pd.DataFrame(
-                    data=np.hstack([time, time]),
-                    columns=["X0", "X1"],
-                    index=out.index,
-                )
+            # get the force scaler
+            max_force = 1
+            for lbl, sns in model.ForcePlatform3D.items():
+                max_force = max(max_force, np.max(sns.force.values.T[ix]))
+            scaler = max_coords / max_force
 
-            # adjust the nans
-            nans = np.any(np.isnan(out.values), 1)
-            out.loc[nans] = 0
-            alphas = np.ones((out.shape[0], 1))
-            alphas[nans] = 0
-            out.insert(out.shape[1], "Alpha", alphas)
-            ix = out.index.to_frame()
-            out.insert(0, "Label", ix["Label"].values.flatten())
-            out.index = pd.Index(ix["Time"].values.flatten())
+            # update all the force data
+            for lbl, sns in model.ForcePlatform3D.items():
+                p0 = sns.origin
+                p1 = sns.force * scaler + p0
+                dfs["ForcePlatform3D"][lbl] = self._makeArrow(p0, p1, ix)
 
-            # separate by label
-            dd = {}
-            for l in np.unique(out["Label"].values.flatten()):
-                dd[l] = out.loc[out.isin([l]).any(1)]
-                dd[l] = dd[l].drop("Label", axis=1)
-            dfs[sns] = dd
+            # set the time
+            if len(times) == 0:
+                for out in dfs["ForcePlatform3D"].values():
+                    times += [out.index]
 
-        # check input data
-        if len(dfs) == 0:
-            raise ValueError("No valid data have been found in 'model'.")
+        # EMG
+        if model.has_EmgSensor():
+            dfs["EmgSensor"] = {}
+            for i, v in model.EmgSensor.items():
+                dfs["EmgSensor"][i] = v.pivot()
+                dfs["EmgSensor"][i].insert(0, "MIN", np.min(v.amplitude.values))
+                dfs["EmgSensor"][i].insert(0, "MAX", np.max(v.amplitude.values))
+
+            # set the time
+            if len(times) == 0:
+                for out in dfs["EmgSensor"].values():
+                    times += [out.index]
+
+        # include the alphas at each sample
+        def set_alpha(obj):
+            if isinstance(obj, dict):
+                return {i: set_alpha(v) for i, v in obj.items()}
+            alphas = (~np.all(np.isnan(obj.values), axis=1)).astype(int)
+            obj.insert(obj.shape[1], "A", alphas)
+            return obj
+
+        dfs = set_alpha(dfs)
+
+        # get the timing
+        self._times = np.unique(np.concatenate(times))
+
+        # store the data
         self.data = dfs
 
         # make the EMG pane
@@ -903,24 +937,25 @@ class Model3DWidget(qtw.QWidget):
             # generate an empty widget
             self.canvasEMG = qtw.QWidget()
 
-        # check the vertical axis input
-        if any([i == "Marker3D" for i in list(dfs.keys())]):
-            dim = list(dfs["Marker3D"].values())[0].columns.to_numpy()
-        else:
-            dim = list(dfs["ForcePlatform3D"].values())[0].columns.to_numpy()
-        txt = "vertical_axis not found in model."
-        assert vertical_axis.upper() in dim, txt
-        self._default_view["vertical_axis"] = vertical_axis.lower()
-
         # create the 3D model pane
         if model.has_ForcePlatform3D() or model.has_Marker3D():
+
+            # check the vertical axis input
+            if any([i == "Marker3D" for i in list(self.data.keys())]):
+                dim = list(self.data["Marker3D"].values())[0]
+            else:
+                dim = list(dfs["ForcePlatform3D"].values())[0]
+            dim = np.array([i[1] for i in dim.columns.to_numpy()])
+            txt = "vertical_axis not found in model."
+            assert vertical_axis.upper() in dim, txt
+            self._default_view["vertical_axis"] = vertical_axis.lower()
 
             # generate the axis
             self._figure3D = pl.figure(dpi=self._dpi)
             self.canvas3D = FigureCanvasQTAgg(self._figure3D)
             self._axis3D = self._figure3D.add_subplot(
                 projection="3d",
-                proj_type="ortho",  # 'persp'
+                proj_type="persp",  # 'ortho'
                 adjustable="box",  # 'datalim'
                 frame_on=False,
             )
@@ -954,7 +989,7 @@ class Model3DWidget(qtw.QWidget):
             self._axis3D.yaxis._axinfo["grid"]["color"] = (1, 1, 1, 0)
             self._axis3D.zaxis._axinfo["grid"]["color"] = (1, 1, 1, 0)
 
-            # set the axis limits
+            # set the initial limits
             if model.has_Marker3D():
                 edges = [v.values for v in self.data["Marker3D"].values()]
             else:
@@ -963,151 +998,106 @@ class Model3DWidget(qtw.QWidget):
             edges = np.concatenate(edges, axis=0)
             maxc = max(0, np.nanmax(edges) * 1.5)
             minc = min(0, np.nanmin(edges) * 1.5)
-            self._axis3D.set_xlim(minc, maxc)
-            self._axis3D.set_ylim(minc, maxc)
-            self._axis3D.set_zlim(minc, maxc)
-
-            # set the initial limits
             self._limits = (minc, maxc)
+            self._axis3D.set_xlim(*self._limits)
+            self._axis3D.set_ylim(*self._limits)
+            self._axis3D.set_zlim(*self._limits)
 
             # plot the reference frame
-            ref_text = self._default_text.copy()
-            ref_text["color"] = self._default_ref["color"]
-            self._ReferenceFrame3D = {
-                "X": {
-                    "Versor": self._axis3D.quiver(
-                        0,
-                        0,
-                        0,
-                        0.15 * (maxc - minc),
-                        0,
-                        0,
-                        animated=True,
-                        length=1,
-                        **self._default_ref,
-                    ),
-                    "Text": self._axis3D.text(
-                        0.2 * (maxc - minc),
-                        0,
-                        0,
-                        "X",
-                        animated=True,
-                        ha="center",
-                        va="center",
-                        **ref_text,
-                    ),
-                },
-                "Y": {
-                    "Versor": self._axis3D.quiver(
-                        0,
-                        0,
-                        0,
-                        0,
-                        0.15 * (maxc - minc),
-                        0,
-                        animated=True,
-                        length=1,
-                        **self._default_ref,
-                    ),
-                    "Text": self._axis3D.text(
-                        0,
-                        0.2 * (maxc - minc),
-                        0,
-                        "Y",
-                        animated=True,
-                        ha="center",
-                        va="center",
-                        **ref_text,
-                    ),
-                },
-                "Z": {
-                    "Versor": self._axis3D.quiver(
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0.15 * (maxc - minc),
-                        animated=True,
-                        length=1,
-                        **self._default_ref,
-                    ),
-                    "Text": self._axis3D.text(
-                        0,
-                        0,
-                        0.2 * (maxc - minc),
-                        "Z",
-                        animated=True,
-                        ha="center",
-                        va="center",
-                        **ref_text,
-                    ),
-                },
-            }
+            ref_scale = abs(np.diff(self._limits))[0] * 0.1
+            r0 = pd.DataFrame([[0, 0, 0]], columns=cols)
+            rx = pd.DataFrame([[ref_scale, 0, 0]], columns=cols)
+            ry = pd.DataFrame([[0, ref_scale, 0]], columns=cols)
+            rz = pd.DataFrame([[0, 0, ref_scale]], columns=cols)
+            i = self._makeArrow(r0, rx, ix)
+            j = self._makeArrow(r0, ry, ix)
+            k = self._makeArrow(r0, rz, ix)
+            self._ReferenceFrame3D = {}
+            for lbl, val in zip(cols, [i, j, k]):
+                self._ReferenceFrame3D[lbl] = self._plotArrow(
+                    val,
+                    self._axis3D,
+                    **self._default_ref,
+                )
+                x, y, z = val.values.flatten()[3:6] * 1.1
+                self._ReferenceFrame3D[lbl]["Label"] = self._axis3D.text(
+                    x,
+                    y,
+                    z,
+                    lbl,
+                    animated=True,
+                    **self._default_text,
+                )
 
-            # force amplitude scaler
+            # plot forces
             if model.has_ForcePlatform3D():
-                max_range = maxc - minc
-                self._force3D_sclr = max_range / maxc
+                self._ForcePlatform3D = {}
+                for lbl, val in self.data["ForcePlatform3D"].items():
+                    df = val.loc[self._times[self._actual_frame]]
+                    self._ForcePlatform3D[lbl] = self._plotArrow(
+                        df=df,
+                        ax=self._axis3D,
+                        **self._default_force,
+                    )
+                    x, y, z = df.values.flatten()[:3]
+                    self._ForcePlatform3D[lbl]["Label"] = self._axis3D.text(
+                        x,
+                        y,
+                        z,
+                        lbl,
+                        animated=True,
+                        **self._default_text,
+                    )
 
-            # set the objects
-            for sns in self.data:
-                for l in self.data[sns]:
-
-                    if sns == "Marker3D":
-                        self._Marker3D[l] = self._axis3D.plot(
-                            0,
-                            0,
-                            0,
+            # plot markers
+            if model.has_Marker3D():
+                self._Marker3D = {}
+                for lbl, val in self.data["Marker3D"].items():
+                    df = val.loc[self._times[self._actual_frame]]
+                    x, y, z, _ = df.values.flatten()
+                    self._Marker3D[lbl] = {
+                        "Point": self._axis3D.plot(
+                            x,
+                            y,
+                            z,
                             marker="o",
                             animated=True,
                             **self._default_marker,
-                        )[0]
-                        self._Text3D[l] = self._axis3D.text(
-                            0,
-                            0,
-                            0,
-                            "{:25s}".format(l),
+                        )[0],
+                        "Label": self._axis3D.text(
+                            x,
+                            y,
+                            z,
+                            lbl,
                             animated=True,
                             **self._default_text,
-                        )
+                        ),
+                    }
 
-                    elif sns == "ForcePlatform3D":
-                        self._ForcePlatform3D[l] = self._axis3D.quiver(
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            0,
-                            animated=True,
-                            **self._default_force,
-                        )[0]
-                        self._Text3D[l] = self._axis3D.text(
-                            0,
-                            0,
-                            0,
-                            "{:25s}".format(l),
-                            animated=True,
-                            **self._default_text,
-                        )
-
-                    elif sns == "Link3D":
-                        self._Link3D[l] = self._axis3D.plot(
-                            np.array([0, 0]),
-                            np.array([0, 0]),
-                            np.array([0, 0]),
+            # plot links
+            if model.has_Link3D():
+                self._Link3D = {}
+                for lbl, val in self.data["Link3D"].items():
+                    df = val.loc[self._times[self._actual_frame]]
+                    x0, y0, z0, x1, y1, z1, _ = df.values.flatten()
+                    self._Link3D[lbl] = {
+                        "Line": self._axis3D.plot(
+                            np.array([x0, x1]),
+                            np.array([y0, y1]),
+                            np.array([z0, z1]),
                             animated=True,
                             **self._default_link,
-                        )[0]
+                        )[0],
+                    }
 
             # setup the Figure Animator
-            artists = [i for i in self._Marker3D.values()]
-            artists += [i for i in self._ForcePlatform3D.values()]
-            artists += [i for i in self._Text3D.values()]
-            artists += [i for i in self._Link3D.values()]
-            for ax in self._ReferenceFrame3D.values():
-                artists += [val for val in ax.values()]
+            artists = []
+            objs = [self._Marker3D, self._ForcePlatform3D, self._Link3D]
+            objs += [self._ReferenceFrame3D]
+            for elem in objs:
+                for objs in elem.values():
+                    for ax in objs.values():
+                        artists += [ax]
             self._FigureAnimator3D = FigureAnimator(
                 figure=self._figure3D,
                 artists=artists,
@@ -1455,6 +1445,93 @@ class Model3DWidget(qtw.QWidget):
         self._adjust_references()
         self._adjust_links()
 
+    def _plotArrow(self, df, ax, **options):
+        """
+        plot a matplotlib arrow.
+
+        Parameters
+        ----------
+        df: DataFrame
+            a line containing all data.
+
+        ax: matplotlib axis
+            the axis on which the arrow has to be plotted.
+
+        options: any
+            additional rendering options passed to each element.
+
+        Returns
+        -------
+        out: dict
+            a dict containing all the axes.
+        """
+        p0x, p0y, p0z = df.values.flatten()[:3]
+        p1x, p1y, p1z = df.values.flatten()[3:6]
+        a0x, a0y, a0z = df.values.flatten()[6:9]
+        a1x, a1y, a1z = df.values.flatten()[9:12]
+        return {
+            "Line": ax.plot(
+                np.array([p0x, p1x]),
+                np.array([p0y, p1y]),
+                np.array([p0z, p1z]),
+                animated=True,
+                **options,
+            )[0],
+            "Arrow1": ax.plot(
+                np.array([a0x, p1x]),
+                np.array([a0y, p1y]),
+                np.array([a0z, p1z]),
+                animated=True,
+                **options,
+            )[0],
+            "Arrow2": ax.plot(
+                np.array([a1x, p1x]),
+                np.array([a1y, p1y]),
+                np.array([a1z, p1z]),
+                animated=True,
+                **options,
+            )[0],
+        }
+
+    def _makeArrow(self, p0, p1, vert_axis):
+        """
+        private method used to obtain the data required to draw an arrow.
+
+        Parameters
+        ----------
+        p0: DataFrame
+            the coordinates of the origin.
+
+        p1: DataFrame
+            the coordinates of the end.
+
+        vert_axis: int
+            the number of the column in p0 and p1 corresponding to the
+            vertical axis
+
+        Returns
+        -------
+        arrow: DataFrame
+            a dataframe containing the coordinates required to render
+            the arrow.
+        """
+        xs = p0.index
+        d0 = p0.values
+        d1 = p1.values
+        m = np.array([i == vert_axis for i in range(d0.shape[1])]).astype(int)
+        m = m.flatten()
+        off = np.sqrt(np.nansum((d1 - d0) ** 2, axis=1))
+        off /= np.cos(np.deg2rad(self._arrow_angle))
+        off = m * np.ones(p0.shape) * np.atleast_2d(off).T
+        a0 = (d0 + off - d1) * self._arrow_length + d1
+        a1 = (d0 - off - d1) * self._arrow_length + d1
+        outs = []
+        cols = ["X", "Y", "Z"]
+        for v, l in zip([d0, d1, a0, a1], ["P0", "P1", "A0", "A1"]):
+            ys = pd.MultiIndex.from_tuples([(l, c) for c in cols])
+            outs += [pd.DataFrame(v, index=xs, columns=ys)]
+        return pd.concat(outs, axis=1)
+
     def _makeIcon(self, file):
         """
         internal function used to build icons from png file.
@@ -1613,6 +1690,83 @@ class Model3DWidget(qtw.QWidget):
             self._figureEMG.tight_layout()
             self._figureEMG.canvas.draw()
 
+    def _update_force_alpha(self, label, alpha):
+        """
+        update the force alpha values.
+
+        Parameters
+        ----------
+        label: str
+            the name of the object to be updated.
+
+        alpha: float
+            the alpha value to be updated.
+
+        has_text: bool
+            should also the text value be updated?
+        """
+        if self.force_button.isChecked():
+            f_alpha = self.force_options.color()[-1]
+            if self.text_button.isChecked():
+                t_alpha = self.text_options.color()[-1]
+            else:
+                t_alpha = 0
+        else:
+            f_alpha = 0
+            t_alpha = 0
+        self._ForcePlatform3D[label]["Line"]._alpha = alpha * f_alpha
+        self._ForcePlatform3D[label]["Arrow1"]._alpha = alpha * f_alpha
+        self._ForcePlatform3D[label]["Arrow2"]._alpha = alpha * f_alpha
+        self._ForcePlatform3D[label]["Label"]._alpha = alpha * t_alpha
+
+    def _update_link_alpha(self, label, alpha):
+        """
+        update the link alpha values.
+
+        Parameters
+        ----------
+        label: str
+            the name of the object to be updated.
+
+        alpha: float
+            the alpha value to be updated.
+
+        has_text: bool
+            should also the text value be updated?
+        """
+        if self.link_button.isChecked():
+            link_alpha = self.link_options.color()[-1]
+            self._Link3D[label]["Line"]._alpha = alpha * link_alpha
+        else:
+            self._Link3D[label]["Line"]._alpha = 0
+
+    def _update_marker_alpha(self, label, alpha):
+        """
+        update the marker alpha values.
+
+        Parameters
+        ----------
+        label: str
+            the name of the object to be updated.
+
+        alpha: float
+            the alpha value to be updated.
+
+        has_text: bool
+            should also the text value be updated?
+        """
+        if self.marker_button.isChecked():
+            marker_alpha = self.marker_options.color()[-1]
+            self._Marker3D[label]["Point"]._alpha = alpha * marker_alpha
+            if self.text_button.isChecked():
+                text_alpha = self.text_options.color()[-1]
+                self._Marker3D[label]["Label"]._alpha = alpha * text_alpha
+            else:
+                self._Marker3D[label]["Label"]._alpha = 0
+        else:
+            self._Marker3D[label]["Label"]._alpha = 0
+            self._Marker3D[label]["Point"]._alpha = 0
+
     def _update_figure(self):
         """
         update the actual rendered figure.
@@ -1631,57 +1785,57 @@ class Model3DWidget(qtw.QWidget):
             for t, df in dcts.items():
 
                 if sns == "ForcePlatform3D":
-                    x, y, z, u, v, w, s = df.loc[time].values
-                    self._ForcePlatform3D[t].set_data_3d(x, y, z, u, v, w)
-                    self._Text3D[t]._x = x
-                    self._Text3D[t]._y = y
-                    self._Text3D[t]._z = z
-                    if self.force_button.isChecked():
-                        force_alpha = self.force_options.color()[-1]
-                        self._ForcePlatform3D[t]._alpha = s * force_alpha
-                        if self.text_button.isChecked():
-                            text_alpha = self.text_options.color()[-1]
-                            self._Text3D[t]._alpha = s * text_alpha
-                        else:
-                            self._Text3D[t]._alpha = 0
+                    if time in df.index.to_numpy():
+                        v = df.loc[time].values
+                        x0, y0, z0, x1, y1, z1 = v[:6]
+                        ax0, ay0, az0, ax1, ay1, az1, s = v[6:]
+                        self._ForcePlatform3D[t]["Line"].set_data_3d(
+                            np.array([x0, x1]),
+                            np.array([y0, y1]),
+                            np.array([z0, z1]),
+                        )
+                        self._ForcePlatform3D[t]["Arrow1"].set_data_3d(
+                            np.array([ax0, x1]),
+                            np.array([ay0, y1]),
+                            np.array([az0, z1]),
+                        )
+                        self._ForcePlatform3D[t]["Arrow2"].set_data_3d(
+                            np.array([ax1, x1]),
+                            np.array([ay1, y1]),
+                            np.array([az1, z1]),
+                        )
+                        self._ForcePlatform3D[t]["Label"]._x = x0
+                        self._ForcePlatform3D[t]["Label"]._y = y0
+                        self._ForcePlatform3D[t]["Label"]._z = z0
+                        self._update_force_alpha(t, s)
                     else:
-                        self._ForcePlatform3D[t]._alpha = 0
-                        self._Text3D[t]._alpha = 0
+                        self._update_force_alpha(t, 0)
 
                 elif sns == "Link3D":
-                    x, y, z, u, v, w, s = df.loc[time].values
-                    self._Link3D[t].set_data_3d(
-                        np.array([x, u]),
-                        np.array([y, v]),
-                        np.array([z, w]),
-                    )
-                    if self.link_button.isChecked():
-                        link_alpha = self.link_options.color()[-1]
-                        self._Link3D[t]._alpha = s * link_alpha
+                    if time in df.index.to_numpy():
+                        x, y, z, u, v, w, s = df.loc[time].values
+                        self._Link3D[t]["Line"].set_data_3d(
+                            np.array([x, u]),
+                            np.array([y, v]),
+                            np.array([z, w]),
+                        )
+                        self._update_link_alpha(t, s)
                     else:
-                        self._Link3D[t]._alpha = 0
+                        self._update_link_alpha(t, 0)
 
                 elif sns == "Marker3D":
-                    x, y, z, s = df.loc[time].values
-                    self._Marker3D[t].set_data_3d(x, y, z)
-                    self._Text3D[t]._x = x
-                    self._Text3D[t]._y = y
-                    self._Text3D[t]._z = z
-                    if self.marker_button.isChecked():
-                        marker_alpha = self.marker_options.color()[-1]
-                        self._Marker3D[t]._alpha = s * marker_alpha
-                        if self.text_button.isChecked():
-                            text_alpha = self.text_options.color()[-1]
-                            self._Text3D[t]._alpha = s * text_alpha
-                        else:
-                            self._Text3D[t]._alpha = 0
+                    if time in df.index.to_numpy():
+                        x, y, z, s = df.loc[time].values
+                        self._Marker3D[t]["Point"].set_data_3d(x, y, z)
+                        self._Marker3D[t]["Label"]._x = x
+                        self._Marker3D[t]["Label"]._y = y
+                        self._Marker3D[t]["Label"]._z = z
+                        self._update_marker_alpha(t, s)
                     else:
-                        self._Marker3D[t]._alpha = 0
-                        self._Text3D[t]._alpha = 0
+                        self._update_marker_alpha(t, 0)
 
                 elif sns == "EmgSensor":
-                    x, y, s = df.loc[time].values
-                    self._EmgSensor[t]["Bar"].set_xdata([x, y])
+                    self._EmgSensor[t]["Bar"].set_xdata([time, time])
 
         # update the figures
         if self._figure3D is not None:
@@ -1701,12 +1855,9 @@ class Model3DWidget(qtw.QWidget):
         # update the reference frame
         alpha = self.reference_options.color()[-1]
         for n in self._ReferenceFrame3D:
-            if self.reference_button.isChecked():
-                self._ReferenceFrame3D[n]["Text"].set_alpha(alpha)
-                self._ReferenceFrame3D[n]["Versor"].set_alpha(alpha)
-            else:
-                self._ReferenceFrame3D[n]["Text"].set_alpha(0)
-                self._ReferenceFrame3D[n]["Versor"].set_alpha(0)
+            a = 1 if self.reference_button.isChecked() else 0
+            for l in ["Line", "Arrow1", "Arrow2", "Label"]:
+                self._ReferenceFrame3D[n][l].set_alpha(a * alpha)
         self._update_figure()
 
     def _play_pressed(self):
@@ -1858,19 +2009,23 @@ class Model3DWidget(qtw.QWidget):
         adjust the markers appearance.
         """
         for n in self._Marker3D:
-            self._Marker3D[n].set_color(self.marker_options.color())
-            self._Marker3D[n].set_ms(self.marker_options.size())
-            self._Marker3D[n].zorder = self.marker_options.zorder()
+            self._Marker3D[n]["Point"].set_color(self.marker_options.color())
+            self._Marker3D[n]["Point"].set_ms(self.marker_options.size())
+            self._Marker3D[n]["Point"].zorder = self.marker_options.zorder()
         self._update_figure()
 
     def _adjust_forces(self):
         """
         adjust the forces appearance.
         """
+        c = self.force_options.color()
+        s = self.force_options.size()
+        z = self.force_options.zorder()
         for n in self._ForcePlatform3D:
-            self._ForcePlatform3D[n].set_color(self.force_options.color())
-            self._ForcePlatform3D[n].set_linewidth(self.force_options.size())
-            self._ForcePlatform3D[n].zorder = self.force_options.zorder()
+            for k in ["Line", "Arrow1", "Arrow2"]:
+                self._ForcePlatform3D[n][k].set_color(c)
+                self._ForcePlatform3D[n][k].set_linewidth(s)
+                self._ForcePlatform3D[n][k].zorder = z
         self._update_figure()
 
     def _adjust_links(self):
@@ -1878,54 +2033,48 @@ class Model3DWidget(qtw.QWidget):
         adjust the links appearance.
         """
         for n in self._Link3D:
-            self._Link3D[n].set_color(self.link_options.color())
-            self._Link3D[n].set_linewidth(self.link_options.size())
-            self._Link3D[n].zorder = self.link_options.zorder()
+            self._Link3D[n]["Line"].set_color(self.link_options.color())
+            self._Link3D[n]["Line"].set_linewidth(self.link_options.size())
+            self._Link3D[n]["Line"].zorder = self.link_options.zorder()
         self._update_figure()
 
     def _adjust_references(self):
         """
         adjust the reference frame appearance.
         """
-        col = self.reference_options.color()
-        val = self.reference_options.size()
-        order = self.reference_options.zorder()
+        c = self.reference_options.color()
+        s = self.reference_options.size()
+        z = self.reference_options.zorder()
         for n in self._ReferenceFrame3D:
-            self._ReferenceFrame3D[n]["Text"].set_color(col)
-            self._ReferenceFrame3D[n]["Text"].zorder = order
-            self._ReferenceFrame3D[n]["Versor"].set_color(col)
-            self._ReferenceFrame3D[n]["Versor"].set_linewidth(val)
-            self._ReferenceFrame3D[n]["Versor"].zorder = order
-            if not self.reference_button.isChecked():
-                self._ReferenceFrame3D[n]["Text"].set_alpha(0)
-                self._ReferenceFrame3D[n]["Versor"].set_alpha(0)
+            for a in ["Line", "Arrow1", "Arrow2", "Label"]:
+                if a == "Label":
+                    self._ReferenceFrame3D[n][a].set_color(c)
+                    self._ReferenceFrame3D[n][a].zorder = z
+                else:
+                    self._ReferenceFrame3D[n][a].set_color(c)
+                    self._ReferenceFrame3D[n][a].zorder = z
+                    self._ReferenceFrame3D[n][a].set_linewidth(s)
+                if not self.reference_button.isChecked():
+                    self._ReferenceFrame3D[n][a].set_alpha(0)
         self._update_figure()
 
     def _adjust_labels(self):
         """
         adjust the text appearance.
         """
-        val = self.text_options.size()
-        col = self.text_options.color()
-        order = self.text_options.zorder()
-
-        # adjust labels
-        for n in self._Text3D:
-            self._Text3D[n].set_size(val)
-            self._Text3D[n].set_color(col)
-            self._Text3D[n].zorder = order
-            markers = list(self._Marker3D.keys())
-            forces = list(self._ForcePlatform3D.keys())
-            if n in markers and not self.marker_button.isChecked():
-                self._Text3D[n].set_alpha(0)
-            elif n in forces and not self.force_button.isChecked():
-                self._Text3D[n].set_alpha(0)
-
-        # adjust reference frame axis labels
+        s = self.text_options.size()
+        c = self.text_options.color()
+        z = self.text_options.zorder()
+        for n in self._Marker3D:
+            self._Marker3D[n]["Label"].set_size(s)
+            self._Marker3D[n]["Label"].set_color(c)
+            self._Marker3D[n]["Label"].zorder = z
+        for n in self._ForcePlatform3D:
+            self._ForcePlatform3D[n]["Label"].set_size(s)
+            self._ForcePlatform3D[n]["Label"].set_color(c)
+            self._ForcePlatform3D[n]["Label"].zorder = z
         for n in self._ReferenceFrame3D:
-            self._ReferenceFrame3D[n]["Text"].set_size(val)
-
-        # update
+            self._ReferenceFrame3D[n]["Label"].set_size(s)
         self._update_figure()
 
     def _adjust_emg_signals(self):
