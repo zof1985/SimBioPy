@@ -4,7 +4,7 @@ test_data/
 .test_data/
 
 # svg files
-*.svg
+# *.svg
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

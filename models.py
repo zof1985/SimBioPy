@@ -640,6 +640,7 @@ class Model3DWidget(qtw.QWidget):
     """
 
     # options pane
+    ground_options = None
     marker_options = None
     force_options = None
     link_options = None
@@ -665,12 +666,18 @@ class Model3DWidget(qtw.QWidget):
     time_label = None
     progress_slider = None
     option_button = None
+    ground_button = None
 
     # default settings
     _default_view = {
         "elev": 10,
         "azim": 45,
         "vertical_axis": "y",
+    }
+    _default_ground = {
+        "color": (0.1, 0.1, 0.1, 0.05),
+        "linewidth": 0.01,
+        "zorder": 3,
     }
     _default_marker = {
         "color": (1, 0, 0, 1),
@@ -730,6 +737,7 @@ class Model3DWidget(qtw.QWidget):
     _Link3D = {}
     _ReferenceFrame3D = {}
     _EmgSensor = {}
+    _Ground3D = None
     _actual_frame = None
     _FigureAnimator3D = None
     _FigureAnimatorEMG = None
@@ -959,6 +967,7 @@ class Model3DWidget(qtw.QWidget):
                 adjustable="box",  # 'datalim'
                 frame_on=False,
             )
+            self._tight = True
 
             # set the view
             self._axis3D.view_init(**self._default_view)
@@ -968,11 +977,6 @@ class Model3DWidget(qtw.QWidget):
                 "resize_event",
                 self._resize_event,
             )
-
-            # make the panes transparent
-            self._axis3D.xaxis.set_pane_color((1, 1, 1, 0))
-            self._axis3D.yaxis.set_pane_color((1, 1, 1, 0))
-            self._axis3D.zaxis.set_pane_color((1, 1, 1, 0))
 
             # make the axis lines transparent
             self._axis3D.xaxis.line.set_color((1, 1, 1, 0))
@@ -984,10 +988,11 @@ class Model3DWidget(qtw.QWidget):
             self._axis3D.yaxis.set_ticks([])
             self._axis3D.zaxis.set_ticks([])
 
-            # make the grid lines transparent
-            self._axis3D.xaxis._axinfo["grid"]["color"] = (1, 1, 1, 0)
-            self._axis3D.yaxis._axinfo["grid"]["color"] = (1, 1, 1, 0)
-            self._axis3D.zaxis._axinfo["grid"]["color"] = (1, 1, 1, 0)
+            # make the axes transparent
+            for l in ["x", "y", "z"]:
+                ax = eval("self._axis3D.w_{}axis".format(l))
+                ax.set_pane_color((1, 1, 1, 0))
+                ax._axinfo["grid"]["color"] = (1, 1, 1, 0)
 
             # set the initial limits
             if model.has_Marker3D():
@@ -1019,15 +1024,26 @@ class Model3DWidget(qtw.QWidget):
                     self._axis3D,
                     **self._default_ref,
                 )
-                x, y, z = val.values.flatten()[3:6] * 1.1
+                u, v, w = val.values.flatten()[3:6] * 1.4
                 self._ReferenceFrame3D[lbl]["Label"] = self._axis3D.text(
+                    u,
+                    v,
+                    w,
+                    lbl,
+                    animated=True,
+                    ha="center",
+                    va="center",
+                    **self._default_text,
+                )
+                x, y, z = val.values.flatten()[:3]
+                self._ReferenceFrame3D[lbl]["Point"] = self._axis3D.plot(
                     x,
                     y,
                     z,
-                    lbl,
+                    marker="o",
                     animated=True,
-                    **self._default_text,
-                )
+                    **self._default_marker,
+                )[0]
 
             # plot forces
             if model.has_ForcePlatform3D():
@@ -1040,6 +1056,14 @@ class Model3DWidget(qtw.QWidget):
                         **self._default_force,
                     )
                     x, y, z = df.values.flatten()[:3]
+                    self._ForcePlatform3D[lbl]["Point"] = self._axis3D.plot(
+                        x,
+                        y,
+                        z,
+                        marker="o",
+                        animated=True,
+                        **self._default_marker,
+                    )[0]
                     self._ForcePlatform3D[lbl]["Label"] = self._axis3D.text(
                         x,
                         y,
@@ -1090,10 +1114,54 @@ class Model3DWidget(qtw.QWidget):
                         )[0],
                     }
 
+            # plot the ground
+            if model.has_Marker3D():
+                dt = self.data["Marker3D"].values()
+                mx, my, mz = np.concatenate([v.values for v in dt], axis=0).T
+            else:
+                mx = np.array([])
+                my = np.array([])
+                mz = np.array([])
+            if model.has_ForcePlatform3D():
+                dt = self.data["ForcePlatform3D"].values()
+                dt = np.concatenate([v.values for v in dt], axis=0).T[:3]
+                fx, fy, fz = dt
+            else:
+                fx = np.array([])
+                fy = np.array([])
+                fz = np.array([])
+            x = np.concatenate([mx, fx], axis=0)
+            y = np.concatenate([my, fy], axis=0)
+            z = np.concatenate([mz, fz], axis=0)
+            frame = {
+                "x": np.linspace(np.nanmin(x), np.nanmax(x), 20),
+                "y": np.linspace(np.nanmin(y), np.nanmax(y), 20),
+                "z": np.linspace(np.nanmin(z), np.nanmax(z), 20),
+            }
+            if self._default_view["vertical_axis"] == "x":
+                sY, sZ = np.meshgrid(frame["y"], frame["z"])
+                sZ = np.zeros_like(sY)
+            elif self._default_view["vertical_axis"] == "y":
+                sX, sZ = np.meshgrid(frame["x"], frame["z"])
+                sY = np.zeros_like(sX)
+            else:
+                sX, sY = np.meshgrid(frame["x"], frame["y"])
+                sZ = np.zeros_like(sX)
+            self._Ground3D = {
+                "Ground": {
+                    "Grid": self._axis3D.plot_wireframe(
+                        sX,
+                        sY,
+                        sZ,
+                        animated=True,
+                    ),
+                },
+            }
+
             # setup the Figure Animator
             artists = []
             objs = [self._Marker3D, self._ForcePlatform3D, self._Link3D]
-            objs += [self._ReferenceFrame3D]
+            objs += [self._ReferenceFrame3D, self._Ground3D]
             for elem in objs:
                 for objs in elem.values():
                     for ax in objs.values():
@@ -1138,6 +1206,16 @@ class Model3DWidget(qtw.QWidget):
 
         # add a separator
         commands_bar.addSeparator()
+
+        # function show/hide the ground
+        self.ground_button = self._command_button(
+            tip="Show/Hide the ground.",
+            icon=os.path.sep.join([self._path, "icons", "ground.png"]),
+            enabled=model.has_Marker3D() or model.has_ForcePlatform3D(),
+            checkable=True,
+            fun=self._ground_button_pressed,
+        )
+        commands_bar.addWidget(self.ground_button)
 
         # function show/hide markers
         self.marker_button = self._command_button(
@@ -1275,6 +1353,23 @@ class Model3DWidget(qtw.QWidget):
         # add another separator
         commands_bar.addSeparator()
 
+        # ground options
+        self.ground_options = OptionGroup(
+            label="Ground",
+            min_value=0.1,
+            max_value=2,
+            step_value=0.1,
+            font_size=self._font_size - 2,
+            object_size=20,
+            default_value=self._default_ground["linewidth"],
+            default_color=self._default_ground["color"],
+            default_zorder=self._default_ground["zorder"],
+        )
+        self.ground_options.valueChanged.connect(self._adjust_ground)
+        self.ground_options.colorChanged.connect(self._adjust_ground)
+        self.ground_options.zorderChanged.connect(self._adjust_ground)
+        self.ground_options.setEnabled(self.ground_button.isEnabled())
+
         # marker options
         self.marker_options = OptionGroup(
             label="Markers",
@@ -1404,6 +1499,7 @@ class Model3DWidget(qtw.QWidget):
         options_layout.addWidget(self.text_options, 1, 2)
         options_layout.addWidget(self.emg_signal_options, 2, 2)
         options_layout.addWidget(self.emg_bar_options, 3, 2)
+        options_layout.addWidget(self.ground_options, 4, 2)
         self.options_pane = qtw.QDialog(parent=self.option_button)
         self.options_pane.setWindowFlags(qtc.Qt.FramelessWindowHint)
         self.options_pane.setWindowModality(qtc.Qt.NonModal)
@@ -1434,6 +1530,7 @@ class Model3DWidget(qtw.QWidget):
 
         # set the starting view
         self._home_pressed()
+        self._ground_button_pressed()
         self._update_figure()
         self.options_pane.show()
         self.options_pane.hide()
@@ -1717,6 +1814,7 @@ class Model3DWidget(qtw.QWidget):
         self._ForcePlatform3D[label]["Line"]._alpha = alpha * f_alpha
         self._ForcePlatform3D[label]["Arrow1"]._alpha = alpha * f_alpha
         self._ForcePlatform3D[label]["Arrow2"]._alpha = alpha * f_alpha
+        self._ForcePlatform3D[label]["Point"]._alpha = alpha * f_alpha
         self._ForcePlatform3D[label]["Label"]._alpha = alpha * t_alpha
 
     def _update_link_alpha(self, label, alpha):
@@ -1804,6 +1902,11 @@ class Model3DWidget(qtw.QWidget):
                             np.array([ay1, y1]),
                             np.array([az1, z1]),
                         )
+                        self._ForcePlatform3D[t]["Point"].set_data_3d(
+                            np.array([x0]),
+                            np.array([y0]),
+                            np.array([z0]),
+                        )
                         self._ForcePlatform3D[t]["Label"]._x = x0
                         self._ForcePlatform3D[t]["Label"]._y = y0
                         self._ForcePlatform3D[t]["Label"]._z = z0
@@ -1854,10 +1957,10 @@ class Model3DWidget(qtw.QWidget):
 
         # update the reference frame
         alpha = self.reference_options.color()[-1]
+        a = alpha if self.reference_button.isChecked() else 0
         for n in self._ReferenceFrame3D:
-            a = 1 if self.reference_button.isChecked() else 0
-            for l in ["Line", "Arrow1", "Arrow2", "Label"]:
-                self._ReferenceFrame3D[n][l].set_alpha(a * alpha)
+            for l in ["Line", "Arrow1", "Arrow2", "Label", "Point"]:
+                self._ReferenceFrame3D[n][l].set_alpha(a)
         self._update_figure()
 
     def _play_pressed(self):
@@ -1982,6 +2085,22 @@ class Model3DWidget(qtw.QWidget):
         # update the figure
         self._update_figure()
 
+    def _ground_button_pressed(self):
+        """
+        handle the ground button interaction.
+        """
+
+        # update the alpha
+        if self.ground_button.isChecked():
+            alpha = self.ground_options.color()[-1]
+        else:
+            alpha = 0
+        for i in self._Ground3D:
+            self._Ground3D[i]["Grid"].set_alpha(alpha)
+
+        # update the figure
+        self._update_figure()
+
     def _adjust_options_pane_position(self):
         """
         method handling the location of the options pane
@@ -2004,14 +2123,33 @@ class Model3DWidget(qtw.QWidget):
         # adjust the speed
         self.speed_box.setValue(self.speed_slider.value())
 
+    def _adjust_ground(self):
+        """
+        adjust the ground appearance.
+        """
+        c = self.ground_options.color()
+        s = self.ground_options.size()
+        z = self.ground_options.zorder()
+        self._Ground3D["Ground"]["Grid"].zorder = z
+        self._Ground3D["Ground"]["Grid"].set_color(c)
+        self._Ground3D["Ground"]["Grid"].linewidth = s / 10
+        self._update_figure()
+
     def _adjust_markers(self):
         """
         adjust the markers appearance.
         """
+        c = self.marker_options.color()
+        s = self.marker_options.size()
+        z = self.marker_options.zorder()
         for n in self._Marker3D:
-            self._Marker3D[n]["Point"].set_color(self.marker_options.color())
-            self._Marker3D[n]["Point"].set_ms(self.marker_options.size())
-            self._Marker3D[n]["Point"].zorder = self.marker_options.zorder()
+            self._Marker3D[n]["Point"].set_color(c)
+            self._Marker3D[n]["Point"].set_ms(s)
+            self._Marker3D[n]["Point"].zorder = z
+        for n in self._ForcePlatform3D:
+            self._ForcePlatform3D[n]["Point"].set_ms(s)
+        for n in self._ReferenceFrame3D:
+            self._ReferenceFrame3D[n]["Point"].set_ms(s)
         self._update_figure()
 
     def _adjust_forces(self):
@@ -2022,10 +2160,11 @@ class Model3DWidget(qtw.QWidget):
         s = self.force_options.size()
         z = self.force_options.zorder()
         for n in self._ForcePlatform3D:
-            for k in ["Line", "Arrow1", "Arrow2"]:
+            for k in ["Line", "Arrow1", "Arrow2", "Point"]:
                 self._ForcePlatform3D[n][k].set_color(c)
-                self._ForcePlatform3D[n][k].set_linewidth(s)
                 self._ForcePlatform3D[n][k].zorder = z
+                if k != "Point":
+                    self._ForcePlatform3D[n][k].set_linewidth(s)
         self._update_figure()
 
     def _adjust_links(self):
@@ -2046,13 +2185,10 @@ class Model3DWidget(qtw.QWidget):
         s = self.reference_options.size()
         z = self.reference_options.zorder()
         for n in self._ReferenceFrame3D:
-            for a in ["Line", "Arrow1", "Arrow2", "Label"]:
-                if a == "Label":
-                    self._ReferenceFrame3D[n][a].set_color(c)
-                    self._ReferenceFrame3D[n][a].zorder = z
-                else:
-                    self._ReferenceFrame3D[n][a].set_color(c)
-                    self._ReferenceFrame3D[n][a].zorder = z
+            for a in ["Line", "Arrow1", "Arrow2", "Label", "Point"]:
+                self._ReferenceFrame3D[n][a].set_color(c)
+                self._ReferenceFrame3D[n][a].zorder = z
+                if a not in ["Label", "Point"]:
                     self._ReferenceFrame3D[n][a].set_linewidth(s)
                 if not self.reference_button.isChecked():
                     self._ReferenceFrame3D[n][a].set_alpha(0)
