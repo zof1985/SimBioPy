@@ -260,10 +260,19 @@ class Participant:
         p: Participant
             a Participant instance.
         """
-        assert isinstance(df, (pd.DataFrame)), "'df' must be a pandas.DataFrame"
+        txt = "'df' must be a pandas.DataFrame"
+        assert isinstance(df, (pd.DataFrame)), txt
         surname, name, gender, _, height, weight, birth_date = df.iloc[:7, 1]
-        birth_date = datetime.strptime(birth_date + "-00:00:00", datetime_format).date()
-        return cls(surname, name, gender, height, weight, birth_date)
+        birth_date = birth_date + "-00:00:00"
+        birth_date = datetime.strptime(birth_date, datetime_format).date()
+        return cls(
+            surname=surname,
+            name=name,
+            gender=gender,
+            height=height,
+            weight=weight,
+            birth_date=birth_date,
+        )
 
     def toDict(self, dt: date = None):
         """
