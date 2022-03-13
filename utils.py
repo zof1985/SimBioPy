@@ -1,4 +1,4 @@
-# BASE MODULE
+# UTILS MODULE
 
 
 #! IMPORTS
@@ -9,6 +9,306 @@ import openpyxl as xl
 import os
 import pandas as pd
 import time
+from datetime import datetime, date
+from typing import Tuple
+
+
+#! CONSTANTS
+
+
+datetime_format = "%d/%m/%Y-%H:%M:%S"
+
+
+#! CLASSES
+
+
+class Participant:
+    """
+    class containing all the data relevant to a participant.
+
+    Parameters
+    ----------
+    df: pandas.DataFrame
+        a dataframe resulting from the export of Cosmed Omia.
+    """
+
+    # class variables
+    _name = None
+    _surname = None
+    _gender = None
+    _height = None
+    _weight = None
+    _birth_date = None
+
+    def __init__(
+        self,
+        surname: str = None,
+        name: str = None,
+        gender: str = None,
+        height: Tuple[int, float] = None,
+        weight: Tuple[int, float] = None,
+        age: Tuple[int, float] = None,
+        birth_date: date = None,
+    ):
+        self.setSurname(surname)
+        self.setName(name)
+        self.setGender(gender)
+        self.setHeight(height / 100)
+        self.setWeight(weight)
+        self.setAge(age)
+        self.setBirthDate(birth_date)
+
+    def setSurname(self, surname):
+        """
+        set the participant surname.
+
+        Parameters
+        ----------
+        surname: str
+            the surname of the participant.
+        """
+        if surname is not None:
+            assert isinstance(surname, str), "'surname' must be a string."
+        self._surname = surname
+
+    def setName(self, name):
+        """
+        set the participant name.
+
+        Parameters
+        ----------
+        name: str
+            the name of the participant.
+        """
+        if name is not None:
+            assert isinstance(name, str), "'name' must be a string."
+        self._name = name
+
+    def setGender(self, gender):
+        """
+        set the participant gender.
+
+        Parameters
+        ----------
+        gender: str
+            the gender of the participant.
+        """
+        if gender is not None:
+            assert isinstance(gender, str), "'gender' must be a string."
+        self._gender = gender
+
+    def setHeight(self, height):
+        """
+        set the participant height in meters.
+
+        Parameters
+        ----------
+        height: int, float
+            the height of the participant.
+        """
+        if height is not None:
+            txt = "'height' must be a float or int."
+            assert isinstance(height, (int, float)), txt
+        self._height = height
+
+    def setWeight(self, weight):
+        """
+        set the participant weight in kg.
+
+        Parameters
+        ----------
+        weight: int, float
+            the weight of the participant.
+        """
+        if weight is not None:
+            txt = "'weight' must be a float or int."
+            assert isinstance(weight, (int, float)), txt
+        self._weight = weight
+
+    def setAge(self, age):
+        """
+        set the participant age in years.
+
+
+        Parameters
+        ----------
+        age: int, float
+            the age of the participant.
+        """
+        if age is not None:
+            txt = "'age' must be a float or int."
+            assert isinstance(age, (int, float)), txt
+        self._age = age
+
+    def setBirthDate(self, birth_date):
+        """
+        set the participant birth_date.
+
+        Parameters
+        ----------
+        birth_date: datetime.date
+            the birth date of the participant.
+        """
+        if birth_date is not None:
+            txt = "'BirthDate' must be a datetime.date or datetime.datetime."
+            assert isinstance(birth_date, (datetime, date)), txt
+            if isinstance(birth_date, datetime):
+                self._birth_date = birth_date.date()
+            else:
+                self._birth_date = birth_date
+        else:
+            self._birth_date = birth_date
+
+    def getSurname(self):
+        """get the participant surname"""
+        return self._surname
+
+    def getName(self):
+        """get the participant name"""
+        return self._name
+
+    def getGender(self):
+        """get the participant gender"""
+        return self._gender
+
+    def getHeight(self):
+        """get the participant height in meter"""
+        return self._height
+
+    def getWeight(self):
+        """get the participant weight in kg"""
+        return self._weight
+
+    def getBirthDate(self):
+        """get the participant birth date"""
+        return self._birth_date
+
+    def getBMI(self):
+        """get the participant BMI in kg/m^2"""
+        return self._weight / (self._height**2)
+
+    def getFullName(self):
+        """
+        get the participant full name.
+        """
+        return "{} {}".format(self._surname, self._name)
+
+    def getAge(self, dt: date = None):
+        """
+        get the age of the participant in years
+
+        Parameters
+        ----------
+        dt: datetime.date (optional)
+            In case age is not directly available, this parameter is used
+            to calulate the age of the participant starting from the birth date.
+
+        Returns
+        -------
+        age: float
+            the age of the participant.
+        """
+        if self._age is not None:
+            return self._age
+        if dt is None:
+            dt = datetime.now().date()
+        else:
+            assert isinstance(dt, date), "'dt' must be a datetime.date object."
+        return dt.year - self._birth_date.year
+
+    def getMaxHR(self, dt: date = None):
+        """
+        get the maximum theoretical heart rate according to Gellish.
+
+        Parameters
+        ----------
+        dt: datetime.date (optional)
+            if provided. Age and maxHR are calculated considering the
+            provided date and the stored birth date.
+
+        Returns
+        -------
+        hr: float
+            the calculated maximum heart rate.
+
+        References
+        ----------
+        Gellish RL, Goslin BR, Olson RE, McDonald A, Russi GD, Moudgil VK.
+            Longitudinal modeling of the relationship between age and maximal
+            heart rate.
+            Med Sci Sports Exerc. 2007;39(5):822-9.
+            doi: 10.1097/mss.0b013e31803349c6.
+        """
+        if dt is None:
+            dt = datetime.now().date()
+        else:
+            assert isinstance(dt, date), "'dt' must be a datetime.date object."
+        return 207 - 0.7 * self.getAge(dt)
+
+    @classmethod
+    def fromCosmedOmnia(cls, df):
+        """
+        return the Participant object read by a Cosmed Omnia excel export.
+
+        Parameters
+        ----------
+        df: pandas.DataFrame
+            the dataframe resulting from the Cosmed Omnia exporting function.
+
+        Returns
+        -------
+        p: Participant
+            a Participant instance.
+        """
+        assert isinstance(df, (pd.DataFrame)), "'df' must be a pandas.DataFrame"
+        surname, name, gender, _, height, weight, birth_date = df.iloc[:7, 1]
+        birth_date = datetime.strptime(birth_date + "-00:00:00", datetime_format).date()
+        return cls(surname, name, gender, height, weight, birth_date)
+
+    def toDict(self, dt: date = None):
+        """
+        return a dict representation of self
+
+        Parameters
+        ----------
+        dt: datetime.date (optional)
+            if provided. Age and maxHR are calculated considering the
+            provided date and the stored birth date.
+
+        Returns
+        -------
+        out: dict
+            a dict with all the data relative to the participant.
+        """
+        return {
+            "FULL NAME": self.getFullName(),
+            "SURNAME": self.getSurname(),
+            "NAME": self.getName(),
+            "GENDER": self.getGender(),
+            "HEIGHT (m)": self.getHeight(),
+            "WEIGHT (kg)": self.getWeight(),
+            "BMI (kg/m^2)": self.getBMI(),
+            "BIRTH DATE (dd/mm/aaaa)": self.getBirthDate(),
+            "AGE (yrs)": self.getAge(),
+            "MAX HR (bpm)": self.getMaxHR(),
+        }
+
+    def toDataFrame(self, dt: date = None):
+        """
+        return a pandas.DataFrame representation of self
+
+        Parameters
+        ----------
+        dt: datetime.date (optional)
+            if provided. Age and maxHR are calculated considering the
+            provided date and the stored birth date.
+
+        Returns
+        -------
+        out: pandas.DataFrame
+            a dataframe with all the data relative to the participant.
+        """
+        return pd.DataFrame({i: [v] for i, v in self.toDict().items()})
 
 
 #! FUNCTIONS
