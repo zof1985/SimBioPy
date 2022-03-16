@@ -206,7 +206,7 @@ class EmgSensor(GeometricMathObject, Sensor):
                 amp = np.atleast_2d(amp).T
             elif amp.ndim > 2:
                 raise ValueError("amplitude must be a 1D or 2D dataset.")
-            cols = ["Channel{}".format(i + 1) for i in range(amp.ndim)]
+            cols = ["Channel{}".format(i + 1) for i in range(amp.shape[1])]
             df = self._get_data(amp, index, cols)
         elif isinstance(amp, (pd.DataFrame, UnitDataFrame)):
             df = self._get_data(amp)

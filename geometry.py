@@ -266,7 +266,8 @@ class UnitDataFrame(pd.DataFrame):
                 return False
         return True
 
-    def _angles(self):
+    @property
+    def angles(self):
         """
         return the angle between all dimensions through the arctan function.
 
@@ -276,11 +277,11 @@ class UnitDataFrame(pd.DataFrame):
             the UnitDataFrame containing the angles in radiants.
         """
         q = {}
-        for i, c0 in self.columns.to_numpy()[:-1]:
-            for j, c1 in self.columns.to_numpy()[1:]:
-                lbl = "{}/{}".format(i, j)
-                y = self[c0].values.flatten()
-                x = self[c1].values.flatten()
+        for c0 in self.columns.to_numpy()[:-1]:
+            for c1 in self.columns.to_numpy()[1:]:
+                lbl = "{}/{}".format(c1, c0)
+                y = self[[c0]].values.flatten()
+                x = self[[c1]].values.flatten()
                 val = np.arctan2(y, x)
                 q[lbl] = val
         return UnitDataFrame(q, index=self.index, unit="rad")
@@ -444,7 +445,18 @@ class GeometricObject:
 
         try:
             return self.loc.__getitem__(itm)
-        except KeyError:
+        except Exception:
+            try:
+                return self.iloc.__getitem__(itm)
+            except KeyError:
+                try:
+                    return self.loc.__getitem__(np.s_[:, itm])
+                except KeyError:
+                    try:
+                        return self.iloc.__getitem__(np.s_[:, itm])
+                    except Exception as exc:
+                        raise exc
+        """
             try:
                 return self.loc.__getitem__(np.s_[:, itm])
             except (ValueError, TypeError):
@@ -452,11 +464,13 @@ class GeometricObject:
                     return self.iloc.__getitem__(itm)
                 except KeyError:
                     return self.iloc.__getitem__(np.s_[:, itm])
+
         except (ValueError, TypeError):
             try:
                 return self.iloc.__getitem__(itm)
             except KeyError:
                 return self.iloc.__getitem__(np.s_[:, itm])
+        """
 
     def _get_item(self, item):
         """
@@ -475,7 +489,7 @@ class GeometricObject:
         if isinstance(item, str) or not hasattr(item, "__iter__"):
             return [item]
         else:
-            return item
+            return list(item)
 
     def _adjust_indices(self, idx: Tuple[list, np.ndarray]) -> np.ndarray:
         """
@@ -1576,6 +1590,13 @@ class Point(GeometricMathObject):
         val = self._math_value(obj, transpose=True)
         return Point(coordinates=self.coordinates @ val)
 
+    @property
+    def angles(self) -> UnitDataFrame:
+        """
+        return the angles between all dimensions using the arctan function.
+        """
+        return self.coordinates.angles
+
 
 class Vector(GeometricMathObject):
     """
@@ -1632,11 +1653,12 @@ class Vector(GeometricMathObject):
         """
         return (self.amplitude - self.origin).norm
 
+    @property
     def angles(self) -> UnitDataFrame:
         """
         return the angles between all dimensions using the arctan function.
         """
-        return (self.amplitude - self.origin)._angles()
+        return (self.amplitude - self.origin).angles
 
     def _math_value(self, obj, transpose: bool = False) -> np.ndarray:
         """
@@ -1778,11 +1800,12 @@ class Segment(GeometricMathObject):
         """
         return (self.p1 - self.p0).norm
 
+    @property
     def angles(self) -> UnitDataFrame:
         """
         return the angles between all dimensions using the arctan function.
         """
-        return (self.p1 - self.p0)._angles()
+        return (self.p1 - self.p0).angles
 
     def point_at(
         self,
