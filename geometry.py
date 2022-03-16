@@ -162,13 +162,6 @@ class UnitDataFrame(pd.DataFrame):
         )
 
     @property
-    def ndim(self):
-        """
-        return the number of dimensions of the object.
-        """
-        return len(self.columns)
-
-    @property
     def nsamp(self):
         """
         return the number of samples of the object.
@@ -259,7 +252,7 @@ class UnitDataFrame(pd.DataFrame):
         valid = (np.ndarray, pd.DataFrame, UnitDataFrame)
         if not isinstance(obj, valid):
             return False
-        if obj.ndim != self.ndim:
+        if obj.shape[1] != self.shape[1]:
             return False
         if obj.shape[0] != self.shape[0]:
             return False
@@ -678,7 +671,7 @@ class GeometricObject:
         lr = LinearRegression(y[valid], x[valid], True)
 
         # replace missing values
-        d = self.ndim
+        d = self.shape[1]
         obj = self.copy()
         miss = np.array(self.loc[self.pivot().isna().any(1)].index)
         for i, attr in enumerate(self._attributes):
@@ -1032,13 +1025,6 @@ class GeometricObject:
         return the shape of the object.
         """
         return getattr(self, self._attributes[0]).shape
-
-    @property
-    def ndim(self):
-        """
-        return the number of dimensions of the object.
-        """
-        return len(self.columns)
 
     @property
     def nsamp(self):

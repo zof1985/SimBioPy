@@ -44,7 +44,7 @@ class Marker3D(Point, Sensor):
             columns=["X", "Y", "Z"],
             unit=unit,
         )
-        assert amp.ndim == 3, "a 3D dataset must be provided."
+        assert amp.shape[1] == 3, "a 3D dataset must be provided."
         super(Marker3D, self).__init__(coordinates=amp, unit=unit)
 
 
@@ -169,10 +169,10 @@ class Link3D(Segment, Sensor):
 
     def __init__(self, p0, p1, index=None, unit=""):
         v0 = p0.coordinates if isinstance(p0, Point) else p0
-        assert v0.ndim == 3, "a 3D dataset must be provided."
+        assert v0.shape[1] == 3, "a 3D dataset must be provided."
         v0 = self._get_data(v0, index, ["X", "Y", "Z"], unit)
         v1 = p1.coordinates if isinstance(p1, Point) else p1
-        assert v1.ndim == 3, "a 3D dataset must be provided."
+        assert v1.shape[1] == 3, "a 3D dataset must be provided."
         v1 = self._get_data(v1, index, ["X", "Y", "Z"], unit)
         super(Link3D, self).__init__(p0=v0, p1=v1)
 
@@ -206,7 +206,7 @@ class EmgSensor(GeometricMathObject, Sensor):
                 amp = np.atleast_2d(amp).T
             elif amp.ndim > 2:
                 raise ValueError("amplitude must be a 1D or 2D dataset.")
-            cols = ["Channel{}".format(i + 1) for i in range(amp.shape[1])]
+            cols = ["Channel{}".format(i + 1) for i in range(amp.ndim)]
             df = self._get_data(amp, index, cols)
         elif isinstance(amp, (pd.DataFrame, UnitDataFrame)):
             df = self._get_data(amp)
@@ -332,7 +332,7 @@ class Imu3D(GeometricMathObject, Sensor):
         if accelerometer is not None:
             if isinstance(accelerometer, Point):
                 attrs["accelerometer"] = accelerometer.coordinates
-                assert attrs["accelerometer"].ndim == 3, txt
+                assert attrs["accelerometer"].shape[1] == 3, txt
             else:
                 attrs["accelerometer"] = self._get_data(
                     data=accelerometer,
@@ -343,7 +343,7 @@ class Imu3D(GeometricMathObject, Sensor):
         if gyroscope is not None:
             if isinstance(gyroscope, Point):
                 attrs["gyroscope"] = gyroscope.coordinates
-                assert attrs["gyroscope"].ndim == 3, txt
+                assert attrs["gyroscope"].shape[1] == 3, txt
             else:
                 attrs["gyroscope"] = self._get_data(
                     data=gyroscope,
@@ -354,7 +354,7 @@ class Imu3D(GeometricMathObject, Sensor):
         if magnetometer is not None:
             if isinstance(magnetometer, Point):
                 attrs["magnetometer"] = magnetometer.coordinates
-                assert attrs["magnetometer"].ndim == 3, txt
+                assert attrs["magnetometer"].shape[1] == 3, txt
             else:
                 attrs["magnetometer"] = self._get_data(
                     data=magnetometer,

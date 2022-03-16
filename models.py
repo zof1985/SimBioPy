@@ -253,7 +253,6 @@ class Model3D:
         app = qtw.QApplication(sys.argv)
         widget = Model3DWidget(self)
         widget.show()
-        # sys.exit(app.exec_())
         app.exec_()
 
     @classmethod
@@ -1117,7 +1116,8 @@ class Model3DWidget(qtw.QWidget):
             # plot the ground
             if model.has_Marker3D():
                 dt = self.data["Marker3D"].values()
-                mx, my, mz = np.concatenate([v.values for v in dt], axis=0).T
+                dt = np.concatenate([v.values for v in dt], axis=0).T[:3]
+                mx, my, mz = dt
             else:
                 mx = np.array([])
                 my = np.array([])
@@ -2238,3 +2238,6 @@ class Model3DWidget(qtw.QWidget):
             self._EmgSensor[n]["Bar"].set_linewidth(val)
             self._EmgSensor[n]["Bar"].zorder = order
         self._update_figure()
+
+    def closeEvent(self, event):
+        self.close()
