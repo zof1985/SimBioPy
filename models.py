@@ -165,8 +165,7 @@ class Model3D:
         """
         obj = Model3D()
         for attr in self.sensors:
-            for key, val in getattr(self, attr).items():
-                obj.append(val, key)
+            obj.append(**getattr(self, attr))
         return obj
 
     def drop(self, sensor, inplace=False):
