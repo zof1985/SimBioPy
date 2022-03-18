@@ -724,11 +724,14 @@ class GeometricObject:
 
         # replace missing values
         out = self.copy()
-        yy_shapes =  [np.tile(i, getattr(out, v).shape[1]) for i, v in enumerate(out.attributes)]
+        yy_shapes = []
+        for i, v in enumerate(out.attributes):
+            yy_shapes += [np.tile(i, getattr(out, v).shape[1])]
         yy_shapes = np.concatenate(yy_shapes)
         for i, attr in enumerate(out.attributes):
+            cols = [j for j, k in enumerate(yy_shapes) if k == i]
             obj = getattr(out, attr)
-            obj.loc[obj.index, obj.columns] = yy[:, [j for j, k in enumerate(yy_shapes) if k == i]]
+            obj.loc[obj.index, obj.columns] = yy[:, cols]
             setattr(out, attr, obj)
         return out
 
