@@ -670,30 +670,67 @@ class GeometricObject:
 
         # get mean absolute correlation between self and the predictors
         corrs = [np.mean(abs(self.corr(i).values)) for i in predictors]
-
-        # keep the best n predictors
-        best_idx = np.argsort(corrs)[::-1][:n]
-        best_preds = []
+        shapes = []
+        xx = []
         for i, v in enumerate(predictors):
-            if i in best_idx:
-                best_preds += [v.pivot()]
-        x = pd.concat(best_preds, axis=1).values
+            if isinstance(v, (UnitDataFrame, pd.DataFrame)):
+                shapes += [np.tile(i, v.shape[1])]
+                xx += [v.values]
+            elif isinstance(v, np.ndarray):
+                shapes += [np.tile(i, v.shape[1])]
+                xx += [v]
+            elif isinstance(v, GeometricObject):
+                k = v.pivot()
+                shapes += [np.tile(i, k.shape[1])]
+                xx += [k.values]
+            else:
+                raise ValueError
+        shapes = np.concatenate(shapes)
+        xx = np.concatenate(xx, axis=1)
 
-        # get the predictive equation
-        y = self.pivot().values
-        valid = np.all(~np.isnan(np.concatenate([y, x], axis=1)), axis=1)
-        lr = LinearRegression(y[valid], x[valid], True)
+        # get the full data
+        yy = self.pivot().values
+
+        # get the missing samples
+        miss = np.where(np.any(np.isnan(yy), 1))[0]
+        for m in miss:
+
+            # get the columns of xx being available to be used for
+            # linear regression
+            c = ~np.isnan(xx[m])
+
+            # get the samples that can be used for linear regression
+            z = np.hstack([yy, xx[:, c]])
+            i = np.all(~np.isnan(z), 1)
+
+            # get the predictors index corresponding to the available
+            # columns
+            p = np.unique(shapes[c]).astype(int)
+
+            # get the correlations corresponding to the p predictors
+            r = [corrs[j] for j in p]
+
+            # keep the best n predictors
+            best_idx = np.argsort(r)[::-1][:n]
+
+            # get the columns corresponding to the best predictors in xx
+            best_xx = [j for j, k in enumerate(shapes) if k in best_idx]
+
+            # obtain the linear regression coefficients
+            lr = LinearRegression(yy[i, :], xx[i][:, best_xx], True)
+
+            # replace the missing data in yy corresponding to m
+            yy[m] = lr.predict(np.atleast_2d(xx[m, best_xx])).values.flatten()
 
         # replace missing values
-        d = self.shape[1]
-        obj = self.copy()
-        miss = np.array(self.loc[self.pivot().isna().any(1)].index)
-        for i, attr in enumerate(self._attributes):
-            df = getattr(obj, attr)
-            cols = [i * d, i * (d + 1)]
-            df.loc[miss, df.columns] = lr.predict(x[miss]).values[:, cols]
-            setattr(obj, attr, df)
-        return obj
+        out = self.copy()
+        yy_shapes =  [np.tile(i, getattr(out, v).shape[1]) for i, v in enumerate(out.attributes)]
+        yy_shapes = np.concatenate(yy_shapes)
+        for i, attr in enumerate(out.attributes):
+            obj = getattr(out, attr)
+            obj.loc[obj.index, obj.columns] = yy[:, [j for j, k in enumerate(yy_shapes) if k == i]]
+            setattr(out, attr, obj)
+        return out
 
     def pivot(self) -> pd.DataFrame:
         """
@@ -844,7 +881,7 @@ class GeometricObject:
             b = pd.DataFrame(obj, index=self.index, columns=cols)
         elif isinstance(obj, (pd.DataFrame, UnitDataFrame)):
             b = obj.copy()
-            cols = [("Obj", "", i) for i in self]
+            cols = [("Obj", "", i) for i in self.columns]
             b.columns = pd.MultiIndex.from_tuples(cols)
         else:
             try:
@@ -937,7 +974,9 @@ class GeometricObject:
         """
         obj = self.copy()
         for attr in self._attributes:
-            tmp = getattr(obj, attr).apply(fun, *args, **kwargs)
+            tmp = getattr(obj, attr)
+            for c, v in tmp.to_dict().items():
+                tmp.loc[tmp.index, c] = fun(v, *args, **kwargs)
             setattr(obj, attr, tmp)
         return obj
 
