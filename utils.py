@@ -274,6 +274,19 @@ class Participant:
             birth_date=birth_date,
         )
 
+    def copy(self):
+        """
+        return a copy of the object.
+        """
+        p = Participant()
+        p._name = self._name
+        p._surname = self._surname
+        p._gender = self.gender
+        p._height = self._height
+        p._weight = self._weight
+        p._birth_date = self._birth_date
+        return p
+
     def toDict(self, dt: date = None):
         """
         return a dict representation of self
