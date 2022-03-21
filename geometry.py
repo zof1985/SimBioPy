@@ -634,10 +634,18 @@ class GeometricObject:
         obj: GeometricObject instance
             the object with missing data replaced by value.
         """
-        obj = self.copy()
-        x_new = self.index
-        x_old = self.dropna().index
-        return obj.apply(interpolate_cs, x_old=x_old, x_new=x_new)
+        new = self.copy()
+        old = self.dropna()
+        x_new = new.index
+        x_old = old.index
+        for attr in old.attributes:
+            new_attr = getattr(new, attr)
+            old_attr = getattr(old, attr)
+            for dim in old_attr.columns:
+                y_old = old_attr[[dim]].values.flatten()
+                y_new = interpolate_cs(y=y_old, x_old=x_old, x_new=x_new)
+                new_attr.loc[x_new, [dim]] = np.atleast_2d(y_new).T
+        return new
 
     def _replace_linear_regression(self, n: int, predictors: list):
         """
@@ -668,8 +676,8 @@ class GeometricObject:
         for p in predictors:
             assert self.matches(p, strict=False), txt
 
-        # get mean absolute correlation between self and the predictors
-        corrs = [np.mean(abs(self.corr(i).values)) for i in predictors]
+        # define the predictors matrix
+        corrs = []
         shapes = []
         xx = []
         for i, v in enumerate(predictors):
@@ -685,8 +693,10 @@ class GeometricObject:
                 xx += [k.values]
             else:
                 raise ValueError
+            corrs += [np.mean(abs(self.corr(v).values))]
         shapes = np.concatenate(shapes)
         xx = np.concatenate(xx, axis=1)
+        argcorrs = np.argsort(corrs)[::-1]
 
         # get the full data
         yy = self.pivot().values
@@ -698,29 +708,29 @@ class GeometricObject:
             # get the columns of xx being available to be used for
             # linear regression
             c = ~np.isnan(xx[m])
+            if any(c):
+                # get the samples that can be used for linear regression
+                i = np.all(~np.isnan(np.hstack([yy, xx[:, c]])), 1)
 
-            # get the samples that can be used for linear regression
-            z = np.hstack([yy, xx[:, c]])
-            i = np.all(~np.isnan(z), 1)
+                # get the predictors index corresponding to the available
+                # columns
+                p = np.unique(shapes[c]).astype(int)
 
-            # get the predictors index corresponding to the available
-            # columns
-            p = np.unique(shapes[c]).astype(int)
+                # keep the best n predictors
+                best_idx = [k for k in argcorrs if k in p][:n]
 
-            # get the correlations corresponding to the p predictors
-            r = [corrs[j] for j in p]
+                # get the columns corresponding to the best predictors in xx
+                best_xx = [j for j, k in enumerate(shapes) if k in best_idx]
 
-            # keep the best n predictors
-            best_idx = np.argsort(r)[::-1][:n]
+                # obtain the linear regression coefficients
+                try:
+                    lr = LinearRegression(yy[i, :], xx[i][:, best_xx], True)
+                except Exception:
+                    check = 1
 
-            # get the columns corresponding to the best predictors in xx
-            best_xx = [j for j, k in enumerate(shapes) if k in best_idx]
-
-            # obtain the linear regression coefficients
-            lr = LinearRegression(yy[i, :], xx[i][:, best_xx], True)
-
-            # replace the missing data in yy corresponding to m
-            yy[m] = lr.predict(np.atleast_2d(xx[m, best_xx])).values.flatten()
+                # replace the missing data in yy corresponding to m
+                y = lr.predict(np.atleast_2d(xx[m, best_xx]))
+                yy[m] = y.values.flatten()
 
         # replace missing values
         out = self.copy()
@@ -731,6 +741,7 @@ class GeometricObject:
         for i, attr in enumerate(out.attributes):
             cols = [j for j, k in enumerate(yy_shapes) if k == i]
             obj = getattr(out, attr)
+            cols = [j for j, k in enumerate(yy_shapes) if k == i]
             obj.loc[obj.index, obj.columns] = yy[:, cols]
             setattr(out, attr, obj)
         return out

@@ -296,6 +296,8 @@ def interpolate_cs(y, n=None, x_old=None, x_new=None):
     """
 
     # control of the inputs
+    if not isinstance(y, np.ndarray):
+        y = np.array(y)
     txt = "{} must be an object of class {}."
     assert isinstance(y, np.ndarray), txt.format("y", "ndarray")
     assert y.ndim == 1, "y must be a 1D array."
