@@ -82,14 +82,14 @@ class ForcePlatform3D(GeometricObject, Sensor):
         """
         return the force vector measured by the ForcePlaftorm.
         """
-        return Vector(amplitude=self._force, origin=self._origin)
+        return Vector(amplitude=self.force, origin=self.origin)
 
     @property
     def moment_vector(self):
         """
         return the moments vector measured by the ForcePlaftorm.
         """
-        return Vector(amplitude=self._moment, origin=self._origin)
+        return Vector(amplitude=self.moment, origin=self.origin)
 
     def __init__(
         self,
