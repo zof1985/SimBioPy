@@ -2016,12 +2016,9 @@ class Model3DWidget(qtw.QWidget):
         self._axis3D.set_ylim(*self._limits)
         self._axis3D.set_zlim(*self._limits)
         self.progress_slider.setValue(0)
-        mrk_ok = self.has_Marker3D()
-        frz_ok = self.has_ForcePlatform3D()
-        lnk_ok = self.has_Link3D()
-        if mrk_ok or frz_ok or lnk_ok:
+        if self._figure3D is not None:
             self._figure3D.canvas.draw()
-        if self.has_EmgSensor():
+        if self._figureEMG is not None:
             self._figureEMG.canvas.draw()
 
     def _media_action_pressed(self):
