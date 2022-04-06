@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import scipy.interpolate as si
 import scipy.signal as ss
+from typing import Tuple
 
 
 #! FUNCTIONS
@@ -144,6 +145,65 @@ def freedman_diaconis_bins(y):
     for i in np.arange(n) + 1:
         d[np.argwhere((y >= (i - 1) * w) & (y < i * w)).flatten()] = i - 1
     return d
+
+
+def fir_filt(
+    signal: Tuple[np.ndarray, list],
+    fc: Tuple[float, int, list, np.ndarray] = 1,
+    fs: Tuple[float, int] = 2,
+    n: Tuple[float, int] = 5,
+    ft: str = "lowpass",
+    wn: str = "hamming",
+) -> np.ndarray:
+    """
+    apply a FIR filter with the specified specs to the signal.
+
+    Parameters
+    ----------
+
+    signal: 1D array
+        the signal to be filtered.
+
+    fc: float, int, 1D array
+        the cutoff frequency of the filter.
+
+    fs: float, int
+        The sampling frequency of the signal.
+
+    n: float, int
+        the order of the filter
+
+    ft: str
+        the type of filter. Any of "bandpass", "lowpass", "highpass",
+        "bandstop".
+
+    wn: str
+        the type of window to be applied. Any of:
+            "boxcar",
+            "triang",
+            "blackman",
+            "hamming",
+            "hann",
+            "bartlett",
+            "flattop",
+            "parzen",
+            "bohman",
+            "blackmanharris",
+            "nuttall",
+            "barthann",
+            "cosine",
+            "exponential",
+            "tukey",
+            "taylor"
+
+    Returns
+    -------
+
+    y: 1D array
+        the filtered signal.
+    """
+    coefs = ss.firwin(n, fc, window=wn, pass_zero=ft, fs=fs)
+    return ss.lfilter(coefs, 1.0, signal)
 
 
 def mean_filter(signal, n=1, pad_style="reflect", offset=0.5):
