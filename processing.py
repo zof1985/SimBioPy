@@ -154,6 +154,7 @@ def fir_filt(
     n: Tuple[float, int] = 5,
     ft: str = "lowpass",
     wn: str = "hamming",
+    pd: str = "constant",
 ) -> np.ndarray:
     """
     apply a FIR filter with the specified specs to the signal.
@@ -196,6 +197,49 @@ def fir_filt(
             "tukey",
             "taylor"
 
+    pd: str
+        the type of padding style adopted to apply before implementing
+        the filter. Available options are:
+
+        constant (default)
+        Pads with a constant value.
+
+        edge
+        Pads with the edge values of array.
+
+        linear_ramp
+        Pads with the linear ramp between end_value and the array
+        edge value.
+
+        maximum
+        Pads with the maximum value of all or part of the vector
+        along each axis.
+
+        mean
+        Pads with the mean value of all or part of the vector
+        along each axis.
+
+        median
+        Pads with the median value of all or part of the vector
+        along each axis.
+
+        minimum
+        Pads with the minimum value of all or part of the vector
+        along each axis.
+
+        reflect
+        Pads with the reflection of the vector mirrored on the first
+        and last values of the vector along each axis.
+
+        symmetric
+        Pads with the reflection of the vector mirrored along the edge
+        of the array.
+
+        wrap
+        Pads with the wrap of the vector along the axis. The first values
+        are used to pad the end and the end values are used to pad
+        the beginning.
+
     Returns
     -------
 
@@ -203,7 +247,8 @@ def fir_filt(
         the filtered signal.
     """
     coefs = ss.firwin(n, fc, window=wn, pass_zero=ft, fs=fs)
-    return ss.lfilter(coefs, 1.0, signal)
+    padded = np.pad(signal, pad_width=(n, 0), mode=pd)
+    return ss.lfilter(coefs, 1.0, padded)[n:]
 
 
 def mean_filter(signal, n=1, pad_style="reflect", offset=0.5):
