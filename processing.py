@@ -247,8 +247,15 @@ def fir_filt(
         the filtered signal.
     """
     coefs = ss.firwin(n, fc, window=wn, pass_zero=ft, fs=fs)
-    padded = np.pad(signal, pad_width=(n, 0), mode=pd)
-    return ss.lfilter(coefs, 1.0, padded)[n:]
+    val = signal[0] if pd == "constant" else 0
+    padded = np.pad(
+        signal,
+        pad_width=(2 * n - 1, 0),
+        mode=pd,
+        constant_values=val,
+    )
+    avg = np.mean(padded)
+    return ss.lfilter(coefs, 1.0, padded - avg)[(2 * n - 1) :] + avg
 
 
 def mean_filter(signal, n=1, pad_style="reflect", offset=0.5):
