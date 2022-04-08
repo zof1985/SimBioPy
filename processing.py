@@ -782,6 +782,7 @@ def butt_filt(signal, fc, fs, n=4, type="lowpass", phase_corrected=True):
         n,
         (np.array([fc]).flatten() / (0.5 * fs)),
         type,
+        analog=False,
         output="sos",
     )
 
