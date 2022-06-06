@@ -148,3 +148,4 @@ test.py
 
 # ini files
 *.ini
+*.code-workspace
