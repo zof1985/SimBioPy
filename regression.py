@@ -8,7 +8,6 @@ from typing import Union
 from scipy.linalg import pinv
 import numpy as np
 import pandas as pd
-import sympy as sy
 
 
 #! CLASSES
@@ -76,7 +75,7 @@ class LinearRegression:
             raise NotImplementedError(txt)
         return xx
 
-    def predict(self, x):
+    def __call__(self, x):
         """
         predict the fitted Y value according to the provided x.
         """
@@ -166,7 +165,7 @@ class PolynomialRegression(LinearRegression):
             xx.columns = pd.Index(cols)
         return xx
 
-    def predict(self, x):
+    def __call__(self, x):
         """
         predict the fitted Y value according to the provided x.
         """
@@ -197,53 +196,18 @@ class PowerRegression(LinearRegression):
             the number of digits used to print the coefficients
     """
 
-    def __init__(self, y, x, digits=5):
+    def __init__(self, y, x):
         """
         constructor
         """
+        super().__init__(y=self._simplify(y), x=self._simplify(x))
+        self.betas.loc[0] = np.e ** self.betas.loc[0]
 
-        # correct the shape of y and x
-        assert isinstance(digits, (int)), "'digits' must be and 'int'."
-        self.digits = digits
-        YY = np.log(self.__simplify__(y, "Y", None))
-        XX = np.log(self.__simplify__(x, "X", None))
-        txt = "'X' and 'Y' number of rows must be identical."
-        assert XX.shape[0] == YY.shape[0], txt
-
-        # add the ones for the intercept
-        XX = np.hstack([np.ones((XX.shape[0], 1)), XX])
-
-        # get the coefficients
-        coefs = pinv(XX.T.dot(XX)).dot(XX.T).dot(YY)
-        coefs[0] = np.e ** coefs[0]
-
-        # get the coefficients and intercept
-        self._coefs = pd.DataFrame(
-            data=coefs, index=self.__iv_labels__, columns=self.__dv_labels__
-        )
-
-        # obtain the symbolic representation of the equation
-        self.symbolic = []
-        for c, var in enumerate(self.betas):
-            vrs = self.X.columns.to_numpy()
-            a = self.betas[var].values[0]
-            bs = self.betas[var].values[1:]
-            line = sy.Float(a, digits)
-            for v, b in zip(vrs, bs):
-                line = line * sy.symbols(v) ** sy.Float(b, digits)
-            self.symbolic += [sy.Eq(sy.symbols(var), line)]
-
-    def copy(self):
-        """
-        copy the current instance
-        """
-        return PowerRegression(self.Y, self.X)
-
-    def predict(self, x):
+    def __call__(self, x):
         """
         predict the fitted Y value according to the provided x.
         """
-        X = self.__simplify__(x, "x", None)
+        X = self._simplify(x)
         m = self.betas.shape[0] - 1
         assert X.shape[1] == m, "'X' must have {} columns.".format(m)
         Z = []
@@ -256,14 +220,6 @@ class PowerRegression(LinearRegression):
         else:
             idx = pd.Index(np.arange(X.shape[0]))
         return pd.DataFrame(Z, index=idx, columns=self.__dv_labels__)
-
-    @property
-    def __iv_labels__(self):
-        """
-        return the labels for the regressors.
-        """
-        lbls = ["b{}".format(i + 1) for i in np.arange(len(self.X.columns))]
-        return ["b0"] + lbls
 
 
 class HyperbolicRegression(LinearRegression):
