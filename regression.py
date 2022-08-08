@@ -247,88 +247,37 @@ class HyperbolicRegression(LinearRegression):
             the number of digits used to render the coefficients.
     """
 
-    def __init__(self, y, x, digits=5):
+    def __init__(self, y, x):
         """
         constructor
         """
-
-        # add the input parameters
-        txt = "{} must be a {} object."
-        assert isinstance(digits, (int)), txt.format("digits", "int")
-        self.digits = digits
-
-        # correct the shape of y and x and get their reciprocal values
-        YY = self.__simplify__(y, "Y", None) ** (-1)
-        XX = self.__simplify__(x, "X", None) ** (-1)
-        txt = "'X' and 'Y' number of rows must be identical."
-        assert XX.shape[0] == YY.shape[0], txt
-        assert XX.shape[1] == 1, "'X' must have just 1 column."
-
-        # add the ones for the intercept
-        XX = np.hstack([np.ones((XX.shape[0], 1)), XX])
-
-        # get the linear regression coefficients
-        coefs = pinv(XX.T.dot(XX)).dot(XX.T).dot(YY)
+        super().__init__(y=y, x=x, fit_intercept=True)
 
         # obtain the hyberbolic coefficients
         # a = -1 / intercept
         # b =  slope / intercept
-        coefs = [[coefs[1][0] / coefs[0][0]], [-1 / coefs[0][0]]]
-        self._coefs = pd.DataFrame(
-            data=coefs, index=self.__iv_labels__, columns=self.__dv_labels__
-        )
+        self.a = -1 / self.betas.values.flatten()[0]
+        self.b = self.betas.values.flatten()[1] / self.betas.values.flatten()[0]
 
-        # obtain the symbolic representation of the equation
-        x = sy.symbols(self.X.columns.to_numpy()[0])
-        c = [sy.Float(i, self.digits) for i in self.betas.values]
-        y = sy.symbols(self.betas.columns.to_numpy()[0])
-        self.symbolic = [sy.Eq(y, (c[1] * x) / (c[0] + x))]
-
-    def copy(self):
-        """
-        copy the current instance
-        """
-        return HyperbolicRegression(self.Y, self.X)
-
-    def predict(self, x):
+    def __call__(self, x):
         """
         predict the fitted Y value according to the provided x.
         """
-        X = self.__simplify__(x, "x", None)
+        X = self._simplify(x)
         assert X.shape[1] == 1, "'X' must have 1 column."
-        Z = -self.betas.loc["b"].values * X / (self.betas.loc["a"].values + X)
+        Z = -self.b * X / (self.a + X)
         if isinstance(x, pd.DataFrame):
             idx = x.index
         else:
             idx = pd.Index(np.arange(X.shape[0]))
-        return pd.DataFrame(Z, index=idx, columns=self.__dv_labels__)
+        return pd.DataFrame(Z, index=idx, columns=self.coefs.columns)
 
-    @property
-    def __iv_labels__(self):
-        """
-        return the labels for the regressors.
-        """
-        return ["a", "b"]
 
-    def to_string(self, digits=3):
-        """
-        Create a textual representation of the fitted model.
+# test the classes
+if __name__ == "__main__":
 
-        Input:
-            digits: (int)
-                    the number of digits to be used to represent the
-                    coefficients.
-
-        Output:
-            txt:    (str)
-                    a single string representing the fitted model.
-        """
-        frm = "{:+." + str(digits) + "f}"
-        txt = "({} " + frm + ") * ({} " + frm + ") = " + frm
-        return txt.format(
-            self.betas.columns.to_numpy()[0],
-            self.betas.loc["a"].values.flatten()[0],
-            self.__dv_labels__()[0],
-            self.betas.loc["b"].values.flatten()[0],
-            np.prod(self.betas.values.flatten()),
-        )
+    # LINEAR REGRESSION
+    x = np.arange(10)
+    y = x * 1.5 + 0.5 + np.random.randn(len(x)) * 0.25
+    print("betas = " + str(LinearRegression(y=y, x=x).betas))
+    print(LinearRegression(y=y, x=x)(x))
