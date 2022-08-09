@@ -36,62 +36,121 @@ class LinearRegression:
         y: Union[np.ndarray, pd.DataFrame],
         x: Union[np.ndarray, pd.DataFrame],
         fit_intercept: bool = True,
-    ):
+    ) -> None:
 
+        # set the inputs
+        self._set_inputs(y=y, x=x, fit_intercept=fit_intercept)
+
+        # calculate betas
+        self._calculate_betas()
+
+    def _simplify(
+        self,
+        v: Union[np.ndarray, pd.DataFrame],
+        label: str = "",
+    ) -> pd.DataFrame:
+        """
+        internal method to format the entries in the constructor and call
+        methods.
+
+        Parameters
+        ----------
+        v: np.ndarray | pd.DataFrame
+            the data to be formatter
+
+        label: str
+            in case an array is provided, the label is used to define the
+            columns of the output DataFrame.
+
+        Returns
+        -------
+        d: pd.DataFrame
+            the data formatted as DataFrame.
+        """
+        if isinstance(v, pd.DataFrame):
+            return v.astype(float)
+        if isinstance(v, np.ndarray):
+            if v.ndim == 1:
+                d = np.atleast_2d(v).T
+            elif v.ndim == 2:
+                d = v
+            else:
+                raise ValueError(v)
+            cols = ["{}{}".format(label, i) for i in range(d.shape[1])]
+            return pd.DataFrame(d.astype(float), columns=cols)
+        raise NotImplementedError(v)
+
+    def _add_intercept(self, x: pd.DataFrame) -> None:
+        """
+        add an intercept to x.
+        """
+        x.insert(0, "INTERCEPT", np.tile(1, x.shape[0]))
+
+    def _set_inputs(
+        self,
+        y: Union[np.ndarray, pd.DataFrame],
+        x: Union[np.ndarray, pd.DataFrame],
+        fit_intercept: bool = True,
+    ) -> None:
+        """
+        set the input parameters
+        """
         # add the input parameters
         txt = "{} must be a {} object.".format("fit_intercept", "bool")
         assert isinstance(fit_intercept, bool), txt
         self.fit_intercept = fit_intercept
 
         # correct the shape of y and x
-        self.Y = self._simplify(y)
-        self.X = self._simplify(x)
-        txt = "'X' and 'Y' number of rows must be identical."
-        assert self.X.shape[0] == self.Y.shape[0], txt
+        self.y = self._simplify(y, "Y")
+        self.x = self._simplify(x, "X")
+        txt = "'x' and 'y' number of rows must be identical."
+        assert self.x.shape[0] == self.y.shape[0], txt
+
+    def _calculate_betas(self) -> None:
+        """
+        calculate the beta coefficients.
+        """
 
         # add the ones for the intercept
+        betas = self.x.copy()
         if self.fit_intercept:
-            xx = self.X.values
-            xx = np.hstack([np.ones((self.X.shape[0], 1)), xx])
+            self._add_intercept(betas)
 
         # get the coefficients and intercept
-        self.betas = pd.DataFrame(
-            data=pinv(xx.T.dot(xx)).dot(xx.T).dot(self.Y.values),
-            index=["INTERCEPT"] + self.X.columns.to_numpy().tolist(),
-            columns=self.Y.columns.to_numpy().tolist(),
-        )
+        self.betas = (pinv((betas.T @ betas).values) @ betas.T) @ self.y
+        labels = ["beta{}".format(i) for i in range(self.betas.shape[0])]
+        self.betas.index = pd.Index(labels)
 
-    def _simplify(self, v):
+    def __repr__(self) -> str:
         """
-        internal method to check entries in the constructor.
+        representation of the object.
         """
-        txt = "the input object must be a pandas.DataFrame, a "
-        txt += "numpy.ndarray or None."
-        if isinstance(v, pd.DataFrame):
-            xx = v.astype(float)
-        elif isinstance(v, np.ndarray):
-            xx = pd.DataFrame(np.atleast_1d(v).astype(float))
-        else:
-            raise NotImplementedError(txt)
-        return xx
+        return self.betas.__repr__()
 
-    def __call__(self, x):
+    def __str__(self) -> str:
+        """
+        representation of the object.
+        """
+        return self.betas.__str__()
+
+    def __call__(self, x: Union[np.ndarray, pd.DataFrame]) -> pd.DataFrame:
         """
         predict the fitted Y value according to the provided x.
-        """
-        return self._predict(self._simplify(x))
 
-    def _predict(self, xx):
+        Parameters
+        ----------
+        x: np.ndarray | pd.DataFrame
+            the input data used as predictor
+
+        Returns
+        -------
+        y: pd.DataFrame
+            the predicted values
         """
-        predict the fitted Y value according to the provided x.
-        """
+        v = self._simplify(x, "X")
         if self.fit_intercept:
-            b0 = self.betas.iloc[0]
-            bs = self.betas.iloc[1:]
-            zz = xx.dot(bs) + b0
-        else:
-            zz = xx.dot(self.betas)
-        return zz
+            self._add_intercept(v)
+        return v.values @ self.betas
 
 
 class PolynomialRegression(LinearRegression):
@@ -121,55 +180,63 @@ class PolynomialRegression(LinearRegression):
         x: Union[np.ndarray, pd.DataFrame],
         n: int = 1,
         fit_intercept: bool = True,
-    ):
-        # add the input parameters
-        txt = "{} must be a {} object.".format("fit_intercept", "bool")
-        assert isinstance(fit_intercept, bool), txt
-        self.fit_intercept = fit_intercept
-        assert isinstance(n, int), txt.format("n", "int")
+    ) -> None:
+        self._set_inputs(y=y, x=x, fit_intercept=fit_intercept)
+
+        # set the polynomial order
+        assert isinstance(n, int), ValueError(n)
+        assert n > 0, "'n' must be > 0"
         self.n = n
 
-        # correct the shape of y and x
-        self.Y = self._simplify(y)
-        self.X = self._simplify(x, self.n)
-        txt = "'X' and 'Y' number of rows must be identical."
-        assert self.X.shape[0] == self.Y.shape[0], txt
+        # get the coefficients
+        self._calculate_betas()
+
+    def _expand_to_n(self, df) -> pd.DataFrame:
+        """
+        expand the df values up to the n-th order.
+        """
+        betas = []
+        for i in range(self.n):
+            b_new = df.copy()
+            cols = [j + "{}".format(i + 1) for j in b_new.columns]
+            b_new.columns = pd.Index(cols)
+            betas += [b_new ** (i + 1)]
+        return pd.concat(betas, axis=1)
+
+    def _calculate_betas(self) -> None:
+        """
+        calculate the beta coefficients.
+        """
+        # expand x to cope with the polynomial order
+        betas = self._expand_to_n(self.x)
 
         # add the ones for the intercept
         if self.fit_intercept:
-            xx = self.X.values
-            xx = np.hstack([np.ones((self.X.shape[0], 1)), xx])
+            self._add_intercept(betas)
 
         # get the coefficients and intercept
-        self.betas = pd.DataFrame(
-            data=pinv(xx.T.dot(xx)).dot(xx.T).dot(self.Y.values),
-            index=["INTERCEPT"] + self.X.columns.to_numpy().tolist(),
-            columns=self.Y.columns.to_numpy().tolist(),
-        )
+        self.betas = (pinv((betas.T @ betas).values) @ betas.T) @ self.y
+        labels = ["beta{}".format(i) for i in range(self.betas.shape[0])]
+        self.betas.index = pd.Index(labels)
 
-    def _simplify(self, v, n=None):
-        """
-        internal method to check entries in the constructor.
-        """
-        txt = "the input object must be a pandas.DataFrame, a numpy.ndarray"
-        txt += " or None."
-        if isinstance(v, pd.DataFrame):
-            xx = v.astype(float)
-        elif isinstance(v, np.ndarray):
-            xx = pd.DataFrame(np.atleast_1d(v).astype(float))
-        else:
-            raise NotImplementedError(txt)
-        if n is not None:
-            xx = pd.concat([xx ** (i + 1) for i in range(n)], axis=1)
-            cols = ["C{}".format(i + 1) for i in range(xx.shape[1])]
-            xx.columns = pd.Index(cols)
-        return xx
-
-    def __call__(self, x):
+    def __call__(self, x: Union[np.ndarray, pd.DataFrame]) -> pd.DataFrame:
         """
         predict the fitted Y value according to the provided x.
+
+        Parameters
+        ----------
+        x: np.ndarray | pd.DataFrame
+            the input data used as predictor
+
+        Returns
+        -------
+        y: pd.DataFrame
+            the predicted values
         """
-        return self._predict(self._simplify(x, self.n))
+        v = self._expand_to_n(self._simplify(x, "X"))
+        if self.fit_intercept:
+            self._add_intercept(v)
+        return v.values @ self.betas
 
 
 class PowerRegression(LinearRegression):
@@ -278,6 +345,12 @@ if __name__ == "__main__":
 
     # LINEAR REGRESSION
     x = np.arange(10)
-    y = x * 1.5 + 0.5 + np.random.randn(len(x)) * 0.25
-    print("betas = " + str(LinearRegression(y=y, x=x).betas))
-    print(LinearRegression(y=y, x=x)(x))
+    y = x * 1.5 + 0.5 + np.random.randn(len(x)) * 0.01
+    lr = LinearRegression(y=y, x=x)
+    print(lr)
+    print(lr(x))
+
+    # POLYNOMIAL REGRESSION
+    pr = PolynomialRegression(y=y, x=x, n=2)
+    print(pr)
+    print(pr(x))
