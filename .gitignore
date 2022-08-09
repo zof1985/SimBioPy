@@ -1,7 +1,3 @@
 # vscode
 .vscode/
 *.code-workspace
-
-# folders
-_tests/
-_raw_icons/
