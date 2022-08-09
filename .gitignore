@@ -1,12 +1,7 @@
-# testing files
-test.py
-test_data/
-.test_data/
-
 # vscode
 .vscode/
-launch.json
 *.code-workspace
 
 # folders
+_tests/
 _raw_icons/
