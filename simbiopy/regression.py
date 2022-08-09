@@ -338,19 +338,3 @@ class HyperbolicRegression(LinearRegression):
         else:
             idx = pd.Index(np.arange(X.shape[0]))
         return pd.DataFrame(Z, index=idx, columns=self.coefs.columns)
-
-
-# test the classes
-if __name__ == "__main__":
-
-    # LINEAR REGRESSION
-    x = np.arange(10)
-    y = x * 1.5 + 0.5 + np.random.randn(len(x)) * 0.01
-    lr = LinearRegression(y=y, x=x)
-    print(lr)
-    print(lr(x))
-
-    # POLYNOMIAL REGRESSION
-    pr = PolynomialRegression(y=y, x=x, n=2)
-    print(pr)
-    print(pr(x))
