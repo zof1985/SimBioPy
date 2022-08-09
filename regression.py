@@ -96,7 +96,7 @@ class LinearRegression:
         set the input parameters
         """
         # add the input parameters
-        txt = "{} must be a {} object.".format("fit_intercept", "bool")
+        txt = "{} must be eiv_pos {} object.".format("fit_intercept", "bool")
         assert isinstance(fit_intercept, bool), txt
         self.fit_intercept = fit_intercept
 
@@ -118,8 +118,9 @@ class LinearRegression:
 
         # get the coefficients and intercept
         self.betas = (pinv((betas.T @ betas).values) @ betas.T) @ self.y
-        labels = ["beta{}".format(i) for i in range(self.betas.shape[0])]
-        self.betas.index = pd.Index(labels)
+        labels = self.betas.shape[0]
+        labels = [i + (0 if self.fit_intercept else 1) for i in range(labels)]
+        self.betas.index = pd.Index(["beta{}".format(i) for i in labels])
 
     def __repr__(self) -> str:
         """
@@ -216,8 +217,9 @@ class PolynomialRegression(LinearRegression):
 
         # get the coefficients and intercept
         self.betas = (pinv((betas.T @ betas).values) @ betas.T) @ self.y
-        labels = ["beta{}".format(i) for i in range(self.betas.shape[0])]
-        self.betas.index = pd.Index(labels)
+        labels = self.betas.shape[0]
+        labels = [i + (0 if self.fit_intercept else 1) for i in range(labels)]
+        self.betas.index = pd.Index(["beta{}".format(i) for i in labels])
 
     def __call__(self, x: Union[np.ndarray, pd.DataFrame]) -> pd.DataFrame:
         """
@@ -245,96 +247,403 @@ class PowerRegression(LinearRegression):
 
                 y = b_0 * x_1 ^ b_1 * ... * x_n ^ b_n
 
-    Input
+    Parameters
+    ----------
+    y:  (samples, dimensions) numpy array or pandas.DataFrame
+        the array containing the dependent variable.
 
-        y (2D column numpy array)
-
-            the array containing the dependent variable.
-
-        x (2D column numpy array)
-
-            the array containing the indipendent variable.
-            The number of rows must equal the rows of y, while
-            each column will be a regressor (i.e. an indipendent
-            variable).
-
-        digits (int)
-
-            the number of digits used to print the coefficients
+    x:  (samples, features) numpy array or pandas.DataFrame
+        the array containing the indipendent variables.
     """
 
-    def __init__(self, y, x):
-        """
-        constructor
-        """
-        super().__init__(y=self._simplify(y), x=self._simplify(x))
-        self.betas.loc[0] = np.e ** self.betas.loc[0]
+    def __init__(
+        self,
+        y: Union[np.ndarray, pd.DataFrame],
+        x: Union[np.ndarray, pd.DataFrame],
+    ) -> None:
+        super().__init__(y=y, x=x, fit_intercept=True)
 
-    def __call__(self, x):
+    def _set_inputs(
+        self,
+        y: Union[np.ndarray, pd.DataFrame],
+        x: Union[np.ndarray, pd.DataFrame],
+        fit_intercept: bool = True,
+    ) -> None:
+        """
+        set the input parameters
+        """
+        super()._set_inputs(y=y, x=x, fit_intercept=fit_intercept)
+
+        # check both x and y are positive
+        assert np.all(self.y.values > 0), "'y' must be positive only."
+        assert np.all(self.x.values > 0), "'x' must be positive only."
+
+    def _calculate_betas(self) -> None:
+        """
+        calculate the beta coefficients.
+        """
+        # add the ones for the intercept
+        betas = self.x.applymap(np.log)
+        self._add_intercept(betas)
+
+        # get the coefficients and intercept
+        logy = self.y.applymap(np.log)
+        self.betas = (pinv((betas.T @ betas).values) @ betas.T) @ logy
+        self.betas.iloc[0] = np.e ** self.betas.iloc[0]
+        labels = [i for i in range(self.betas.shape[0])]
+        self.betas.index = pd.Index(["beta{}".format(i) for i in labels])
+
+    def __call__(self, x: Union[np.ndarray, pd.DataFrame]) -> pd.DataFrame:
         """
         predict the fitted Y value according to the provided x.
         """
-        X = self._simplify(x)
-        m = self.betas.shape[0] - 1
-        assert X.shape[1] == m, "'X' must have {} columns.".format(m)
-        Z = []
-        for dim in self.betas:
-            coefs = self.betas[dim].values.T
-            Z += [np.prod(X ** coefs[1:], axis=1) * coefs[0]]
-        Z = pd.DataFrame(np.atleast_2d(Z).T)
-        if isinstance(x, pd.DataFrame):
-            idx = x.index
-        else:
-            idx = pd.Index(np.arange(X.shape[0]))
-        return pd.DataFrame(Z, index=idx, columns=self.__dv_labels__)
+        v = self._simplify(x, "X")
+        o = np.ones((v.shape[0], self.betas.shape[1]))
+        o = pd.DataFrame(o, index=v.index, columns=self.betas.columns)
+        o *= self.betas.iloc[0].values
+        for i in np.arange(1, self.betas.shape[0]):
+            o *= v.values ** self.betas.iloc[i].values
+        return o
 
 
-class HyperbolicRegression(LinearRegression):
+class HyperbolicRegression(PowerRegression):
     """
     Obtain the regression coefficients according to the (Rectangular) Least
     Squares Hyperbolic function:
-                                                        b * x
-                    (x + a) * (y + b) = a * b ==> y = - -----
-                                                        a + x
-    Input
+                            y = eiv_pos / x + b
+    Parameters
+    ----------
+    y:  (samples, dimensions) numpy array or pandas.DataFrame
+        the array containing the dependent variable.
 
-        y (2D column numpy array)
-
-            the array containing the dependent variable.
-
-        x (2D column numpy array)
-
-            the array containing the indipendent variable.
-            The number of rows must equal the rows of y, while
-            each column will be a regressor (i.e. an indipendent
-            variable).
-
-        digits (int)
-
-            the number of digits used to render the coefficients.
+    x:  (samples, features) numpy array or pandas.DataFrame
+        the array containing the indipendent variables.
     """
 
-    def __init__(self, y, x):
-        """
-        constructor
-        """
-        super().__init__(y=y, x=x, fit_intercept=True)
+    def __init__(
+        self,
+        y: Union[np.ndarray, pd.DataFrame],
+        x: Union[np.ndarray, pd.DataFrame],
+    ) -> None:
+        super().__init__(y=y, x=x)
 
-        # obtain the hyberbolic coefficients
-        # a = -1 / intercept
-        # b =  slope / intercept
-        self.a = -1 / self.betas.values.flatten()[0]
-        self.b = self.betas.values.flatten()[1] / self.betas.values.flatten()[0]
+    def _calculate_betas(self) -> None:
+        """
+        calculate the beta coefficients.
+        """
+        betas = self.x ** (-1)
+        self._add_intercept(betas)
+        self.betas = (pinv((betas.T @ betas).values) @ betas.T) @ self.y
+        labels = [i for i in range(self.betas.shape[0])]
+        self.betas.index = pd.Index(["beta{}".format(i) for i in labels])
 
     def __call__(self, x):
         """
         predict the fitted Y value according to the provided x.
         """
-        X = self._simplify(x)
-        assert X.shape[1] == 1, "'X' must have 1 column."
-        Z = -self.b * X / (self.a + X)
-        if isinstance(x, pd.DataFrame):
-            idx = x.index
+        v = self._simplify(x, "X") ** (-1)
+        self._add_intercept(v)
+        return v.values @ self.betas
+
+
+class EllipsisRegression(LinearRegression):
+    """
+    calculate the beta coefficients equivalent to the fit the coefficients
+    eiv_pos,b,cnd,d,e,f, representing an ellipse described by the formula
+
+        b_0 * x^2 + b_1 * xy + b_2 * y^2 + b_3 * x + b_4 * y + b_5 = 0
+
+    Based on the algorithm of Halir and Flusser.
+
+    References
+    ----------
+    Halır R, Flusser J. Numerically stable direct least squares fitting of
+        ellipses. InProc. 6th International Conference in Central Europe on
+        Computer Graphics and Visualization. WSCG 1998 (Vol. 98, pp. 125-132).
+        Citeseer. https://citeseerx.ist.psu.edu/viewdoc/download;jsessionid=DF7A4B034A45C75AFCFF861DA1D7B5CD?doi=10.1.1.1.7559&rep=rep1&type=pdf
+
+    Parameters
+    ----------
+    y:  (samples, dimensions) numpy array or pandas.DataFrame
+        the array containing the dependent variable.
+
+    x:  (samples, features) numpy array or pandas.DataFrame
+        the array containing the indipendent variables.
+    """
+
+    def __init__(
+        self,
+        y: Union[np.ndarray, pd.DataFrame],
+        x: Union[np.ndarray, pd.DataFrame],
+    ) -> None:
+        super().__init__(y=y, x=x)
+        assert self.x.shape[1] == 1, "x can be unidimensional only"
+        assert self.y.shape[1] == 1, "y can be unidimensional only"
+
+    def _calculate_betas(self) -> None:
+        """
+        calculate the regression coefficients.
+        """
+        # quadratic part of the design matrix
+        xval = self.x.values.flatten()
+        yval = self.y.values.flatten()
+        d_1 = np.vstack([xval**2, xval * yval, yval**2]).T
+
+        # linear part of the design matrix
+        d_2 = np.vstack([xval, yval, np.ones(len(xval))]).T
+
+        # quadratic part of the scatter matrix
+        s_1 = d_1.T @ d_1
+
+        # combined part of the scatter matrix
+        s_2 = d_1.T @ d_2
+
+        # linear part of the scatter matrix
+        s_3 = d_2.T @ d_2
+
+        # reduced scatter matrix
+        cnd = np.array(((0, 0, 2), (0, -1, 0), (2, 0, 0)), dtype=float)
+        trc = -np.linalg.inv(s_3) @ s_2.T
+        mat = np.linalg.inv(cnd) @ (s_1 + s_2 @ trc)
+
+        # solve the eigen system
+        eigvec = np.linalg.eig(mat)[1]
+
+        # evaluate the coefficients
+        con = 4 * eigvec[0] * eigvec[2] - eigvec[1] ** 2
+        eiv_pos = eigvec[:, np.nonzero(con > 0)[0]]
+        coefs = np.concatenate((eiv_pos, trc @ eiv_pos)).ravel()
+        names = ["beta{}".format(i) for i in range(len(coefs))]
+        self.betas = pd.DataFrame(coefs, index=names, columns=["CART. COEFS"])
+
+        # extract the major and minor axes of the ellipsis
+        # get the axes length
+        a, b, c, d, f, g = self.betas.values.flatten()
+        b /= 2
+        d /= 2
+        f /= 2
+        num = 2 * (a * f**2 + c * d**2 + g * b**2 - 2 * b * d * f - a * c * g)
+        den = b**2 - a * c
+        fac = ((a - c) ** 2 + 4 * b**2) ** 0.5
+        l0 = 2 * ((num / den / (fac - a - c)) ** 0.5)
+        l1 = 2 * ((num / den / (-fac - a - c)) ** 0.5)
+
+        # check which axis is the major
+        first_major = l0 >= l1
+
+        # get the axes angles
+        if b == 0:
+            a0 = 0 if a < c else np.pi / 2
         else:
-            idx = pd.Index(np.arange(X.shape[0]))
-        return pd.DataFrame(Z, index=idx, columns=self.coefs.columns)
+            a0 = np.arctan((2 * b) / (a - c)) / 2
+            if a > c:
+                a0 += np.pi / 2
+            if not first_major:
+                a0 += np.pi / 2
+            a0 = a0 % (2 * np.pi)
+        a1 = (a0 + np.pi / 2) % (2 * np.pi)
+
+        # We know that the two axes pass from the centre of the ellipsis
+        # and we also know the angle of the major and minor axes.
+        # Therefore the intercept of the fitting lines describing the two
+        # axes can be found.
+        x0, y0 = self.center
+        m0 = np.tan(a0)
+        m1 = np.tan(a1)
+        i0 = y0 - x0 * m0
+        i1 = y0 - x0 * m1
+
+        # get two LinearRegression objects describing the two axes
+        r0 = LinearRegression(y=np.array([y0, i0]), x=np.array([x0, 0]))
+        r1 = LinearRegression(y=np.array([y0, i1]), x=np.array([x0, 0]))
+
+        # get the crossings between the two axes and the ellipsis
+        p0_1, p0_2 = self.get_crossings(r0)
+        p1_1, p1_2 = self.get_crossings(r1)
+
+        # pack all the data by axis
+        axis0 = {"line": r0, "angle": a0, "length": l0, "p0": p0_1, "p1": p0_2}
+        axis1 = {"line": r1, "angle": a1, "length": l1, "p0": p1_1, "p1": p1_2}
+        if not first_major:
+            axis0, axis1 = axis1, axis0
+
+        # store the axes
+        self.axis_major = axis0
+        self.axis_minor = axis1
+
+    def _get_abc_by_x(self, x: float) -> tuple:
+        """
+        private method which calculates the values a, b and c used
+        to extract the values of y given x.
+
+        Parameters
+        ----------
+        x: float
+            the given x value.
+
+        Returns
+        -------
+        a, b, c: float
+            the coefficients to be used for extracting the roots of a
+            2nd order equation having y as unknown parameter.
+        """
+        x_ = float(x)
+        a, b, c, d, e, f = self.betas.values.flatten()
+        return c, b * x_ + e, f + a * x_**2 + d * x_
+
+    def _get_abc_by_y(self, y: float) -> tuple:
+        """
+        private method which calculates the values a, b and c used
+        to extract the values of x given y.
+
+        Parameters
+        ----------
+        y: float
+            the given y value.
+
+        Returns
+        -------
+        a, b, c: float
+            the coefficients to be used for extracting the roots of a
+            2nd order equation having x as unknown parameter.
+        """
+        y_ = float(y)
+        a, b, c, d, e, f = self.betas.values.flatten()
+        return a, b * y_ + d, f + c * y_**2 + e * y_
+
+    def _get_roots(self, a: float, b: float, c: float) -> tuple:
+        """
+        obtain the roots of a second order polynomial having form:
+                a * x**2 + b * x + c = 0
+
+        Parameters
+        ----------
+        a, b, c: float
+            the coefficients of the polynomial.
+
+        Returns
+        -------
+        x0, x1: float | None
+            the roots of the polynomial. None is returned if the solution
+            is impossible.
+        """
+        delta = b**2 - 4 * a * c
+        if delta < 0:
+            return None, None
+        d = np.sqrt(delta)
+        return (-b - d) / (2 * a), (-b + d) / (2 * a)
+
+    def __call__(self, x=None, y=None):
+        """
+        predict the x given y or predict y given x.
+
+        Parameters
+        ----------
+        x OR y: (samples, 1) numpy array or pandas.DataFrame
+            the array containing the dependent variable.
+
+        Returns
+        -------
+        y OR x: (samples, 2) numpy array or pandas.DataFrame
+            the array containing the dependent variable.
+
+        Note
+        ----
+        only x or y can be provided. None is returned if the provided value
+        lies outside the ellipsis boundaries.
+        """
+        # check the entries
+        assert x is not None or y is not None, "'x' or 'y' must be provided."
+        assert x is None or y is None, "only 'x' or 'y' must be provided."
+        if x is not None:
+            v = self._simplify(x, "X")
+            fun = self._get_abc_by_x
+            cols = ["Y0", "Y1"]
+        else:
+            v = self._simplify(y, "Y")
+            fun = self._get_abc_by_y
+            cols = ["X0", "X1"]
+        assert v.shape[1] == 1, "Only 1D arrays can be provided."
+
+        # calculate the values
+        o = np.atleast_2d([self._get_roots(*fun(i)) for i in v.values])
+        return pd.DataFrame(o, columns=cols, index=v.index)
+
+    @property
+    def center(self) -> tuple:
+        """
+        get the center of the ellipsis as described here:
+        https://mathworld.wolfram.com/Ellipse.html
+
+        Returns
+        -------
+        x0, y0: float
+            the coordinates of the centre of the ellipsis.
+        """
+        a, b, c, d, f, g = self.betas.values.flatten()
+        b /= 2
+        d /= 2
+        f /= 2
+        n = b**2 - a * c
+        return (c * d - b * f) / n, (a * f - b * d) / n
+
+    @property
+    def centre(self) -> tuple:
+        """
+        get the center of the ellipsis as described here:
+        https://mathworld.wolfram.com/Ellipse.html
+
+        Returns
+        -------
+        x0, y0: float
+            the coordinates of the centre of the ellipsis.
+        """
+        return self.center
+
+    def get_crossings(self, lr: LinearRegression) -> tuple:
+        """
+        get the crossings between the provided line and the ellipsis
+
+        Parameters
+        ----------
+        m: float
+            the slope of the axis line
+
+        i: float
+            the intercept of the axis line
+
+        Returns
+        -------
+        p0, p1: tuple
+            the coordinates of the crossing points. It returns None if
+            the line does not touch the ellipsis.
+        """
+        i, m = lr.betas.values.flatten()
+        a, b, c, d, f, g = self.betas.values.flatten()
+        b /= 2
+        d /= 2
+        f /= 2
+        n0 = (c * i**2 + f * i + g) * (c * m**2 + b * m + a)
+        n0 += (2 * c * i * m + b * i + f * m + d) ** 2
+        n0 = (-4 * n0) ** 0.5
+        n1 = 2 * c * i * m + b * i + f * m + d
+        d0 = 2 * (c * m**2 + b * m + a)
+
+        # get p0 and p1
+        if d0 != 0:
+            p0_x = (n0 + n1) / d0
+            p0_y = -m * p0_x + i
+            p1_x = (n0 - n1) / d0
+            p1_y = m * p1_x + i
+            return (p0_x, p0_y), (p1_x, p1_y)
+
+        return None, None
+
+    @property
+    def eccentricity(self) -> float:
+        """
+        return the eccentricity parameter of the ellipsis.
+        """
+        b = self.axis_minor["length"] / 2
+        a = self.axis_major["length"] / 2
+        return (1 - b**2 / a**2) ** 0.5

@@ -2,3 +2,5 @@
 .vscode/
 *.code-workspace
 .devcontainer/
+__pycache__/
+test.py
