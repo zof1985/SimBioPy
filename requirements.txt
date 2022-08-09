@@ -3,3 +3,4 @@ scipy
 plotly
 openpyxl
 PySide2
+matplotlib

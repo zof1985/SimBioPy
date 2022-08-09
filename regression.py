@@ -413,7 +413,7 @@ class EllipsisRegression(LinearRegression):
         con = 4 * eigvec[0] * eigvec[2] - eigvec[1] ** 2
         eiv_pos = eigvec[:, np.nonzero(con > 0)[0]]
         coefs = np.concatenate((eiv_pos, trc @ eiv_pos)).ravel()
-        names = ["beta{}".format(i) for i in range(len(coefs))]
+        names = [f"beta{i}" for i in range(len(coefs))]
         self.betas = pd.DataFrame(coefs, index=names, columns=["CART. COEFS"])
 
         # extract the major and minor axes of the ellipsis
@@ -458,12 +458,21 @@ class EllipsisRegression(LinearRegression):
         r1 = LinearRegression(y=np.array([y0, i1]), x=np.array([x0, 0]))
 
         # get the crossings between the two axes and the ellipsis
-        p0_1, p0_2 = self.get_crossings(r0)
-        p1_1, p1_2 = self.get_crossings(r1)
+        p0_0, p0_1 = self.get_crossings(r0)
+        p1_0, p1_1 = self.get_crossings(r1)
+
+        import matplotlib.pyplot as pl
+
+        pl.plot(self.x, self.y, label="ellipsis")
+        pl.plot(x=[p0_0[0]], y=[p0_0[1]], 'rx', label="p0_0")
+        pl.plot(x=[p0_1[0]], y=[p0_1[1]], 'rx', label="p0_1")
+        pl.plot(x=[p1_0[0]], y=[p1_0[1]], 'rx', label="p1_0")
+        pl.plot(x=[p1_1[0]], y=[p1_1[1]], 'rx', label="p1_1")
+        pl.show()
 
         # pack all the data by axis
-        axis0 = {"line": r0, "angle": a0, "length": l0, "p0": p0_1, "p1": p0_2}
-        axis1 = {"line": r1, "angle": a1, "length": l1, "p0": p1_1, "p1": p1_2}
+        axis0 = {"line": r0, "angle": a0, "length": l0, "p0": p0_0, "p1": p0_1}
+        axis1 = {"line": r1, "angle": a1, "length": l1, "p0": p1_0, "p1": p1_1}
         if not first_major:
             axis0, axis1 = axis1, axis0
 
@@ -533,7 +542,7 @@ class EllipsisRegression(LinearRegression):
         d = np.sqrt(delta)
         return (-b - d) / (2 * a), (-b + d) / (2 * a)
 
-    def __call__(self, x=None, y=None):
+    def __call__(self, x=None, y=None) -> pd.DataFrame:
         """
         predict the x given y or predict y given x.
 
@@ -619,25 +628,19 @@ class EllipsisRegression(LinearRegression):
             the line does not touch the ellipsis.
         """
         i, m = lr.betas.values.flatten()
-        a, b, c, d, f, g = self.betas.values.flatten()
-        b /= 2
-        d /= 2
-        f /= 2
-        n0 = (c * i**2 + f * i + g) * (c * m**2 + b * m + a)
-        n0 += (2 * c * i * m + b * i + f * m + d) ** 2
-        n0 = (-4 * n0) ** 0.5
-        n1 = 2 * c * i * m + b * i + f * m + d
-        d0 = 2 * (c * m**2 + b * m + a)
-
-        # get p0 and p1
-        if d0 != 0:
-            p0_x = (n0 + n1) / d0
-            p0_y = -m * p0_x + i
-            p1_x = (n0 - n1) / d0
-            p1_y = m * p1_x + i
-            return (p0_x, p0_y), (p1_x, p1_y)
-
-        return None, None
+        a, b, c, d, e, f = self.betas.values.flatten()
+        a_ = a + b * m + c * m**2
+        b_ = b * i + 2 * m * i * c + d + e * m
+        c_ = c * i**2 + e * i + f
+        d_ = b_**2 - 4 * a_ * c_
+        if d_ < 0:
+            return None, None
+        e_ = 2 * a_
+        f_ = -b_ / e_
+        g_ = (d_**0.5) / e_
+        x0 = f_ - g_
+        x1 = f_ + g_
+        return (x0, x0 * m + i), (x1, x1 * m + i)
 
     @property
     def eccentricity(self) -> float:
