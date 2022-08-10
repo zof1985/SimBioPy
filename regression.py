@@ -448,7 +448,7 @@ class EllipsisRegression(LinearRegression):
         l1 = 2 * ((num / den / (-fac - a - c)) ** 0.5)
 
         # check which axis is the major
-        first_major = l0 <= l1
+        first_major = l0 >= l1
 
         # get the axes angles
         if b == 0:
