@@ -594,7 +594,7 @@ class EllipsisRegression(LinearRegression):
 
         # calculate the values
         o = np.atleast_2d([self._get_roots(*fun(i)) for i in v.values])
-        return pd.DataFrame(o, columns=cols, index=v.index)
+        return pd.DataFrame(o, columns=cols, index=v.index).astype(float)
 
     @property
     def center(self) -> tuple:
