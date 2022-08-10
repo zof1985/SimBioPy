@@ -365,6 +365,63 @@ class HyperbolicRegression(PowerRegression):
         return v.values @ self.betas
 
 
+class _Axis(LinearRegression):
+    """
+    generate the axis object defining one single axis of a 2D geometric figure.
+
+    Parameters:
+    y:  (samples, dimensions) numpy array or pandas.DataFrame
+        the array containing the dependent variable.
+
+    x:  (samples, features) numpy array or pandas.DataFrame
+        the array containing the indipendent variables.
+    """
+    _vertex = (None, None)
+
+    def __init__(
+        self,
+        y: Union[np.ndarray, pd.DataFrame, list, int, float],
+        x: Union[np.ndarray, pd.DataFrame, list, int, float],
+    ) -> None:
+        super().__init__(y=y, x=x, fit_intercept=True)
+        txt = "Axis must be defined by 2 elements only."
+        assert self.y.shape[0] == 2, txt
+        assert self.x.shape[0] == 2, txt
+
+        # set the vertex
+        x = self.x.values.flatten()
+        y = self.y.values.flatten()
+        self._vertex = ((x[0], y[0]), (x[1], y[1]))
+
+    @property
+    def angle(self) -> float:
+        """
+        return the angle (in radians) of the axis.
+        """
+        return np.arctan(self.betas.loc["beta1"].values[0][0])
+
+    @property
+    def length(self) -> float:
+        """
+        get the distance between the two vertex.
+        """
+        return len(self)
+
+    @property
+    def vertex(self) -> tuple:
+        """
+        return the vertex of the axis
+        """
+        return self._vertex
+
+    def __len__(self) -> float:
+        """
+        get the distance between the two vertex.
+        """
+        a, b = self._vertex
+        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
 class EllipsisRegression(LinearRegression):
     """
     calculate the beta coefficients equivalent to the fit the coefficients
@@ -435,44 +492,24 @@ class EllipsisRegression(LinearRegression):
         names = [f"beta{i}" for i in range(len(coefs))]
         self.betas = pd.DataFrame(coefs, index=names, columns=["CART. COEFS"])
 
-        # extract the major and minor axes of the ellipsis
-        # get the axes length
-        a, b, c, d, f, g = self.betas.values.flatten()
-        b /= 2
-        d /= 2
-        f /= 2
-        num = 2 * (a * f**2 + c * d**2 + g * b**2 - 2 * b * d * f - a * c * g)
-        den = b**2 - a * c
-        fac = ((a - c) ** 2 + 4 * b**2) ** 0.5
-        l0 = 2 * ((num / den / (fac - a - c)) ** 0.5)
-        l1 = 2 * ((num / den / (-fac - a - c)) ** 0.5)
-
-        # check which axis is the major
-        first_major = l0 >= l1
+        # get the axes angles
+        # ref: http://www.geom.uiuc.edu/docs/reference/CRC-formulas/node28.html
+        a, c, b = self.betas.values.flatten()[:3]
 
         # get the axes angles
-        if b == 0:
-            a0 = 0 if a < c else np.pi / 2
+        if c == 0:
+            a0 = 0
         else:
-            a0 = np.arctan((2 * b) / (a - c)) / 2
-            if a > c:
-                a0 += np.pi / 2
-            if not first_major:
-                a0 += np.pi / 2
-            a0 = a0
-        a1 = a0 + np.pi / 2
-
-        # make the angles in the 0-pi range
-        a0 %= np.pi
-        a1 %= np.pi
+            m0 = (b - a) / c
+            m0 = (m0**2 + 1) ** 0.5 + m0
+            m1 = -1 / m0
+            a0 = np.arctan(m0)
 
         # We know that the two axes pass from the centre of the ellipsis
         # and we also know the angle of the major and minor axes.
         # Therefore the intercept of the fitting lines describing the two
         # axes can be found.
         x0, y0 = self.center
-        m0 = np.tan(a0)
-        m1 = np.tan(a1)
         i0 = y0 - x0 * m0
         i1 = y0 - x0 * m1
 
@@ -481,18 +518,20 @@ class EllipsisRegression(LinearRegression):
         r1 = LinearRegression(y=np.array([y0, i1]), x=np.array([x0, 0]))
 
         # get the crossings between the two axes and the ellipsis
-        p0_0, p0_1 = self.get_crossings(r0)
-        p1_0, p1_1 = self.get_crossings(r1)
+        p0_0, p0_1 = self._get_crossings(r0)
+        p1_0, p1_1 = self._get_crossings(r1)
 
-        # pack all the data by axis
-        axis0 = {"line": r0, "angle": a0, "length": l0, "p0": p0_0, "p1": p0_1}
-        axis1 = {"line": r1, "angle": a1, "length": l1, "p0": p1_0, "p1": p1_1}
-        if not first_major:
-            axis0, axis1 = axis1, axis0
+        # generate the two axes
+        ax0 = _Axis(x=[p0_0[0], p0_1[0]], y=[p0_0[1], p0_1[1]])
+        ax1 = _Axis(x=[p1_0[0], p1_1[0]], y=[p1_0[1], p1_1[1]])
+
+        # sort the axes
+        if len(ax0) < len(ax1):
+            ax0, ax1 = ax1, ax0
 
         # store the axes
-        self.axis_major = axis0
-        self.axis_minor = axis1
+        self.axis_major = ax0
+        self.axis_minor = ax1
 
     def _get_abc_by_x(self, x: float) -> tuple:
         """
@@ -629,9 +668,9 @@ class EllipsisRegression(LinearRegression):
         """
         the area of the ellipsis
         """
-        return np.pi * self.axis_major["length"] * self.axis_minor["length"]
+        return np.pi * len(self.axis_major) * len(self.axis_minor)
 
-    def get_crossings(self, lr: LinearRegression) -> tuple:
+    def _get_crossings(self, lr: LinearRegression) -> tuple:
         """
         get the crossings between the provided line and the ellipsis
 
@@ -669,8 +708,8 @@ class EllipsisRegression(LinearRegression):
         """
         return the eccentricity parameter of the ellipsis.
         """
-        b = self.axis_minor["length"] / 2
-        a = self.axis_major["length"] / 2
+        b = len(self.axis_minor) / 2
+        a = len(self.axis_major) / 2
         return (1 - b**2 / a**2) ** 0.5
 
     @property
@@ -684,14 +723,11 @@ class EllipsisRegression(LinearRegression):
             the coordinates of the crossing points. It returns None if
             the line does not touch the ellipsis.
         """
-        c = self.axis_major["length"] * self.eccentricity
-        l = self.axis_major["line"]
-        a = np.arctan(l.betas.loc["beta1"].values[0])
-        w = c * np.cos(a)
-        x0 = self.centre[0]
-        f0 = (x0 - w, l(np.array([x0 - w])).values[0][0])
-        f1 = (x0 + w, l(np.array([x0 + w])).values[0][0])
-        return f0, f1
+        a = len(self.axis_major) / 2
+        p = self.axis_major.angle
+        x, y = a * self.eccentricity * np.array([np.cos(p), np.sin(p)])
+        x0, y0 = self.centre
+        return (x0 - x, y0 - y), (x0 + x, y0 + y)
 
     def is_inside(
         self,
