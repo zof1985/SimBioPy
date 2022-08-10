@@ -462,6 +462,10 @@ class EllipsisRegression(LinearRegression):
             a0 = a0
         a1 = a0 + np.pi / 2
 
+        # make the angles in the 0-pi range
+        a0 %= np.pi
+        a1 %= np.pi
+
         # We know that the two axes pass from the centre of the ellipsis
         # and we also know the angle of the major and minor axes.
         # Therefore the intercept of the fitting lines describing the two
