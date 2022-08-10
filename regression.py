@@ -607,12 +607,9 @@ class EllipsisRegression(LinearRegression):
         x0, y0: float
             the coordinates of the centre of the ellipsis.
         """
-        a, b, c, d, f, g = self.betas.values.flatten()
-        b /= 2
-        d /= 2
-        f /= 2
-        n = b**2 - a * c
-        return (c * d - b * f) / n, (a * f - b * d) / n
+        a, b, c, d, e = self.betas.values.flatten()[:-1]
+        den = b**2 - 4 * a * c
+        return (2 * c * d - b * e) / den, (2 * a * e - b * d) / den
 
     @property
     def centre(self) -> tuple:
