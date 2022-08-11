@@ -405,7 +405,8 @@ class _Axis(LinearRegression):
         """
         get the distance between the two vertex.
         """
-        return len(self)
+        return len(self)a, b = self._vertex
+        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
 
     @property
     def vertex(self) -> tuple:
@@ -413,13 +414,6 @@ class _Axis(LinearRegression):
         return the vertex of the axis
         """
         return self._vertex
-
-    def __len__(self) -> float:
-        """
-        get the distance between the two vertex.
-        """
-        a, b = self._vertex
-        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
 
 
 class EllipsisRegression(LinearRegression):
@@ -526,7 +520,7 @@ class EllipsisRegression(LinearRegression):
         ax1 = _Axis(x=[p1_0[0], p1_1[0]], y=[p1_0[1], p1_1[1]])
 
         # sort the axes
-        if len(ax0) < len(ax1):
+        if ax0.length < ax1.length:
             ax0, ax1 = ax1, ax0
 
         # store the axes
