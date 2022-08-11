@@ -405,7 +405,7 @@ class _Axis(LinearRegression):
         """
         get the distance between the two vertex.
         """
-        return len(self)a, b = self._vertex
+        a, b = self._vertex
         return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
 
     @property
