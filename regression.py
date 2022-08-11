@@ -398,7 +398,7 @@ class _Axis(LinearRegression):
         """
         return the angle (in radians) of the axis.
         """
-        return np.arctan(self.betas.loc["beta1"].values[0][0])
+        return np.arctan(self.betas.loc["beta1"].values[0])
 
     @property
     def length(self) -> float:
