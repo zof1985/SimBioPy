@@ -376,6 +376,7 @@ class _Axis(LinearRegression):
     x:  (samples, features) numpy array or pandas.DataFrame
         the array containing the indipendent variables.
     """
+
     _vertex = (None, None)
 
     def __init__(
@@ -702,8 +703,8 @@ class EllipsisRegression(LinearRegression):
         """
         return the eccentricity parameter of the ellipsis.
         """
-        b = len(self.axis_minor) / 2
-        a = len(self.axis_major) / 2
+        b = self.axis_minor.length / 2
+        a = self.axis_major.length / 2
         return (1 - b**2 / a**2) ** 0.5
 
     @property
