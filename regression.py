@@ -508,13 +508,9 @@ class EllipsisRegression(LinearRegression):
         i0 = y0 - x0 * m0
         i1 = y0 - x0 * m1
 
-        # get two LinearRegression objects describing the two axes
-        r0 = LinearRegression(y=np.array([y0, i0]), x=np.array([x0, 0]))
-        r1 = LinearRegression(y=np.array([y0, i1]), x=np.array([x0, 0]))
-
         # get the crossings between the two axes and the ellipsis
-        p0_0, p0_1 = self._get_crossings(r0)
-        p1_0, p1_1 = self._get_crossings(r1)
+        p0_0, p0_1 = self.get_crossings(m=m0, i=i0)
+        p1_0, p1_1 = self.get_crossings(m=m1, i=i1)
 
         # generate the two axes
         ax0 = _Axis(x=[p0_0[0], p0_1[0]], y=[p0_0[1], p0_1[1]])
@@ -665,7 +661,7 @@ class EllipsisRegression(LinearRegression):
         """
         return np.pi * len(self.axis_major) * len(self.axis_minor)
 
-    def _get_crossings(self, lr: LinearRegression) -> tuple:
+    def get_crossings(self, m: Union[int, float], i: Union[int, float]) -> tuple:
         """
         get the crossings between the provided line and the ellipsis
 
@@ -683,7 +679,6 @@ class EllipsisRegression(LinearRegression):
             the coordinates of the crossing points. It returns None if
             the line does not touch the ellipsis.
         """
-        i, m = lr.betas.values.flatten()
         a, b, c, d, e, f = self.betas.values.flatten()
         a_ = a + b * m + c * m**2
         b_ = b * i + 2 * m * i * c + d + e * m
@@ -718,7 +713,7 @@ class EllipsisRegression(LinearRegression):
             the coordinates of the crossing points. It returns None if
             the line does not touch the ellipsis.
         """
-        a = len(self.axis_major) / 2
+        a = self.axis_major.length / 2
         p = self.axis_major.angle
         x, y = a * self.eccentricity * np.array([np.cos(p), np.sin(p)])
         x0, y0 = self.centre
