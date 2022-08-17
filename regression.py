@@ -492,13 +492,9 @@ class EllipsisRegression(LinearRegression):
         a, c, b = self.betas.values.flatten()[:3]
 
         # get the axes angles
-        if c == 0:
-            a0 = 0
-        else:
-            m0 = (b - a) / c
-            m0 = (m0**2 + 1) ** 0.5 + m0
-            m1 = -1 / m0
-            a0 = np.arctan(m0)
+        m0 = (b - a) / c
+        m0 = (m0**2 + 1) ** 0.5 + m0
+        m1 = -1 / m0
 
         # We know that the two axes pass from the centre of the ellipsis
         # and we also know the angle of the major and minor axes.
@@ -509,8 +505,8 @@ class EllipsisRegression(LinearRegression):
         i1 = y0 - x0 * m1
 
         # get the crossings between the two axes and the ellipsis
-        p0_0, p0_1 = self.get_crossings(m=m0, i=i0)
-        p1_0, p1_1 = self.get_crossings(m=m1, i=i1)
+        p0_0, p0_1 = self._get_crossings(m=m0, i=i0)
+        p1_0, p1_1 = self._get_crossings(m=m1, i=i1)
 
         # generate the two axes
         ax0 = _Axis(x=[p0_0[0], p0_1[0]], y=[p0_0[1], p0_1[1]])
@@ -626,42 +622,11 @@ class EllipsisRegression(LinearRegression):
         o = np.atleast_2d([self._get_roots(*fun(i)) for i in v.values])
         return pd.DataFrame(o, columns=cols, index=v.index).astype(float)
 
-    @property
-    def center(self) -> tuple:
-        """
-        get the center of the ellipsis as described here:
-        https://mathworld.wolfram.com/Ellipse.html
-
-        Returns
-        -------
-        x0, y0: float
-            the coordinates of the centre of the ellipsis.
-        """
-        a, b, c, d, e = self.betas.values.flatten()[:-1]
-        den = b**2 - 4 * a * c
-        return (2 * c * d - b * e) / den, (2 * a * e - b * d) / den
-
-    @property
-    def centre(self) -> tuple:
-        """
-        get the center of the ellipsis as described here:
-        https://mathworld.wolfram.com/Ellipse.html
-
-        Returns
-        -------
-        x0, y0: float
-            the coordinates of the centre of the ellipsis.
-        """
-        return self.center
-
-    @property
-    def area(self) -> float:
-        """
-        the area of the ellipsis
-        """
-        return np.pi * len(self.axis_major) * len(self.axis_minor)
-
-    def get_crossings(self, m: Union[int, float], i: Union[int, float]) -> tuple:
+    def _get_crossings(
+        self,
+        m: Union[int, float],
+        i: Union[int, float],
+    ) -> tuple:
         """
         get the crossings between the provided line and the ellipsis
 
@@ -693,6 +658,97 @@ class EllipsisRegression(LinearRegression):
         x1 = f_ + g_
         return (x0, x0 * m + i), (x1, x1 * m + i)
 
+    def is_inside(
+        self,
+        x: Union[int, float],
+        y: Union[int, float],
+    ) -> bool:
+        """
+        check whether the point (x, y) is inside the ellipsis.
+
+        Parameters
+        ----------
+        x: float
+            the x axis coordinate
+
+        y: float
+            the y axis coordinate
+
+        Returns
+        -------
+        i: bool
+            True if the provided point is contained by the ellipsis.
+        """
+        y0, y1 = self(x=x).values.flatten()
+        return (y0 is not None) & (y > min(y0, y1)) & (y <= max(y0, y1))
+
+    @property
+    def center(self) -> tuple:
+        """
+        get the center of the ellipsis as described here:
+        https://mathworld.wolfram.com/Ellipse.html
+
+        Returns
+        -------
+        x0, y0: float
+            the coordinates of the centre of the ellipsis.
+        """
+        a, b, c, d, e = self.betas.values.flatten()[:-1]
+        den = b**2 - 4 * a * c
+        return (2 * c * d - b * e) / den, (2 * a * e - b * d) / den
+
+    @property
+    def area(self) -> float:
+        """
+        the area of the ellipsis.
+
+        Returns
+        -------
+        a: float
+            the area of the ellipsis.
+        """
+        return np.pi * len(self.axis_major) * len(self.axis_minor)
+
+    @property
+    def perimeter(self) -> float:
+        """
+        the (approximated) perimeter of the ellipsis as calculated
+        by the "infinite series approach".
+
+                P = pi * (a + b) * sum_{n=0...N} (h ** n / (4 ** (n + 1)))
+
+        where:
+            h = (a - b) ** 2 / (a ** 2 + b ** 2)
+            a = axis major
+            b = axis minor
+            N = any natural number.
+
+        Note:
+        -----
+        N is set such as the output measure no longer changes up to the
+        12th decimal number.
+
+        Returns
+        -------
+        p: float
+            the approximated perimeter of the ellipsis.
+        """
+        a = self.axis_major.length / 2
+        b = self.axis_minor.length / 2
+        h = (a - b) ** 2 / (a**2 + b**2)
+        c = np.pi * (a + b)
+        p_old = -c
+        p = c
+        n = 0
+        q = 1
+        while n == 0 or abs(p_old - p) > 1e-12:
+            p_old = p
+            n += 1
+            q += h**n / 4**n
+            p = c * q
+
+        return p
+
     @property
     def eccentricity(self) -> float:
         """
@@ -719,6 +775,148 @@ class EllipsisRegression(LinearRegression):
         x0, y0 = self.centre
         return (x0 - x, y0 - y), (x0 + x, y0 + y)
 
+
+class CircleRegression(LinearRegression):
+    """
+    generate a circle from the provided data in a least squares sense.
+
+    References
+    ----------
+    https://lucidar.me/en/mathematics/least-squares-fitting-of-circle/
+
+    Parameters
+    ----------
+    y:  (samples, dimensions) numpy array or pandas.DataFrame
+        the array containing the dependent variable.
+
+    x:  (samples, features) numpy array or pandas.DataFrame
+        the array containing the indipendent variables.
+    """
+
+    def __init__(
+        self,
+        y: Union[np.ndarray, pd.DataFrame, list, int, float],
+        x: Union[np.ndarray, pd.DataFrame, list, int, float],
+    ) -> None:
+        super().__init__(y=y, x=x)
+        assert self.x.shape[1] == 1, "x can be unidimensional only"
+        assert self.y.shape[1] == 1, "y can be unidimensional only"
+
+    def _calculate_betas(self) -> None:
+        """
+        calculate the regression coefficients.
+        """
+        a = pd.concat([self.x, self.y], axis=1)
+        a.insert(a.shape[1], "I", np.tile(self.x.shape[0]))
+        b = self.x**2 + self.y.values**2
+        b.columns = pd.Index(["B"])
+        self.betas = a.T @ pinv((a @ a.T).values) @ self.y
+        names = [f"beta{i}" for i in range(self.betas.shape[0])]
+        self.betas.index = pd.Index(names)
+        self.betas.columns = pd.Index(["CART. COEFS"])
+
+    def _get_abc_by_x(self, x: float) -> tuple:
+        """
+        private method which calculates the values a, b and c used
+        to extract the values of y given x.
+
+        Parameters
+        ----------
+        x: float
+            the given x value.
+
+        Returns
+        -------
+        a, b, c: float
+            the coefficients to be used for extracting the roots of a
+            2nd order equation having y as unknown parameter.
+        """
+        x0, y0 = self.center
+        r = self.radius
+        return 1, -2 * y0, y0**2 - r**2 + (float(x) - x0) ** 2
+
+    def _get_abc_by_y(self, y: float) -> tuple:
+        """
+        private method which calculates the values a, b and c used
+        to extract the values of x given y.
+
+        Parameters
+        ----------
+        y: float
+            the given y value.
+
+        Returns
+        -------
+        a, b, c: float
+            the coefficients to be used for extracting the roots of a
+            2nd order equation having x as unknown parameter.
+        """
+        x0, y0 = self.center
+        r = self.radius
+        return 1, -2 * x0, x0**2 - r**2 + (float(y) - y0) ** 2
+
+    def _get_roots(self, a: float, b: float, c: float) -> tuple:
+        """
+        obtain the roots of a second order polynomial having form:
+                a * x**2 + b * x + c = 0
+
+        Parameters
+        ----------
+        a, b, c: float
+            the coefficients of the polynomial.
+
+        Returns
+        -------
+        x0, x1: float | None
+            the roots of the polynomial. None is returned if the solution
+            is impossible.
+        """
+        delta = b**2 - 4 * a * c
+        if delta < 0:
+            return None, None
+        d = np.sqrt(delta)
+        return (-b - d) / (2 * a), (-b + d) / (2 * a)
+
+    def __call__(
+        self,
+        x: Union[np.ndarray, pd.DataFrame, list, int, float] = None,
+        y: Union[np.ndarray, pd.DataFrame, list, int, float] = None,
+    ) -> pd.DataFrame:
+        """
+        predict the x given y or predict y given x.
+
+        Parameters
+        ----------
+        x OR y: (samples, 1) numpy array or pandas.DataFrame
+            the array containing the dependent variable.
+
+        Returns
+        -------
+        y OR x: (samples, 2) numpy array or pandas.DataFrame
+            the array containing the dependent variable.
+
+        Note
+        ----
+        only x or y can be provided. None is returned if the provided value
+        lies outside the ellipsis boundaries.
+        """
+        # check the entries
+        assert x is not None or y is not None, "'x' or 'y' must be provided."
+        assert x is None or y is None, "only 'x' or 'y' must be provided."
+        if x is not None:
+            v = self._simplify(x, "X")
+            fun = self._get_abc_by_x
+            cols = ["Y0", "Y1"]
+        else:
+            v = self._simplify(y, "Y")
+            fun = self._get_abc_by_y
+            cols = ["X0", "X1"]
+        assert v.shape[1] == 1, "Only 1D arrays can be provided."
+
+        # calculate the values
+        o = np.atleast_2d([self._get_roots(*fun(i)) for i in v.values])
+        return pd.DataFrame(o, columns=cols, index=v.index).astype(float)
+
     def is_inside(
         self,
         x: Union[int, float],
@@ -742,3 +940,53 @@ class EllipsisRegression(LinearRegression):
         """
         y0, y1 = self(x=x).values.flatten()
         return (y0 is not None) & (y > min(y0, y1)) & (y <= max(y0, y1))
+
+    @property
+    def radius(self) -> float:
+        """
+        get the radius of the circle.
+
+        Returns
+        -------
+        r: float
+            the radius of the circle.
+        """
+        a, b, c = self.betas.values.flatten()
+        return ((4 * c + a**2 + b**2) ** 0.5) / 2
+
+    @property
+    def center(self) -> tuple:
+        """
+        get the center of the circle.
+
+        Returns
+        -------
+        x0, y0: float
+            the coordinates of the centre of the cicle.
+        """
+        a, b = self.betas.values.flatten()[:-1]
+        return a / 2, b / 2
+
+    @property
+    def area(self) -> float:
+        """
+        the area of the circle.
+
+        Returns
+        -------
+        a: float
+            the area of the circle.
+        """
+        return np.pi * self.radius**2
+
+    @property
+    def perimeter(self) -> float:
+        """
+        the perimeter of the circle.
+
+        Returns
+        -------
+        p: float
+            the perimeter of the circle.
+        """
+        return 2 * self.radius * np.pi
