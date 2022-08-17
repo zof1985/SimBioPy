@@ -808,12 +808,10 @@ class CircleRegression(LinearRegression):
         """
         a = pd.concat([self.x, self.y], axis=1)
         a.insert(a.shape[1], "I", np.tile(1, self.x.shape[0]))
+        a.columns = pd.Index([f"beta{i}" for i in range(a.shape[1])])
         b = self.x**2 + self.y.values**2
-        b.columns = pd.Index(["B"])
-        self.betas = a.T @ pinv((a @ a.T).values) @ self.y
-        names = [f"beta{i}" for i in range(self.betas.shape[0])]
-        self.betas.index = pd.Index(names)
-        self.betas.columns = pd.Index(["CART. COEFS"])
+        b.columns = pd.Index(["CART. COEFS"])
+        self.betas = a.T @ pinv((a @ a.T).values) @ b
 
     def _get_abc_by_x(self, x: float) -> tuple:
         """
