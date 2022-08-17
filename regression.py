@@ -807,7 +807,7 @@ class CircleRegression(LinearRegression):
         calculate the regression coefficients.
         """
         a = pd.concat([self.x, self.y], axis=1)
-        a.insert(a.shape[1], "I", np.tile(self.x.shape[0]))
+        a.insert(a.shape[1], "I", np.tile(1, self.x.shape[0]))
         b = self.x**2 + self.y.values**2
         b.columns = pd.Index(["B"])
         self.betas = a.T @ pinv((a @ a.T).values) @ self.y
