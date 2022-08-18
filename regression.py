@@ -451,6 +451,43 @@ class EllipsisRegression(LinearRegression):
         assert self.x.shape[1] == 1, "x can be unidimensional only"
         assert self.y.shape[1] == 1, "y can be unidimensional only"
 
+    def __call__(
+        self,
+        x: Union[np.ndarray, pd.DataFrame, list, int, float] = None,
+        y: Union[np.ndarray, pd.DataFrame, list, int, float] = None,
+    ) -> pd.DataFrame:
+        """
+        predict the x given y or predict y given x.
+
+        Parameters
+        ----------
+        x OR y: (samples, 1) numpy array or pandas.DataFrame
+            the array containing the dependent variable.
+
+        Returns
+        -------
+        y OR x: (samples, 2) numpy array or pandas.DataFrame
+            the array containing the dependent variable.
+
+        Note
+        ----
+        only x or y can be provided. None is returned if the provided value
+        lies outside the ellipsis boundaries.
+        """
+        # check the entries
+        assert x is not None or y is not None, "'x' or 'y' must be provided."
+        assert x is None or y is None, "only 'x' or 'y' must be provided."
+        if x is not None:
+            v = self._simplify(x, "X")
+            o = np.atleast_2d([self._get_roots(x=i) for i in v.values])
+            cols = ["Y0", "Y1"]
+        else:
+            v = self._simplify(y, "Y")
+            o = np.atleast_2d([self._get_roots(y=i) for i in v.values])
+            cols = ["X0", "X1"]
+        assert v.shape[1] == 1, "Only 1D arrays can be provided."
+        return pd.DataFrame(o, columns=cols, index=v.index).astype(float)
+
     def _calculate_betas(self) -> None:
         """
         calculate the regression coefficients.
@@ -520,79 +557,6 @@ class EllipsisRegression(LinearRegression):
         self.axis_major = ax0
         self.axis_minor = ax1
 
-    def _get_roots(self, x: float = None, y: float = None) -> tuple:
-        """
-        obtain the roots of a second order polynomial having form:
-                a * x**2 + b * x + c = 0
-        
-        Parameters
-        ----------
-        x: float
-            the given x value.
-           
-        y: float
-            the given y value.
-
-        Returns
-        -------
-        x0, x1: float | None
-            the roots of the polynomial. None is returned if the solution
-            is impossible.
-        """
-        # get the coefficients
-        a_, b_, c_, d_, e_, f_ = self.betas.values.flatten()
-        if y is not None and x is None:
-            y_ = float(y)
-            a, b, c = a_, b_ * y_ + d_, f_ + c_ * y_**2 + e_ * y_
-        elif x is not None and y is None:
-            x_ = float(x)
-            a, b, c = c_, b_ * x_ + e_, f_ + a_ * x_**2 + d_ * x_
-        else:
-            raise ValueError("Only one 'x' or 'y' must be provided.")
-        
-        # get the roots
-        d = b**2 - 4 * a * c
-        if d < 0:
-            return None, None
-        return (-b - d**0.5) / (2 * a), (-b + d**0.5) / (2 * a)
-
-    def __call__(
-        self,
-        x: Union[np.ndarray, pd.DataFrame, list, int, float] = None,
-        y: Union[np.ndarray, pd.DataFrame, list, int, float] = None,
-    ) -> pd.DataFrame:
-        """
-        predict the x given y or predict y given x.
-
-        Parameters
-        ----------
-        x OR y: (samples, 1) numpy array or pandas.DataFrame
-            the array containing the dependent variable.
-
-        Returns
-        -------
-        y OR x: (samples, 2) numpy array or pandas.DataFrame
-            the array containing the dependent variable.
-
-        Note
-        ----
-        only x or y can be provided. None is returned if the provided value
-        lies outside the ellipsis boundaries.
-        """
-        # check the entries
-        assert x is not None or y is not None, "'x' or 'y' must be provided."
-        assert x is None or y is None, "only 'x' or 'y' must be provided."
-        if x is not None:
-            v = self._simplify(x, "X")
-            o = np.atleast_2d([self._get_roots(x=i) for i in v.values])
-            cols = ["Y0", "Y1"]
-        else:
-            v = self._simplify(y, "Y")
-            o = np.atleast_2d([self._get_roots(y=i) for i in v.values])
-            cols = ["X0", "X1"]
-        assert v.shape[1] == 1, "Only 1D arrays can be provided."
-        return pd.DataFrame(o, columns=cols, index=v.index).astype(float)
-
     def _get_crossings(
         self,
         m: Union[int, float],
@@ -628,6 +592,60 @@ class EllipsisRegression(LinearRegression):
         x0 = f_ - g_
         x1 = f_ + g_
         return (x0, x0 * m + i), (x1, x1 * m + i)
+
+    def _solve(self, a: float, b: float, c: float) -> tuple:
+        """
+        obtain the solutions of a second order polynomial having form:
+                a * x**2 + b * x + c = 0
+
+        Parameters
+        ----------
+        a, b, c: float
+            the coefficients of the equation.
+
+        Returns
+        -------
+        x0, x1: float | None
+            the roots of the polynomial. None is returned if the solution
+            is impossible.
+        """
+        d = b**2 - 4 * a * c
+        if d < 0:
+            return None, None
+        return (-b - d**0.5) / (2 * a), (-b + d**0.5) / (2 * a)
+
+    def _get_roots(self, x: float = None, y: float = None) -> tuple:
+        """
+        obtain the roots of a second order polynomial having form:
+                a * x**2 + b * x + c = 0
+
+        Parameters
+        ----------
+        x: float
+            the given x value.
+
+        y: float
+            the given y value.
+
+        Returns
+        -------
+        x0, x1: float | None
+            the roots of the polynomial. None is returned if the solution
+            is impossible.
+        """
+        # get the coefficients
+        a_, b_, c_, d_, e_, f_ = self.betas.values.flatten()
+        if y is not None and x is None:
+            y_ = float(y)
+            a, b, c = a_, b_ * y_ + d_, f_ + c_ * y_**2 + e_ * y_
+        elif x is not None and y is None:
+            x_ = float(x)
+            a, b, c = c_, b_ * x_ + e_, f_ + a_ * x_**2 + d_ * x_
+        else:
+            raise ValueError("Only one 'x' or 'y' must be provided.")
+
+        # get the roots
+        return self._solve(a, b, c)
 
     def is_inside(
         self,
@@ -745,42 +763,47 @@ class EllipsisRegression(LinearRegression):
         x, y = a * self.eccentricity * np.array([np.cos(p), np.sin(p)])
         x0, y0 = self.center
         return (x0 - x, y0 - y), (x0 + x, y0 + y)
-    
+
     @property
     def domain(self) -> tuple:
         """
         return the domain of the ellipse.
-        
+
         Returns
         -------
         x1, x2: float
             the x-axis boundaries of the ellipse.
         """
-        t = self.axis_major.angle
-        a = self.axis_major.length / 2
-        b = self.axis_minor.length / 2
-        k = (a**2 * np.cos(t) + b**2 * np.sin(t)) ** 0.5
-        x = self.center[0]
-        s = np.sort([x - k, x + k])
-        return s[0], s[1]
+
+        # get the roots to for the 2nd order equation to be solved
+        a_, b_, c_, d_, e_, f_ = self.betas.values.flatten()
+        a = b_**2 - 4 * a_ * c_
+        b = 2 * b_ * e_ - 4 * c_ * d_
+        c = e_**2 - 4 * c_ * f_
+
+        # solve the equation
+        x0, x1 = np.sort(self._solve(a, b, c))
+        return x0, x1
 
     @property
     def codomain(self) -> tuple:
         """
         return the codomain of the ellipse.
-        
+
         Returns
         -------
         y1, y2: float
             the y-axis boundaries of the ellipse.
         """
-        t = self.axis_major.angle
-        a = self.axis_major.length / 2
-        b = self.axis_minor.length / 2
-        k = (a**2 * np.sin(t) + b**2 * np.cos(t)) ** 0.5
-        y = self.center[1]
-        s = np.sort([y - k, y + k])
-        return s[0], s[1]
+        # get the roots to for the 2nd order equation to be solved
+        a_, b_, c_, d_, e_, f_ = self.betas.values.flatten()
+        a = b_**2 - 4 * a_ * c_
+        b = 2 * b_ * d_ - 4 * a_ * e_
+        c = d_**2 - 4 * a_ * f_
+
+        # solve the equation
+        y0, y1 = np.sort(self._solve(a, b, c))
+        return y0, y1
 
 
 class CircleRegression(LinearRegression):
@@ -817,7 +840,7 @@ class CircleRegression(LinearRegression):
         y = self.y.values.flatten()
         i = np.tile(1, len(y))
         a = np.vstack(np.atleast_2d([x, y, i])).T
-        b = np.atleast_2d(x ** 2 + y ** 2).T
+        b = np.atleast_2d(x**2 + y**2).T
         ix = [f"beta{i}" for i in range(a.shape[1])]
         cl = ["CART. COEFS"]
         self.betas = pd.DataFrame(pinv(a.T @ a) @ a.T @ b, index=ix, columns=cl)
@@ -826,12 +849,12 @@ class CircleRegression(LinearRegression):
         """
         obtain the roots of a second order polynomial having form:
                 a * x**2 + b * x + c = 0
-        
+
         Parameters
         ----------
         x: float
             the given x value.
-           
+
         y: float
             the given y value.
 
@@ -850,7 +873,7 @@ class CircleRegression(LinearRegression):
             a, b, c = 1, -2 * y0, y0**2 - r**2 + (float(x) - x0) ** 2
         else:
             raise ValueError("Only one 'x' or 'y' must be provided.")
-        
+
         # get the roots
         d = b**2 - 4 * a * c
         if d < 0:
@@ -967,12 +990,12 @@ class CircleRegression(LinearRegression):
             the perimeter of the circle.
         """
         return 2 * self.radius * np.pi
-    
+
     @property
     def domain(self) -> tuple:
         """
         return the domain of the circle.
-        
+
         Returns
         -------
         x1, x2: float
@@ -981,12 +1004,12 @@ class CircleRegression(LinearRegression):
         x = self.center[0]
         r = self.radius
         return x - r, x + r
-        
+
     @property
     def codomain(self) -> tuple:
         """
         return the codomain of the circle.
-        
+
         Returns
         -------
         y1, y2: float
