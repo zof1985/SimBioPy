@@ -520,55 +520,18 @@ class EllipsisRegression(LinearRegression):
         self.axis_major = ax0
         self.axis_minor = ax1
 
-    def _get_abc_by_x(self, x: float) -> tuple:
+    def _get_roots(self, x: float = None, y: float = None) -> tuple:
         """
-        private method which calculates the values a, b and c used
-        to extract the values of y given x.
-
+        obtain the roots of a second order polynomial having form:
+                a * x**2 + b * x + c = 0
+        
         Parameters
         ----------
         x: float
             the given x value.
-
-        Returns
-        -------
-        a, b, c: float
-            the coefficients to be used for extracting the roots of a
-            2nd order equation having y as unknown parameter.
-        """
-        x_ = float(x)
-        a, b, c, d, e, f = self.betas.values.flatten()
-        return c, b * x_ + e, f + a * x_**2 + d * x_
-
-    def _get_abc_by_y(self, y: float) -> tuple:
-        """
-        private method which calculates the values a, b and c used
-        to extract the values of x given y.
-
-        Parameters
-        ----------
+           
         y: float
             the given y value.
-
-        Returns
-        -------
-        a, b, c: float
-            the coefficients to be used for extracting the roots of a
-            2nd order equation having x as unknown parameter.
-        """
-        y_ = float(y)
-        a, b, c, d, e, f = self.betas.values.flatten()
-        return a, b * y_ + d, f + c * y_**2 + e * y_
-
-    def _get_roots(self, a: float, b: float, c: float) -> tuple:
-        """
-        obtain the roots of a second order polynomial having form:
-                a * x**2 + b * x + c = 0
-
-        Parameters
-        ----------
-        a, b, c: float
-            the coefficients of the polynomial.
 
         Returns
         -------
@@ -576,11 +539,22 @@ class EllipsisRegression(LinearRegression):
             the roots of the polynomial. None is returned if the solution
             is impossible.
         """
-        delta = b**2 - 4 * a * c
-        if delta < 0:
+        # get the coefficients
+        a_, b_, c_, d_, e_, f_ = self.betas.values.flatten()
+        if y is not None and x is None:
+            y_ = float(y)
+            a, b, c = a_, b_ * y_ + d_, f_ + c_ * y_**2 + e_ * y_
+        elif x is not None and y is None:
+            x_ = float(x)
+            a, b, c = c_, b_ * x_ + e_, f_ + a_ * x_**2 + d_ * x_
+        else:
+            raise ValueError("Only one 'x' or 'y' must be provided.")
+        
+        # get the roots
+        d = b**2 - 4 * a * c
+        if d < 0:
             return None, None
-        d = np.sqrt(delta)
-        return (-b - d) / (2 * a), (-b + d) / (2 * a)
+        return (-b - d**0.5) / (2 * a), (-b + d**0.5) / (2 * a)
 
     def __call__(
         self,
@@ -610,16 +584,13 @@ class EllipsisRegression(LinearRegression):
         assert x is None or y is None, "only 'x' or 'y' must be provided."
         if x is not None:
             v = self._simplify(x, "X")
-            fun = self._get_abc_by_x
+            o = np.atleast_2d([self._get_roots(x=i) for i in v.values])
             cols = ["Y0", "Y1"]
         else:
             v = self._simplify(y, "Y")
-            fun = self._get_abc_by_y
+            o = np.atleast_2d([self._get_roots(y=i) for i in v.values])
             cols = ["X0", "X1"]
         assert v.shape[1] == 1, "Only 1D arrays can be provided."
-
-        # calculate the values
-        o = np.atleast_2d([self._get_roots(*fun(i)) for i in v.values])
         return pd.DataFrame(o, columns=cols, index=v.index).astype(float)
 
     def _get_crossings(
@@ -774,6 +745,42 @@ class EllipsisRegression(LinearRegression):
         x, y = a * self.eccentricity * np.array([np.cos(p), np.sin(p)])
         x0, y0 = self.centre
         return (x0 - x, y0 - y), (x0 + x, y0 + y)
+    
+    @property
+    def domain(self) -> tuple:
+        """
+        return the domain of the ellipse.
+        
+        Returns
+        -------
+        x1, x2: float
+            the x-axis boundaries of the ellipse.
+        """
+        t = self.axis_major.angle
+        a = self.axis_major.length / 2
+        b = self.axis_minor.length / 2
+        k = (a**2 * np.cos(t) + b**2 * np.sin(t)) ** 0.5
+        x = self.center[0]
+        s = np.sort([x - k, x + k])
+        return s[0], s[1]
+
+    @property
+    def codomain(self) -> tuple:
+        """
+        return the codomain of the ellipse.
+        
+        Returns
+        -------
+        y1, y2: float
+            the y-axis boundaries of the ellipse.
+        """
+        t = self.axis_major.angle
+        a = self.axis_major.length / 2
+        b = self.axis_minor.length / 2
+        k = (a**2 * np.sin(t) + b**2 * np.cos(t)) ** 0.5
+        y = self.center[1]
+        s = np.sort([y - k, y + k])
+        return s[0], s[1]
 
 
 class CircleRegression(LinearRegression):
@@ -815,55 +822,18 @@ class CircleRegression(LinearRegression):
         cl = ["CART. COEFS"]
         self.betas = pd.DataFrame(a.T @ pinv(a @ a.T) @ b, index=ix, columns=cl)
 
-    def _get_abc_by_x(self, x: float) -> tuple:
+    def _get_roots(self, x: float = None, y: float = None) -> tuple:
         """
-        private method which calculates the values a, b and c used
-        to extract the values of y given x.
-
+        obtain the roots of a second order polynomial having form:
+                a * x**2 + b * x + c = 0
+        
         Parameters
         ----------
         x: float
             the given x value.
-
-        Returns
-        -------
-        a, b, c: float
-            the coefficients to be used for extracting the roots of a
-            2nd order equation having y as unknown parameter.
-        """
-        x0, y0 = self.center
-        r = self.radius
-        return 1, -2 * y0, y0**2 - r**2 + (float(x) - x0) ** 2
-
-    def _get_abc_by_y(self, y: float) -> tuple:
-        """
-        private method which calculates the values a, b and c used
-        to extract the values of x given y.
-
-        Parameters
-        ----------
+           
         y: float
             the given y value.
-
-        Returns
-        -------
-        a, b, c: float
-            the coefficients to be used for extracting the roots of a
-            2nd order equation having x as unknown parameter.
-        """
-        x0, y0 = self.center
-        r = self.radius
-        return 1, -2 * x0, x0**2 - r**2 + (float(y) - y0) ** 2
-
-    def _get_roots(self, a: float, b: float, c: float) -> tuple:
-        """
-        obtain the roots of a second order polynomial having form:
-                a * x**2 + b * x + c = 0
-
-        Parameters
-        ----------
-        a, b, c: float
-            the coefficients of the polynomial.
 
         Returns
         -------
@@ -871,11 +841,21 @@ class CircleRegression(LinearRegression):
             the roots of the polynomial. None is returned if the solution
             is impossible.
         """
-        delta = b**2 - 4 * a * c
-        if delta < 0:
+        # get the coefficients
+        x0, y0 = self.center
+        r = self.radius
+        if y is not None and x is None:
+            a, b, c = 1, -2 * x0, x0**2 - r**2 + (float(y) - y0) ** 2
+        elif x is not None and y is None:
+            a, b, c = 1, -2 * y0, y0**2 - r**2 + (float(x) - x0) ** 2
+        else:
+            raise ValueError("Only one 'x' or 'y' must be provided.")
+        
+        # get the roots
+        d = b**2 - 4 * a * c
+        if d < 0:
             return None, None
-        d = np.sqrt(delta)
-        return (-b - d) / (2 * a), (-b + d) / (2 * a)
+        return (-b - d**0.5) / (2 * a), (-b + d**0.5) / (2 * a)
 
     def __call__(
         self,
@@ -905,16 +885,13 @@ class CircleRegression(LinearRegression):
         assert x is None or y is None, "only 'x' or 'y' must be provided."
         if x is not None:
             v = self._simplify(x, "X")
-            fun = self._get_abc_by_x
+            o = np.atleast_2d([self._get_roots(x=i) for i in v.values])
             cols = ["Y0", "Y1"]
         else:
             v = self._simplify(y, "Y")
-            fun = self._get_abc_by_y
+            o = np.atleast_2d([self._get_roots(y=i) for i in v.values])
             cols = ["X0", "X1"]
         assert v.shape[1] == 1, "Only 1D arrays can be provided."
-
-        # calculate the values
-        o = np.atleast_2d([self._get_roots(*fun(i)) for i in v.values])
         return pd.DataFrame(o, columns=cols, index=v.index).astype(float)
 
     def is_inside(
@@ -952,7 +929,7 @@ class CircleRegression(LinearRegression):
             the radius of the circle.
         """
         a, b, c = self.betas.values.flatten()
-        return ((4 * c + a**2 + b**2) ** 0.5) / 2
+        return ((4 * c + a**2 + b**2) ** 0.5) * 0.5
 
     @property
     def center(self) -> tuple:
@@ -965,7 +942,7 @@ class CircleRegression(LinearRegression):
             the coordinates of the centre of the cicle.
         """
         a, b = self.betas.values.flatten()[:-1]
-        return a / 2, b / 2
+        return a * 0.5, b * 0.5
 
     @property
     def area(self) -> float:
@@ -990,3 +967,31 @@ class CircleRegression(LinearRegression):
             the perimeter of the circle.
         """
         return 2 * self.radius * np.pi
+    
+    @property
+    def domain(self) -> tuple:
+        """
+        return the domain of the circle.
+        
+        Returns
+        -------
+        x1, x2: float
+            the x-axis boundaries of the circle.
+        """
+        x = self.center[0]
+        r = self.radius
+        return x - r, x + r
+        
+    @property
+    def codomain(self) -> tuple:
+        """
+        return the codomain of the circle.
+        
+        Returns
+        -------
+        y1, y2: float
+            the y-axis boundaries of the circle.
+        """
+        y = self.center[1]
+        r = self.radius
+        return y - r, y + r
