@@ -806,12 +806,14 @@ class CircleRegression(LinearRegression):
         """
         calculate the regression coefficients.
         """
-        a = pd.concat([self.x, self.y], axis=1)
-        a.insert(a.shape[1], "I", np.tile(1, self.x.shape[0]))
-        a.columns = pd.Index([f"beta{i}" for i in range(a.shape[1])])
-        b = self.x**2 + self.y.values**2
-        b.columns = pd.Index(["CART. COEFS"])
-        self.betas = a.T @ pinv((a @ a.T).values) @ b
+        x = self.x.values.flatten()
+        y = self.y.values.flatten()
+        i = np.tile(1, len(y))
+        a = np.vstack(np.atleast_2d([x, y, i])).T
+        b = np.atleast_2d(x ** 2 + y ** 2).T
+        ix = [f"beta{i}" for i in range(a.shape[1])]
+        cl = ["CART. COEFS"]
+        self.betas = pd.DataFrame(a.T @ pinv(a @ a.T) @ b, index=ix, columns=cl)
 
     def _get_abc_by_x(self, x: float) -> tuple:
         """
