@@ -743,7 +743,7 @@ class EllipsisRegression(LinearRegression):
         a = self.axis_major.length / 2
         p = self.axis_major.angle
         x, y = a * self.eccentricity * np.array([np.cos(p), np.sin(p)])
-        x0, y0 = self.centre
+        x0, y0 = self.center
         return (x0 - x, y0 - y), (x0 + x, y0 + y)
     
     @property
