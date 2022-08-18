@@ -612,7 +612,10 @@ class EllipsisRegression(LinearRegression):
         d = b**2 - 4 * a * c
         if d < 0:
             return None, None
-        return (-b - d**0.5) / (2 * a), (-b + d**0.5) / (2 * a)
+        k = (2 * a)**(-1)
+        i = -b * k
+        j = k * d**0.5
+        return i + j, i - j
 
     def _get_roots(self, x: float = None, y: float = None) -> tuple:
         """
