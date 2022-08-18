@@ -820,7 +820,7 @@ class CircleRegression(LinearRegression):
         b = np.atleast_2d(x ** 2 + y ** 2).T
         ix = [f"beta{i}" for i in range(a.shape[1])]
         cl = ["CART. COEFS"]
-        self.betas = pd.DataFrame(a.T @ pinv(a @ a.T) @ b, index=ix, columns=cl)
+        self.betas = pd.DataFrame(pinv(a.T @ a) @ a.T @ b, index=ix, columns=cl)
 
     def _get_roots(self, x: float = None, y: float = None) -> tuple:
         """
