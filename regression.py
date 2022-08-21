@@ -43,6 +43,10 @@ class LinearRegression:
 
         # calculate betas
         self._calculate_betas()
+        
+        # if complex values are found raise an error
+        if np.any(np.iscomplex(self.betas.values)):
+            raise ValueError("Complex coefficients have been found.")
 
     def _simplify(
         self,
@@ -523,7 +527,7 @@ class EllipsisRegression(LinearRegression):
         coefs = np.concatenate((eiv_pos, trc @ eiv_pos)).ravel()
         names = [f"beta{i}" for i in range(len(coefs))]
         self.betas = pd.DataFrame(coefs, index=names, columns=["CART. COEFS"])
-
+        
         # get the axes angles
         # ref: http://www.geom.uiuc.edu/docs/reference/CRC-formulas/node28.html
         a, c, b = self.betas.values.flatten()[:3]
