@@ -43,7 +43,7 @@ class LinearRegression:
 
         # calculate betas
         self._calculate_betas()
-        
+
         # if complex values are found raise an error
         if np.any(np.iscomplex(self.betas.values)):
             raise ValueError("Complex coefficients have been found.")
@@ -527,14 +527,18 @@ class EllipsisRegression(LinearRegression):
         coefs = np.concatenate((eiv_pos, trc @ eiv_pos)).ravel()
         names = [f"beta{i}" for i in range(len(coefs))]
         self.betas = pd.DataFrame(coefs, index=names, columns=["CART. COEFS"])
-        
+
         # get the axes angles
         # ref: http://www.geom.uiuc.edu/docs/reference/CRC-formulas/node28.html
         a, c, b = self.betas.values.flatten()[:3]
 
         # get the axes angles
+        if c == 0:
+            raise ValueError("coefficient c = 0.")
         m0 = (b - a) / c
         m0 = (m0**2 + 1) ** 0.5 + m0
+        if m0 == 0:
+            raise ValueError("m0 = 0.")
         m1 = -1 / m0
 
         # We know that the two axes pass from the centre of the ellipsis
@@ -591,6 +595,8 @@ class EllipsisRegression(LinearRegression):
         if d_ < 0:
             return None, None
         e_ = 2 * a_
+        if a_ == 0:
+            raise ValueError("(a + b * m + c * m**2) = 0.")
         f_ = -b_ / e_
         g_ = (d_**0.5) / e_
         x0 = f_ - g_
@@ -616,7 +622,7 @@ class EllipsisRegression(LinearRegression):
         d = b**2 - 4 * a * c
         if d < 0:
             return None, None
-        k = (2 * a)**(-1)
+        k = (2 * a) ** (-1)
         i = -b * k
         j = k * d**0.5
         return i + j, i - j
@@ -691,6 +697,8 @@ class EllipsisRegression(LinearRegression):
         """
         a, b, c, d, e = self.betas.values.flatten()[:-1]
         den = b**2 - 4 * a * c
+        if den < 0:
+            raise ValueError("(b**2 - 4 * a * c) < 0.")
         return (2 * c * d - b * e) / den, (2 * a * e - b * d) / den
 
     @property
@@ -731,6 +739,8 @@ class EllipsisRegression(LinearRegression):
         """
         a = self.axis_major.length / 2
         b = self.axis_minor.length / 2
+        if a == 0 and b == 0:
+            raise ValueError("a and b coefficients = 0.")
         h = (a - b) ** 2 / (a**2 + b**2)
         c = np.pi * (a + b)
         p_old = -c
@@ -752,6 +762,8 @@ class EllipsisRegression(LinearRegression):
         """
         b = self.axis_minor.length / 2
         a = self.axis_major.length / 2
+        if a == 0:
+            raise ValueError("coefficient a = 0")
         return (1 - b**2 / a**2) ** 0.5
 
     @property
@@ -885,6 +897,8 @@ class CircleRegression(LinearRegression):
         d = b**2 - 4 * a * c
         if d < 0:
             return None, None
+        if a == 0:
+            raise ValueError("coefficient a = 0")
         return (-b - d**0.5) / (2 * a), (-b + d**0.5) / (2 * a)
 
     def __call__(

@@ -3,12 +3,13 @@
 
 #! IMPORTS
 
+from types import FunctionType
+from typing import Any, Tuple
 import itertools as it
 import numpy as np
 import pandas as pd
 import scipy.interpolate as si
 import scipy.signal as ss
-from typing import Tuple
 
 
 #! FUNCTIONS
@@ -99,7 +100,7 @@ def d2y(y, x=None, dt=1):
     return dy / dx
 
 
-def freedman_diaconis_bins(y):
+def freedman_diaconis_bins(y) -> np.NDArray[np.float64]:
     """
     return a digitized version of y where each value is linked to a
     bin (i.e an int value) according to the rule.
@@ -155,7 +156,7 @@ def fir_filt(
     ft: str = "lowpass",
     wn: str = "hamming",
     pd: str = "constant",
-) -> np.ndarray:
+):
     """
     apply a FIR filter with the specified specs to the signal.
 
@@ -258,7 +259,12 @@ def fir_filt(
     return ss.lfilter(coefs, 1.0, padded - avg)[(2 * n - 1) :] + avg
 
 
-def mean_filter(signal, n=1, pad_style="reflect", offset=0.5):
+def mean_filter(
+    signal: np.NDArray[np.float64],
+    n: int = 1,
+    pad_style: str = "reflect",
+    offset: float = 0.5,
+) -> np.ndarray[Any, np.dtype[np.floating]]:
     """
     apply a moving average filter to the signal.
 
@@ -319,7 +325,12 @@ def mean_filter(signal, n=1, pad_style="reflect", offset=0.5):
     return np.array([np.mean(y[j]) for j in i]).flatten()
 
 
-def median_filter(signal, n=1, pad_style="reflect", offset=0.5):
+def median_filter(
+    signal: np.NDArray[np.float64],
+    n: int = 1,
+    pad_style: str = "reflect",
+    offset: float = 0.5,
+) -> np.ndarray[Any, np.dtype[np.floating]]:
     """
     apply a median filter to the signal.
 
@@ -430,16 +441,16 @@ def interpolate_cs(y, n=None, x_old=None, x_new=None):
 
 
 def residuals_analysis(
-    signal,
-    fs,
-    f_num=1000,
-    f_max=None,
-    segments=2,
-    min_samples=2,
-    which_segment=None,
-    filt_fun=None,
-    filt_opt=None,
-):
+    signal: np.ndarray,
+    fs: Tuple[np.floating, None],
+    f_num: int = 1000,
+    f_max: np.floating = None,
+    segments: int = 2,
+    min_samples: int = 2,
+    which_segment: int = None,
+    filt_fun: FunctionType = None,
+    filt_opt: dict = None,
+) -> Tuple[float, pd.DataFrame]:
     """
     Perform Winter's residual analysis of y.
 
