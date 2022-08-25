@@ -170,6 +170,20 @@ class LinearRegression:
             self._add_intercept(v)
         return v.values @ self.betas
 
+    @property
+    def r_squared(self) -> float:
+        """
+        return the calculated R-squared for the given model.
+
+        Returns
+        -------
+        r2: float
+            the calculated r-squared.
+        """
+        z = self(self.x)
+        m = pd.concat([self.y, z], axis=1)
+        return m.corr("pearson").values[0, 1] ** 2
+
 
 class PolynomialRegression(LinearRegression):
     """
@@ -330,7 +344,7 @@ class HyperbolicRegression(PowerRegression):
     """
     Obtain the regression coefficients according to the (Rectangular) Least
     Squares Hyperbolic function:
-                            y = eiv_pos / x + b
+                            y = a / x + b
     Parameters
     ----------
     y:  (samples, dimensions) numpy array or pandas.DataFrame
@@ -365,6 +379,55 @@ class HyperbolicRegression(PowerRegression):
         predict the fitted Y value according to the provided x.
         """
         v = self._simplify(x, "X") ** (-1)
+        self._add_intercept(v)
+        return v.values @ self.betas
+
+
+class ExponentialRegression(LinearRegression):
+    """
+    Obtain the regression coefficients according to the exponential function:
+
+                            y = a * BASE ** x + b
+
+    Parameters
+    ----------
+    y:  (samples, dimensions) numpy array or pandas.DataFrame
+        the array containing the dependent variable.
+
+    x:  (samples, features) numpy array or pandas.DataFrame
+        the array containing the indipendent variables.
+
+    b: float
+        the base of the exponential part of the equation
+    """
+
+    def __init__(
+        self,
+        y: Union[np.ndarray, pd.DataFrame, list, int, float],
+        x: Union[np.ndarray, pd.DataFrame, list, int, float],
+        b: float = np.e,
+    ) -> None:
+        self.base = b
+        super().__init__(y=y, x=x)
+
+    def _calculate_betas(self) -> None:
+        """
+        calculate the beta coefficients.
+        """
+        betas = self.base**self.x
+        self._add_intercept(betas)
+        self.betas = (pinv((betas.T @ betas).values) @ betas.T) @ self.y
+        labels = [i for i in range(self.betas.shape[0])]
+        self.betas.index = pd.Index([f"beta{i}" for i in labels])
+
+    def __call__(
+        self,
+        x: Union[np.ndarray, pd.DataFrame, list, int, float],
+    ) -> pd.DataFrame:
+        """
+        predict the fitted Y value according to the provided x.
+        """
+        v = self.base ** self._simplify(x, "X")
         self._add_intercept(v)
         return v.values @ self.betas
 
