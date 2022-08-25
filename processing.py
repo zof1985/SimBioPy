@@ -100,7 +100,7 @@ def d2y(y, x=None, dt=1):
     return dy / dx
 
 
-def freedman_diaconis_bins(y) -> np.NDArray[np.float64]:
+def freedman_diaconis_bins(y) -> np.ndarray:
     """
     return a digitized version of y where each value is linked to a
     bin (i.e an int value) according to the rule.
@@ -260,11 +260,11 @@ def fir_filt(
 
 
 def mean_filter(
-    signal: np.NDArray[np.float64],
+    signal: np.ndarray,
     n: int = 1,
     pad_style: str = "reflect",
     offset: float = 0.5,
-) -> np.ndarray[Any, np.dtype[np.floating]]:
+) -> np.ndarray:
     """
     apply a moving average filter to the signal.
 
@@ -326,11 +326,11 @@ def mean_filter(
 
 
 def median_filter(
-    signal: np.NDArray[np.float64],
+    signal: np.ndarray,
     n: int = 1,
     pad_style: str = "reflect",
     offset: float = 0.5,
-) -> np.ndarray[Any, np.dtype[np.floating]]:
+) -> np.ndarray:
     """
     apply a median filter to the signal.
 
