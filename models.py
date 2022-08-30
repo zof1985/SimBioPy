@@ -13,21 +13,20 @@ import itertools as it
 import PySide2.QtWidgets as qtw
 import PySide2.QtCore as qtc
 import PySide2.QtGui as qtg
+import matplotlib as mpl
 import matplotlib.pyplot as pl
 from matplotlib.gridspec import GridSpec
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-from matplotlib import use as matplotlib_use
 from mpl_toolkits import mplot3d
 from .geometry import *
 from .sensors import *
 from .utils import *
-from .matplotlib import *
 
 
 #! MATPLOTLIB OPTIONS
 
 
-matplotlib_use("Qt5Agg")
+mpl.use("Qt5Agg")
 pl.rc("font", size=3)  # controls default text sizes
 pl.rc("axes", titlesize=3)  # fontsize of the axes title
 pl.rc("axes", labelsize=3)  # fontsize of the x and y labels
@@ -39,6 +38,78 @@ pl.rc("figure", autolayout=True)
 
 
 #! CLASSES
+
+
+class FigureAnimator:
+    """
+    Speed up the redraw of animated artists contained in a figure.
+
+    Parameters
+    ----------
+    figure: matplotlib.pyplot.Figure
+        a matplotlib figure.
+
+    artists: Iterable[Artist]
+        an iterable of artists being those elements that will be updated
+        on top of figure.
+    """
+
+    def __init__(self, figure, artists: mpl.artist.Artist):
+        """
+        constructor
+        """
+        self.figure = figure
+        self._background = None
+
+        # get the animated artists
+        self._artists = []
+        for art in artists:
+            art.set_animated(True)
+            self._artists.append(art)
+
+        # grab the background on every draw
+        self._cid = self.figure.canvas.mpl_connect("draw_event", self.on_draw)
+
+    def on_draw(self, event):
+        """
+        Callback to register with 'draw_event'.
+        """
+        if event is not None:
+            if event.canvas != self.figure.canvas:
+                raise RuntimeError
+        bbox = self.figure.canvas.figure.bbox
+        self._background = self.figure.canvas.copy_from_bbox(bbox)
+        self._draw_animated()
+
+    def _draw_animated(self):
+        """
+        Draw all of the animated artists.
+        """
+        for a in self._artists:
+            self.figure.canvas.figure.draw_artist(a)
+
+    def update(self):
+        """
+        Update the screen with animated artists.
+        """
+
+        # update the background if required
+        if self._background is None:
+            self.on_draw(None)
+
+        else:
+
+            # restore the background
+            self.figure.canvas.restore_region(self._background)
+
+            # draw all of the animated artists
+            self._draw_animated()
+
+            # update the GUI state
+            self.figure.canvas.blit(self.figure.canvas.figure.bbox)
+
+        # let the GUI event loop process anything it has to do
+        self.figure.canvas.flush_events()
 
 
 class Model3D:
