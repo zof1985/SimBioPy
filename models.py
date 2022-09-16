@@ -9,22 +9,20 @@ import sys
 import warnings
 import numpy as np
 import pandas as pd
-import itertools as it
-import PySide2.QtWidgets as qtw
-import PySide2.QtCore as qtc
-import PySide2.QtGui as qtg
 import matplotlib as mpl
 import matplotlib.pyplot as pl
 from matplotlib.gridspec import GridSpec
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from mpl_toolkits import mplot3d
+import PyQt5.QtWidgets as qtw
+import PyQt5.QtCore as qtc
+import PyQt5.QtGui as qtg
 from .geometry import *
 from .sensors import *
 from .utils import *
 
 
 #! MATPLOTLIB OPTIONS
-
 
 mpl.use("Qt5Agg")
 pl.rc("font", size=3)  # controls default text sizes
