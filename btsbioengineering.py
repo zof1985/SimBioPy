@@ -132,7 +132,7 @@ class TDF:
         data match with the start and end of the kinematic data.
     """
 
-    #****** VARIABLES ******#
+    # ****** VARIABLES ******#
 
     _path = None
     _fit_to_kinematics = None
@@ -141,9 +141,9 @@ class TDF:
     _tdf_signature = "41604B82CA8411D3ACB60060080C6816"
     _Model3D = None
 
-    #****** CONSTRUCTOR ******#
+    # ****** CONSTRUCTOR ******#
 
-    def __init__(self, path:str, fit_to_kinematics:bool=True):
+    def __init__(self, path: str, fit_to_kinematics: bool = True):
 
         # check the validity of the entered path
         assert os.path.exists(path), path + " does not exist."
@@ -177,10 +177,10 @@ class TDF:
                 "fun": self._get_ForcePlatformCalibrationData,
                 "label": "ForcePlatform3DCalibration",
             },
-            9: {
-                "fun": self._get_UntrackedForce3D,
-                "label": "ForcePlatform3D",
-            },
+            # 9: {
+            #     "fun": self._get_UntrackedForce3D,
+            #     "label": "ForcePlatform3D",
+            # },
             12: {
                 "fun": self._get_Force3D,
                 "label": "ForcePlatform3D",
@@ -218,7 +218,7 @@ class TDF:
         # read the available data
         out = {}
         for b in self._blocks:
-            if b["info"]['Type'] != 7:
+            if b["info"]["Type"] != 7:
                 for key, value in b["fun"](b["info"]).items():
                     if not any([i == key for i in out]):
                         out[key] = {}
@@ -244,7 +244,7 @@ class TDF:
         # close the file
         self._fid.close()
 
-    #****** GETTERS ******#
+    # ****** GETTERS ******#
 
     @property
     def Model3D(self):
@@ -263,7 +263,7 @@ class TDF:
         """returns path to the file"""
         return self._path
 
-    #****** METHODS ******#
+    # ****** METHODS ******#
 
     def _read_tracks(
         self,
@@ -273,7 +273,7 @@ class TDF:
         time: float,
         by_frame: bool,
         size: int,
-        has_labels:bool=True,
+        has_labels: bool = True,
     ):
         """
         internal method used to extract 3D tracks from tdf file.
@@ -323,7 +323,7 @@ class TDF:
             # get the label
             if has_labels:
                 lbls = struct.unpack("256B", self._fid.read(256))
-                labels[trk] = "".join(lbls).split(chr(0))[0]
+                labels[trk] = "".join((chr(i) for i in lbls)).split(chr(0))[0]
 
             # read data
             if by_frame:
@@ -336,16 +336,20 @@ class TDF:
             else:
                 n_seg = struct.unpack("i", self._fid.read(4))[0]
                 self._fid.seek(4, 1)
-                segments = struct.unpack("2i", self._fid.read(8 * n_seg))
-                segments = np.array(segments).reshape(2, n_seg).T
+                segments = struct.unpack(
+                    "%ii" % (2 * n_seg),
+                    self._fid.read(8 * n_seg)
+                )
+                segments = np.array(segments).reshape(n_seg, 2).T
                 cols = np.arange(size) + size * trk
                 for s in range(n_seg):
-                    for row in np.arange(segments[s][0], segments[s][1]):
-                        val = struct.unpack(
-                            "{}f".format(size),
-                            self._fid.read(4 * size),
-                        )
-                        tracks[row, cols] = val
+                    for row in np.arange(segments[1, s]) + segments[0, s]:
+                        if row < n_frames:
+                            val = struct.unpack(
+                                "{}f".format(size),
+                                self._fid.read(4 * size),
+                            )
+                            tracks[row, cols] = val
 
         # calculate the index (in msec)
         idx = np.round((np.arange(n_frames) / freq + time) * 1000).astype(int)
@@ -370,7 +374,7 @@ class TDF:
         """
 
         # get the file read
-        self._fid.seek(info['Offset'], 0)
+        self._fid.seek(info["Offset"], 0)
         frames, tracks, freq, time = struct.unpack("iifi", self._fid.read(16))
 
         # calibration data (read but not exported)
@@ -445,8 +449,8 @@ class TDF:
             a dict of sensors.ForcePlatform3D objects.
         """
         # get the file read
-        self._fid.seek(info['Offset'], 0)
-        frames, tracks, freq, time = struct.unpack("iifi", self._fid.read(16))
+        self._fid.seek(info["Offset"], 0)
+        n_tracks, freq, time, frames = struct.unpack("iifi", self._fid.read(16))
 
         # calibration data (read but not exported)
         _ = np.array(struct.unpack("3f", self._fid.read(12)))
@@ -462,12 +466,12 @@ class TDF:
 
         # read the data
         tracks, labels, index = self._read_tracks(
-            frames, tracks, freq, time, by_frame, 9
+            frames, n_tracks, freq, time, by_frame, 9
         )
 
         # generate the output dict
         fp = {}
-        for trk in range(tracks):
+        for trk in range(n_tracks):
             point_cols = np.arange(3) + 9 * trk
             points = tracks[:, point_cols]
             force_cols = np.arange(3) + 3 + 9 * trk
@@ -503,7 +507,7 @@ class TDF:
             objects.
         """
         # get the basic info
-        self._fid.seek(info['Offset'], 0)
+        self._fid.seek(info["Offset"], 0)
         n_plats = struct.unpack("i", self._fid.read(4))[0]
         self._fid.seek(4, 1)
 
@@ -522,9 +526,9 @@ class TDF:
             position = struct.unpack("12f", self._fid.read(48))
             self._fid.seek(256, 1)
             cal_data["ForcePlatform" + fmt.format(platform + 1)] = {
-                'Label': "".join([chr(i) for i in label]).split(chr(0))[0],
-                'Size': tuple(np.round(size, 3)),
-                'Position': np.round(position, 3).reshape((4, 3)),
+                "Label": "".join([chr(i) for i in label]).split(chr(0))[0],
+                "Size": tuple(np.round(size, 3)),
+                "Position": np.round(position, 3).reshape((4, 3)),
             }
 
         return cal_data
@@ -545,14 +549,14 @@ class TDF:
             a dict of sensors.ForcePlatform3D objects.
         """
         # obtain the force calibration data
-        cal_block = [i['info'] for i in self._blocks if i['info']["Type"] == 7]
+        cal_block = [i["info"] for i in self._blocks if i["info"]["Type"] == 7]
         if len(cal_block) == 0:
             txt = "No calibration data have been found for force platforms."
             raise TypeError(txt)
         calibration_data = self._get_ForcePlatformCalibrationData(cal_block[0])
 
         # read the file
-        self._fid.seek(info['Offset'], 0)
+        self._fid.seek(info["Offset"], 0)
         tracks, freq, time, frames = struct.unpack("iifi", self._fid.read(16))
         plat_map = struct.unpack(
             "".join(np.tile("h", tracks)),
@@ -567,7 +571,13 @@ class TDF:
 
         # read the data
         tracks, _, index = self._read_tracks(
-            frames, tracks, freq, time, by_frame, 6, False,
+            frames,
+            tracks,
+            freq,
+            time,
+            by_frame,
+            6,
+            False,
         )
 
         # generate the output dict
@@ -610,7 +620,7 @@ class TDF:
             a dict with all the EMG channels provided as simbiopy.EmgSensor.
         """
         # get the file read
-        self._fid.seek(info['Offset'], 0)
+        self._fid.seek(info["Offset"], 0)
         tracks, frames, freq, time = struct.unpack("iifi", self._fid.read(16))
 
         # check if the file has to be read by frame or by track
@@ -656,14 +666,12 @@ class TDF:
             raise IOError("Invalid 'Format' info {}".format(info["Format"]))
 
         # get the file read
-        self._fid.seek(info['Offset'], 0)
+        self._fid.seek(info["Offset"], 0)
         tracks, frames, freq, time = struct.unpack("iifi", self._fid.read(16))
 
         # read the data
         self._fid.seek(2, 1)
-        tracks, labels, index = self._read_tracks(
-            frames, tracks, freq, time, False, 9
-        )
+        tracks, labels, index = self._read_tracks(frames, tracks, freq, time, False, 9)
 
         # generate the output dict
         imus = {}
