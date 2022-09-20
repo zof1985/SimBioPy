@@ -234,12 +234,6 @@ class UnitDataFrame(pd.DataFrame):
         """
         return self.pivot().__str__()
 
-    def __repr__(self):
-        """
-        representation of the object.
-        """
-        return super().__repr__()
-
     def matches(self, obj) -> bool:
         """
         check whether the object is similar to self.
