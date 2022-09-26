@@ -5,5 +5,3 @@ openpyxl
 PySide2
 matplotlib
 numpy
-pint
-git+https://github.com/hgrecco/pint-pandas.git

@@ -1,294 +1,31 @@
-# MODELS MODULE
+"""
+QTWIDGETS
+---------
+
+A suite of classes and functions to handle the creation of GUI rendering
+Model3D objects.
+"""
 
 
 #! IMPORTS
 
+from typing import Iterable
+from numpy.typing import NDArray
+from PySide2 import QtWidgets as widgets
+from PySide2 import QtCore as qtcore
+from PySide2 import QtGui as qtgui
+from matplotlib.figure import Figure
+from matplotlib.artist import Artist
+from matplotlib.backend_bases import Event
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from .models_work_in_progress import Model3D
 
 import os
-import sys
-import warnings
 import numpy as np
 import pandas as pd
-import matplotlib as mpl
-import matplotlib.pyplot as pl
-from matplotlib.gridspec import GridSpec
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-from mpl_toolkits import mplot3d
-import PyQt5.QtWidgets as qtw
-import PyQt5.QtCore as qtc
-import PyQt5.QtGui as qtg
-from .geometry import *
-from .sensors import *
-from .utils import *
-
-
-#! MATPLOTLIB OPTIONS
-
-mpl.use("Qt5Agg")
-pl.rc("font", size=3)  # controls default text sizes
-pl.rc("axes", titlesize=3)  # fontsize of the axes title
-pl.rc("axes", labelsize=3)  # fontsize of the x and y labels
-pl.rc("xtick", labelsize=3)  # fontsize of the x tick labels
-pl.rc("ytick", labelsize=3)  # fontsize of the y tick labels
-pl.rc("legend", fontsize=3)  # legend fontsize
-pl.rc("figure", titlesize=3)  # fontsize of the figure title
-pl.rc("figure", autolayout=True)
 
 
 #! CLASSES
-
-
-class Model3D:
-    """
-    generic class used as interface for the implementation of
-    specific 3D models.
-
-    Parameters
-    ----------
-    sensors: keyworded arguments
-        The list of arguments containing the data of the object.
-        The key of the arguments will be used as attributes of the object.
-        The values of each key must be an instance of the Sensor class.
-    """
-
-    # list of sensors of the class which contain relevant data.
-    # NOTE THESE ATTRIBUTES ARE CONSTANTS THAT SHOULD NOT BE MODIFIED
-    _sensors = []
-
-    def __init__(self, **sensors):
-        """
-        class constructor.
-        """
-        # populate the object with the input sensors
-        self._sensors = []
-        self.append(**sensors)
-
-    def __str__(self) -> str:
-        """
-        convert self to a string.
-        """
-        return self.pivot().__str__()
-
-    def _appender(self, obj, name):
-        """
-        append an object to self and store it appropriately.
-
-        Parameters
-        ----------
-        obj: GeometricObject instance
-            the object to be stored.
-
-        name: str
-            the label denoting the object.
-        """
-
-        # check the input data
-        txt = "obj must be a Sensor instance."
-        assert isinstance(obj, Sensor), txt
-        assert isinstance(name, str), "name must be a string."
-
-        # ensure the object will be stored according to its class
-        cls = obj.__class__.__name__
-        if not cls in self._sensors:
-            self._sensors += [cls]
-            setattr(self, cls, {})
-
-        # check if another object with the same name exists
-        if any([i == name for i in getattr(self, cls)]):
-            txt = "{} already existing in {}. The old instance has been "
-            txt += "replaced"
-            warnings.warn(txt.format(name, cls))
-
-        # store the sensor
-        getattr(self, cls).update({name: obj})
-
-    def append(self, **objs):
-        """
-        append named objects to this model.
-
-        Parameters
-        ----------
-        objs: keyword-named sensor
-            any object being instance of the Sensor class.
-        """
-        for i, v in objs.items():
-            self._appender(obj=v, name=i)
-
-    def pivot(self) -> pd.DataFrame:
-        """
-        generate a wide dataframe object containing all the data.
-        """
-        out = []
-        for sensor in self.sensors:
-            for label, value in getattr(self, sensor).items():
-                df = value.pivot()
-                cols = ([sensor, label, *i] for i in df.columns)
-                df.columns = pd.MultiIndex.from_tuples(cols)
-                out += [df]
-        return pd.concat(out, axis=1)
-
-    def has_Marker3D(self):
-        """
-        check whether 3D markers are included in the model.
-        """
-        return any([i == Marker3D.__name__ for i in self.sensors])
-
-    def has_ForcePlatform3D(self):
-        """
-        check whether 3D force platform are included in the model.
-        """
-        return any([i == ForcePlatform3D.__name__ for i in self.sensors])
-
-    def has_EmgSensor(self):
-        """
-        check whether EMG sensors are included in the model.
-        """
-        return any([i == EmgSensor.__name__ for i in self.sensors])
-
-    def has_Link3D(self):
-        """
-        check whether 3D Links are included in the model.
-        """
-        return any([i == Link3D.__name__ for i in self.sensors])
-
-    def has_Imu3D(self):
-        """
-        check whether 3D Links are included in the model.
-        """
-        return any([i == Imu3D.__name__ for i in self.sensors])
-
-    def copy(self):
-        """
-        make a copy of the current object.
-        """
-        obj = Model3D()
-        for attr in self.sensors:
-            obj.append(**getattr(self, attr))
-        return obj
-
-    def drop(self, sensor, inplace=False):
-        """
-        remove the current sensor from the object.
-
-        Parameters
-        ----------
-        sensor: str
-            the name of the sensor to be removed.
-
-        inplace: bool
-            if True the current object is edited. Otherwise an edited copy
-            is returned
-
-        Returns
-        -------
-        None if inplace is True, a Model3D object otherwise.
-        """
-        assert isinstance(sensor, str), "sensor must be a str object."
-        assert isinstance(inplace, bool), "inplace must be a bool."
-        if inplace:
-            for i in self.sensors:
-                if i == sensor:
-                    delattr(self, i)
-                    break
-        else:
-            obj = Model3D()
-            for i in self.sensors:
-                if i != sensor:
-                    for key, value in getattr(self, sensor).items():
-                        obj.append(value, key)
-            return obj
-
-    def describe(self, percentiles: list = []) -> pd.DataFrame:
-        """
-        provide descriptive statistics about the parameters in df.
-
-        Parameters
-        ----------
-        percentiles: list
-            a list of values in the [0, 1] range defining the desired
-            percentiles to be calculated.
-
-        Returns
-        -------
-        df: pd.DataFrame
-            a pandas.DataFrame with the object descriptive statistics.
-        """
-        grp = self.stack().drop("Time", axis=1)
-        grp = grp.groupby(["Sensor", "Label", "Source", "Dimension"])
-        df = grp.describe(percentiles=percentiles)
-        df.columns = pd.Index([i[1] for i in df.columns])
-        return df
-
-    def stack(self) -> pd.DataFrame:
-        """
-        stack the object as a long format DataFrame.
-        """
-        out = []
-        for sns in self._sensors:
-            for lbl, obj in getattr(self, sns).items():
-                df = obj.stack()
-                df.insert(0, "Label", np.tile(lbl, df.shape[0]))
-                df.insert(0, "Sensor", np.tile(sns, df.shape[0]))
-                out += [df]
-        return pd.concat(out, axis=0, ignore_index=True)
-
-    def plot(self, high_dpi: bool = True) -> None:
-        """
-        plot the actual model.
-
-        Parameters
-        ----------
-        high_dpi: bool
-            enable high dpi scaling.
-        """
-        # highdpi scaling
-        if high_dpi:
-            qtw.QApplication.setAttribute(qtc.Qt.AA_EnableHighDpiScaling, True)
-            qtw.QApplication.setAttribute(qtc.Qt.AA_UseHighDpiPixmaps, True)
-
-        # app generation
-        app = qtw.QApplication(sys.argv)
-        widget = Model3DWidget(self)
-        widget.show()
-        app.exec_()
-
-    @classmethod
-    def unstack(cls, df: pd.DataFrame):
-        """
-        convert a long format DataFrame into an instance of the object.
-
-        Parameters
-        ----------
-        df: pandas.DataFrame
-            a pandas.DataFrame sorted as it would be generated by the
-            .stack() method.
-
-        Returns
-        -------
-        obj: GeometricObject
-            the instance resulting from the dataframe reading.
-        """
-        out = cls()
-        root = ["Type", "Sensor"]
-        types = np.unique(df[root].values.astype(str), axis=0)
-        for typ, sns in types:
-            sub = df.loc[df[root].isin([sns, typ]).all(1)]
-            out.append(obj=eval(typ).unstack(sub), name=sns)
-        return out
-
-    @property
-    def sensors(self):
-        """
-        return the sensors of this instance.
-        """
-        return self._sensors
-
-    @property
-    def index(self):
-        """
-        return the index of the objects containing by the model.
-        """
-        return self.pivot().index.to_numpy().astype(int)
 
 
 class FigureAnimator:
@@ -300,12 +37,16 @@ class FigureAnimator:
     figure: matplotlib.pyplot.Figure
         a matplotlib figure.
 
-    artists: Iterable[Artist]
+    artists: Artist | Iterable[Artist]
         an iterable of artists being those elements that will be updated
         on top of figure.
     """
 
-    def __init__(self, figure, artists: mpl.artist.Artist):
+    def __init__(
+        self,
+        figure: Figure,
+        artists: Artist | Iterable[Artist],
+    ) -> None:
         """
         constructor
         """
@@ -321,7 +62,7 @@ class FigureAnimator:
         # grab the background on every draw
         self._cid = self.figure.canvas.mpl_connect("draw_event", self.on_draw)
 
-    def on_draw(self, event):
+    def on_draw(self, event: Event) -> None:
         """
         Callback to register with 'draw_event'.
         """
@@ -332,14 +73,14 @@ class FigureAnimator:
         self._background = self.figure.canvas.copy_from_bbox(bbox)
         self._draw_animated()
 
-    def _draw_animated(self):
+    def _draw_animated(self) -> None:
         """
         Draw all of the animated artists.
         """
         for a in self._artists:
             self.figure.canvas.figure.draw_artist(a)
 
-    def update(self):
+    def update(self) -> None:
         """
         Update the screen with animated artists.
         """
@@ -348,22 +89,19 @@ class FigureAnimator:
         if self._background is None:
             self.on_draw(None)
 
+        # restore the background
+        # draw all of the animated artists
+        # update the GUI state
         else:
-
-            # restore the background
             self.figure.canvas.restore_region(self._background)
-
-            # draw all of the animated artists
             self._draw_animated()
-
-            # update the GUI state
             self.figure.canvas.blit(self.figure.canvas.figure.bbox)
 
         # let the GUI event loop process anything it has to do
         self.figure.canvas.flush_events()
 
 
-class OptionGroup(qtw.QGroupBox):
+class OptionGroup(widgets.QGroupBox):
     """
     make a line option.
 
@@ -402,9 +140,9 @@ class OptionGroup(qtw.QGroupBox):
     _color = None
 
     # signals
-    zorderChanged = qtc.Signal()
-    colorChanged = qtc.Signal()
-    valueChanged = qtc.Signal()
+    zorderChanged = qtcore.Signal()
+    colorChanged = qtcore.Signal()
+    valueChanged = qtcore.Signal()
 
     def __init__(
         self,
@@ -417,7 +155,7 @@ class OptionGroup(qtw.QGroupBox):
         default_zorder=0,
         font_size=12,
         object_size=35,
-    ):
+    ) -> None:
         """
         constructor
         """
@@ -428,14 +166,14 @@ class OptionGroup(qtw.QGroupBox):
         self.object_size = object_size
 
         # zorder label
-        zorder_label = qtw.QLabel("Z Order")
-        object_font = qtg.QFont("Arial", max(1, self.font_size - 2))
+        zorder_label = widgets.QLabel("Z Order")
+        object_font = qtgui.QFont("Arial", max(1, self.font_size - 2))
         zorder_label.setFont(object_font)
         zorder_label.setFixedHeight(self.object_size)
-        zorder_label.setAlignment(qtc.Qt.AlignCenter | qtc.Qt.AlignBottom)
+        zorder_label.setAlignment(qtcore.Qt.AlignCenter | qtcore.Qt.AlignBottom)
 
         # zorder box
-        self.zorderBox = self.sizeBox = qtw.QSpinBox()
+        self.zorderBox = self.sizeBox = widgets.QSpinBox()
         self.zorderBox.setFont(object_font)
         self.zorderBox.setFixedHeight(self.object_size)
         self.zorderBox.setFixedWidth(self.object_size * 2)
@@ -446,22 +184,22 @@ class OptionGroup(qtw.QGroupBox):
         self.zorderBox.setStyleSheet("border: none;")
 
         # zorder pane
-        zorder_layout = qtw.QVBoxLayout()
+        zorder_layout = widgets.QVBoxLayout()
         zorder_layout.setSpacing(0)
         zorder_layout.setContentsMargins(0, 0, 0, 0)
         zorder_layout.addWidget(zorder_label)
         zorder_layout.addWidget(self.zorderBox)
-        zorder_widget = qtw.QWidget()
+        zorder_widget = widgets.QWidget()
         zorder_widget.setLayout(zorder_layout)
 
         # size label
-        size_label = qtw.QLabel("Size")
+        size_label = widgets.QLabel("Size")
         size_label.setFont(object_font)
         size_label.setFixedHeight(self.object_size)
-        size_label.setAlignment(qtc.Qt.AlignCenter | qtc.Qt.AlignBottom)
+        size_label.setAlignment(qtcore.Qt.AlignCenter | qtcore.Qt.AlignBottom)
 
         # size slider
-        self.sizeSlider = qtw.QSlider(qtc.Qt.Horizontal)
+        self.sizeSlider = widgets.QSlider(qtcore.Qt.Horizontal)
         self.sizeSlider.setMinimum(min_value * 10)
         self.sizeSlider.setMaximum(max_value * 10)
         self.sizeSlider.setTickInterval(step_value * 10)
@@ -471,7 +209,7 @@ class OptionGroup(qtw.QGroupBox):
         self.sizeSlider.setStyleSheet("border: none;")
 
         # spinbox
-        self.sizeBox = qtw.QDoubleSpinBox()
+        self.sizeBox = widgets.QDoubleSpinBox()
         self.sizeBox.setDecimals(1)
         self.sizeBox.setFont(object_font)
         self.sizeBox.setFixedHeight(self.object_size)
@@ -483,29 +221,29 @@ class OptionGroup(qtw.QGroupBox):
         self.sizeBox.setStyleSheet("border: none;")
 
         # size pane
-        size_layout1 = qtw.QHBoxLayout()
+        size_layout1 = widgets.QHBoxLayout()
         size_layout1.setSpacing(0)
         size_layout1.setContentsMargins(0, 0, 0, 0)
         size_layout1.addWidget(self.sizeSlider)
         size_layout1.addWidget(self.sizeBox)
-        size_widget1 = qtw.QWidget()
+        size_widget1 = widgets.QWidget()
         size_widget1.setLayout(size_layout1)
-        size_layout2 = qtw.QVBoxLayout()
+        size_layout2 = widgets.QVBoxLayout()
         size_layout2.setSpacing(0)
         size_layout2.setContentsMargins(0, 0, 0, 0)
         size_layout2.addWidget(size_label)
         size_layout2.addWidget(size_widget1)
-        size_widget2 = qtw.QWidget()
+        size_widget2 = widgets.QWidget()
         size_widget2.setLayout(size_layout2)
 
         # color label
-        color_label = qtw.QLabel("Color")
+        color_label = widgets.QLabel("Color")
         color_label.setFont(object_font)
         color_label.setFixedHeight(self.object_size)
-        color_label.setAlignment(qtc.Qt.AlignCenter | qtc.Qt.AlignBottom)
+        color_label.setAlignment(qtcore.Qt.AlignCenter | qtcore.Qt.AlignBottom)
 
         # color box
-        self.colorBox = qtw.QPushButton()
+        self.colorBox = widgets.QPushButton()
         self.colorBox.setFixedHeight(self.object_size)
         self.colorBox.setFixedWidth(self.object_size)
         self.colorBox.setAutoFillBackground(True)
@@ -513,16 +251,16 @@ class OptionGroup(qtw.QGroupBox):
         self.setColor(default_color)
 
         # color pane
-        color_layout = qtw.QVBoxLayout()
+        color_layout = widgets.QVBoxLayout()
         color_layout.setSpacing(0)
         color_layout.setContentsMargins(0, 0, 0, 0)
         color_layout.addWidget(color_label)
         color_layout.addWidget(self.colorBox)
-        color_widget = qtw.QWidget()
+        color_widget = widgets.QWidget()
         color_widget.setLayout(color_layout)
 
         # option pane
-        layout = qtw.QHBoxLayout()
+        layout = widgets.QHBoxLayout()
         layout.addWidget(color_widget)
         layout.addWidget(size_widget2)
         layout.addWidget(zorder_widget)
@@ -537,32 +275,32 @@ class OptionGroup(qtw.QGroupBox):
         self.colorBox.clicked.connect(self.adjustColor)
         self.zorderBox.valueChanged.connect(self.adjustZOrderBox)
 
-    def zorder(self):
+    def zorder(self) -> int:
         """
         return the actual stored zorder.
         """
         return self.zorderBox.value()
 
-    def size(self):
+    def size(self) -> int | float:
         """
         return the actual stored size.
         """
         return self.sizeBox.value()
 
-    def color(self):
+    def color(self) -> tuple | None:
         """
         return the actual color stored.
         """
         return self._color.getRgbF()
 
-    def adjustSizeSlider(self):
+    def adjustSizeSlider(self) -> None:
         """
         adjust the slider value according to the spinbox value.
         """
         if self.sizeSlider.value() != self.sizeBox.value():
             self.sizeSlider.setValue(self.sizeBox.value() * 10)
 
-    def adjustSizeBox(self):
+    def adjustSizeBox(self) -> None:
         """
         adjust the spinbox value according to the slider value.
         """
@@ -570,27 +308,27 @@ class OptionGroup(qtw.QGroupBox):
             self.sizeBox.setValue(self.sizeSlider.value() / 10)
             self.valueChanged.emit()
 
-    def adjustZOrderBox(self):
+    def adjustZOrderBox(self) -> None:
         """
         handle changes in the zorderBox.
         """
         self.zorderChanged.emit()
 
-    def adjustColor(self):
+    def adjustColor(self) -> None:
         """
         select and set the desired color.
         """
         try:
-            color = qtw.QColorDialog.getColor(
+            color = widgets.QColorDialog.getColor(
                 initial=self._color,
-                options=qtw.QColorDialog.ShowAlphaChannel,
+                options=widgets.QColorDialog.ShowAlphaChannel,
             )
             if color.isValid():
                 self.setColor(color)
         except Exception:
             pass
 
-    def setColor(self, rgba):
+    def setColor(self, rgba: tuple) -> None:
         """
         set the required rgba color.
 
@@ -603,23 +341,22 @@ class OptionGroup(qtw.QGroupBox):
         # check the input
         txt = "'color' must be a QColor object or a tuple/list of 4 elements "
         txt += "each in the 0-1 range."
-        assert isinstance(rgba, (tuple, list, qtg.QColor)), txt
-        if not isinstance(rgba, qtg.QColor):
+        assert isinstance(rgba, (tuple, list, qtgui.QColor)), txt
+        if not isinstance(rgba, qtgui.QColor):
             assert len(rgba) == 4, txt
             assert all([0 <= i <= 1 for i in rgba]), txt
             if isinstance(rgba, list):
                 rgba = tuple(rgba)
-            rgba = qtg.QColor.fromRgbF(*rgba)
+            rgba = qtgui.QColor.fromRgbF(*rgba)
 
         # create the QColor object
         self._color = rgba
         values = tuple((np.array(self._color.getRgbF()) * 255).astype(int))
-        txt = "background-color: rgba{};".format(values)
-        self.colorBox.setStyleSheet(txt)
+        self.colorBox.setStyleSheet(f"background-color: rgba{values};")
         self.colorChanged.emit()
 
 
-class Model3DWidget(qtw.QWidget):
+class Model3DWidget(widgets.QWidget):
     """
     renderer for a 3D Model.
 
@@ -743,23 +480,24 @@ class Model3DWidget(qtw.QWidget):
     _arrow_angle = 15  # degrees
     _arrow_length = 0.1  # 10% of the quiver length
 
-    def __init__(
-        self,
-        model,
-        vertical_axis: str = "Y",
-        parent: qtw.QWidget = None,
-    ):
+    def __init__(self, model, vertical_axis: str = "Y") -> None:
         """
         constructor
         """
-        super(Model3DWidget, self).__init__(parent=parent)
+        super(Model3DWidget, self).__init__()
 
         # check the model
         txt = "model must be a Model3D instance."
         assert isinstance(model, Model3D), txt
 
+        # check the vertical axis
+        if not isinstance(vertical_axis, str):
+            raise TypeError(f"{vertical_axis} must be a {str} instance.")
+        if not vertical_axis in model.dimensions:
+            raise ValueError(f"{vertical_axis} not found in {model.dimensions}")
+
         # path to the package folder
-        self._path = os.path.sep.join([os.getcwd(), "simbiopy"])
+        self._path = os.path.sep.join(__file__.split(os.path.sep)[-1])
 
         # set the actual frame
         self._actual_frame = 0
@@ -955,7 +693,7 @@ class Model3DWidget(qtw.QWidget):
             self._default_view["vertical_axis"] = vertical_axis.lower()
 
             # generate the axis
-            self._figure3D = pl.figure(dpi=self._dpi)
+            self._figure3D = Figure(dpi=self._dpi)
             self.canvas3D = FigureCanvasQTAgg(self._figure3D)
             self._axis3D = self._figure3D.add_subplot(
                 projection="3d",

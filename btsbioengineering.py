@@ -338,7 +338,7 @@ class TDF:
                 self._fid.seek(4, 1)
                 segments = struct.unpack(
                     "%ii" % (2 * n_seg),
-                    self._fid.read(8 * n_seg)
+                    self._fid.read(8 * n_seg),
                 )
                 segments = np.array(segments).reshape(n_seg, 2).T
                 cols = np.arange(size) + size * trk
@@ -375,7 +375,7 @@ class TDF:
 
         # get the file read
         self._fid.seek(info["Offset"], 0)
-        frames, tracks, freq, time = struct.unpack("iifi", self._fid.read(16))
+        frames, freq, time, n_tracks = struct.unpack("iifi", self._fid.read(16))
 
         # calibration data (read but not exported)
         _ = np.array(struct.unpack("3f", self._fid.read(12)))
@@ -402,7 +402,7 @@ class TDF:
         # read the data
         tracks, labels, index = self._read_tracks(
             frames,
-            tracks,
+            n_tracks,
             freq,
             time,
             by_frame,
@@ -411,7 +411,7 @@ class TDF:
 
         # generate the output markers
         points = {}
-        for trk in range(tracks):
+        for trk in range(n_tracks):
             cols = np.arange(3) + 3 * trk
             points[labels[trk]] = Marker3D(
                 coordinates=tracks[:, cols],
