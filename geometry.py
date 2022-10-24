@@ -186,7 +186,7 @@ class UnitDataFrame(pd.DataFrame):
         """
         unit = np.unique(df["Unit"].values.flatten())[0]
         tmp = df.copy().drop("Unit", axis=1)
-        out = tmp.pivot("Time", "Dimension", "Amplitude")
+        out = tmp.pivot(index="Time", columns="Dimension", values="Amplitude")
         out.columns = pd.Index(out.columns.to_numpy())
         out.index = pd.Index(out.index.to_numpy().astype(int))
         return cls(out, unit=unit)
@@ -223,10 +223,16 @@ class UnitDataFrame(pd.DataFrame):
         """
         create a wide df view of the data.
         """
-        out = pd.DataFrame(self)
-        cols = [i + " ({})".format(self.unit) for i in out.columns]
-        out.columns = pd.Index(cols)
+        cols = [(i, f"({self.unit})") for i in self.columns]
+        out = pd.DataFrame(self, copy=True)
+        out.columns = pd.MultiIndex.from_tuples(cols)
         return out
+
+    def __repr__(self):
+        """
+        support to repr
+        """
+        return self.pivot().__repr__()
 
     def __str__(self):
         """
@@ -295,11 +301,27 @@ class UnitDataFrame(pd.DataFrame):
         *args,
         **kwargs,
     ):
-        if any([i == "name" for i in kwargs]):
-            args = [pd.Series(*args, **kwargs)]
-            kwargs = {}
-        if data is not None:
+        if isinstance(data, pd.core.internals.managers.SingleBlockManager):
+            data = pd.DataFrame(pd.Series(data, *args, **kwargs))
             args = []
+            kwargs = {}
+        elif isinstance(data, dict):
+            vals = (isinstance(i, (pd.DataFrame)) for i in data.values())
+            if all(vals):
+                data = pd.concat(list(data.values()), axis=1)
+                if isinstance(data.columns, pd.MultiIndex):
+                    cols = data.columns.get_level_values(0)
+                    unit = data.columns.get_level_values(1)[0][1:-1]
+                    data.columns = pd.Index(cols)
+            else:
+                msg = "The current condition is not handled by the constructor:"
+                msg += f"\ndata:{data}"
+                msg += f"\nindex:{index}"
+                msg += f"\ncolumns:{columns}"
+                msg += f"\nunit:{unit}"
+                msg += f"\nargs:{args}"
+                msg += f"\nkwargs:{kwargs}"
+                raise NotImplementedError(msg) from self
         super(UnitDataFrame, self).__init__(
             data=data,
             index=index,
@@ -332,7 +354,6 @@ class UnitDataFrame(pd.DataFrame):
         """
         right division.
         """
-
         return (self ** (-1)) * obj
 
 
@@ -386,16 +407,12 @@ class GeometricObject:
         self.iloc = _Indexer(attr="iloc", obj=self, **objs)
 
     def __str__(self) -> str:
-        """
-        convert self to a string.
-        """
+        """print"""
         return self.pivot().__str__()
 
-    def __len__(self):
-        """
-        return the length of the object.
-        """
-        return super().__len__()
+    def __repr__(self) -> str:
+        """repr"""
+        return self.__str__()
 
     def __setitem__(self, item, value):
         """
@@ -456,21 +473,6 @@ class GeometricObject:
                         return self.iloc.__getitem__(np.s_[:, itm])
                     except Exception as exc:
                         raise exc
-        """
-            try:
-                return self.loc.__getitem__(np.s_[:, itm])
-            except (ValueError, TypeError):
-                try:
-                    return self.iloc.__getitem__(itm)
-                except KeyError:
-                    return self.iloc.__getitem__(np.s_[:, itm])
-
-        except (ValueError, TypeError):
-            try:
-                return self.iloc.__getitem__(itm)
-            except KeyError:
-                return self.iloc.__getitem__(np.s_[:, itm])
-        """
 
     def _get_item(self, item):
         """
@@ -615,13 +617,12 @@ class GeometricObject:
         obj: GeometricObject instance
             the object with missing data replaced by value.
         """
-        assert isinstance(value, float, int), "value must be float or int."
+        assert isinstance(value, (float, int)), "value must be float or int."
         obj = self.copy()
         for attr in self._attributes:
             df = getattr(obj, attr)
-            miss = df.isna()
-            df.loc[miss] = value
-            setattr(obj, attr, df)
+            miss = pd.DataFrame(df).isna()
+            df.loc[miss.values] = value
         return obj
 
     def _replace_cubic_spline(self):
@@ -692,7 +693,7 @@ class GeometricObject:
                 shapes += [np.tile(i, k.shape[1])]
                 xx += [k.values]
             else:
-                raise ValueError
+                raise ValueError(f"{v} is not a valid predictor.")
             corrs += [np.mean(abs(self.corr(v).values))]
         shapes = np.concatenate(shapes)
         xx = np.concatenate(xx, axis=1)
@@ -729,7 +730,7 @@ class GeometricObject:
                     check = 1
 
                 # replace the missing data in yy corresponding to m
-                y = lr.predict(np.atleast_2d(xx[m, best_xx]))
+                y = lr(np.atleast_2d(xx[m, best_xx]))
                 yy[m] = y.values.flatten()
 
         # replace missing values
@@ -741,7 +742,6 @@ class GeometricObject:
         for i, attr in enumerate(out.attributes):
             cols = [j for j, k in enumerate(yy_shapes) if k == i]
             obj = getattr(out, attr)
-            cols = [j for j, k in enumerate(yy_shapes) if k == i]
             obj.loc[obj.index, obj.columns] = yy[:, cols]
             setattr(out, attr, obj)
         return out
@@ -751,7 +751,10 @@ class GeometricObject:
         generate a wide dataframe object containing both origin and
         amplitudes.
         """
-        df = self.stack().pivot("Time", ["Source", "Dimension", "Unit"])
+        df = self.stack().pivot(
+            index="Time",
+            columns=["Source", "Dimension", "Unit"],
+        )
         df.columns = pd.Index([i[1:] for i in df.columns])
         return df
 
@@ -868,7 +871,7 @@ class GeometricObject:
 
     def corr(self, obj, weighted=True):
         """
-        internal methoget the correlation between self and obj.
+        internal method to get the correlation between self and obj.
 
         Parameters
         ----------
@@ -895,22 +898,23 @@ class GeometricObject:
             b = pd.DataFrame(obj, index=self.index, columns=cols)
         elif isinstance(obj, (pd.DataFrame, UnitDataFrame)):
             b = obj.copy()
-            cols = [("Obj", "", i) for i in self.columns]
+            cols = [("Obj", "", i) for i in b.columns.to_numpy()]
             b.columns = pd.MultiIndex.from_tuples(cols)
+        elif isinstance(obj, GeometricObject):
+            b = obj.pivot()
+            cols = [("Obj", *i) for i in b.columns.to_numpy()]
+            b.columns = pd.MultiIndex.from_tuples(cols)
+            cols = [("Src", *i) for i in a.columns.to_numpy()]
+            a.columns = pd.MultiIndex.from_tuples(cols)
         else:
-            try:
-                b = obj.pivot()
-                cols = [("Obj", *i) for i in b]
-                b.columns = pd.MultiIndex.from_tuples(cols)
-            except Exception:
-                txt = "correlation between {} and {} is not supported."
-                txt = txt.format(*[i.__class__.__name__ for i in [self, obj]])
-                raise NotImplementedError(txt)
+            txt = "correlation between {} and {} is not supported."
+            txt = txt.format(*[i.__class__.__name__ for i in [self, obj]])
+            raise NotImplementedError(txt)
         df = pd.DataFrame(pd.concat([a, b], axis=1))
         dfn = df.dropna(inplace=False)
         r = df.corr().iloc[: a.shape[1], b.shape[1] :]  # pearson's correlation
         if weighted:
-            r *= dfn.shape[0] / df.shape[0]
+            r *= 0 if df.shape[0] == 0 else (dfn.shape[0] / df.shape[0])
         return r
 
     def stack(self) -> pd.DataFrame:
@@ -947,7 +951,7 @@ class GeometricObject:
         """
         return the index of the samples containing missing data.
         """
-        i = self.pivot().isna().any(1)
+        i = self.pivot().isna().any(axis=1)
         return self[i].index
 
     def to_dict(self):
@@ -988,10 +992,8 @@ class GeometricObject:
         """
         obj = self.copy()
         for attr in self._attributes:
-            tmp = getattr(obj, attr)
-            for c, v in tmp.to_dict().items():
-                tmp.loc[tmp.index, c] = fun(v, *args, **kwargs)
-            setattr(obj, attr, tmp)
+            tmp = getattr(obj, attr).pivot()
+            setattr(obj, attr, tmp.apply(fun, *args, **kwargs, raw=True))
         return obj
 
     def fillna(
@@ -1061,7 +1063,7 @@ class GeometricObject:
         cols = ["Time", "Dimension", "Unit", "Amplitude"]
         objs = {}
         for attr in np.unique(df["Source"].values.flatten()):
-            tmp = df.loc[df.isin([attr]).any(1)][cols]
+            tmp = df.loc[df.isin([attr]).any(axis=1)][cols]
             objs[attr] = UnitDataFrame.unstack(tmp)
         return cls(**objs)
 
@@ -1106,6 +1108,12 @@ class GeometricObject:
         return the "average" sampling frequency of the object.
         """
         return float(1000.0 / np.mean(np.diff(self.index)))
+
+    def __repr__(self):
+        return self.pivot().__repr__()
+
+    def __str__(self):
+        return self.pivot().__str__()
 
 
 class ReferenceFrame(GeometricObject):
@@ -1161,7 +1169,7 @@ class ReferenceFrame(GeometricObject):
             elif isinstance(versors[d], (pd.DataFrame, UnitDataFrame)):
                 v = self._get_data(versors[d], unit=unit)
             txt2 = "{} versor does not match with origin.".format(d)
-            assert ori.matches(v, strict=False), txt2
+            assert ori.matches(v), txt2
             vrs[d] = v.copy()
 
         # apply gram-schmidt normalization to the versors
@@ -1178,42 +1186,7 @@ class ReferenceFrame(GeometricObject):
 
         # store the efficient scipy.Rotation class object allowing the
         # rotation of additional input segments.
-        self._rotmat = R.from_matrix(mat)
-
-    def _apply(self, obj, fun):
-        """
-        rotate the object.
-
-        Parameters
-        ----------
-        obj: GeometricObject, UnitDataFrame
-            the object to be rotated.
-
-        fun: function
-            the rotation function.
-
-        Returns
-        -------
-        rot: GeometricObject, UnitDataFrame
-            the rotated object.
-        """
-        if isinstance(obj, UnitDataFrame):
-            txt = "obj doesn't match with the ReferenceFrame."
-            assert self.matches(obj, strict=False), txt
-            out = fun(obj)
-
-        elif isinstance(obj, GeometricObject):
-            out = obj.copy()
-            for attr in out.attributes:
-                setattr(out, attr, self._apply(getattr(out, attr), fun))
-
-        else:
-            txt = "obj has class {}, which cannot be aligned to"
-            txt += "ReferenceFrame instances"
-            txt = txt.format(obj.__class__.__name__)
-            raise TypeError(txt)
-
-        return out
+        self._rotmat = mat
 
     def _gram_schmidt(self, points: np.ndarray) -> np.ndarray:
         """
@@ -1245,10 +1218,11 @@ class ReferenceFrame(GeometricObject):
         # normalize
         return np.vstack([norm(u) for u in W])
 
-    def apply_to(
+    def align(
         self,
-        obj: Tuple[GeometricObject, UnitDataFrame],
-    ) -> Tuple[GeometricObject, UnitDataFrame]:
+        obj: UnitDataFrame | GeometricObject,
+        inverted: bool = False,
+    ) -> UnitDataFrame | GeometricObject:
         """
         Align the object to the current ReferenceFrame instance.
 
@@ -1257,45 +1231,53 @@ class ReferenceFrame(GeometricObject):
         obj: UnitDataFrame, GeometricObject
             the object to be rotated.
 
-        Returns
-        -------
-        rot: UnitDataFrame, GeometricObject
-            the rotated object.
-        """
-
-        def fun(obj):
-            if self.matches(obj, strict=True):
-                return self._rotmat.apply(obj - self.origin)
-            else:
-                return self._rotmat.apply(obj)
-
-        return self._apply(obj, fun)
-
-    def invert(
-        self,
-        obj: Tuple[GeometricObject, UnitDataFrame],
-    ) -> Tuple[GeometricObject, UnitDataFrame]:
-        """
-        Rotate the object back to the global ReferenceFrame.
-
-        Parameters
-        ----------
-        obj: UnitDataFrame, GeometricObject
-            the object to be rotated.
+        inverted: bool
+            True if inverse alignment is required, i.e. if the object
+            has to be aligned to the former (e.g. global) ReferenceFrame.
 
         Returns
         -------
         rot: UnitDataFrame, GeometricObject
             the rotated object.
         """
+        # check the entries
+        if not isinstance(obj, (UnitDataFrame, GeometricObject)):
+            txt = "obj has class {}, which cannot be aligned to"
+            txt += "ReferenceFrame instances"
+            txt = txt.format(obj.__class__.__name__)
+            raise TypeError(txt)
 
-        def fun(obj):
-            out = self._rotmat.inv().apply(obj)
-            if self.matches(out, strict=True):
-                out += self.origin
-            return out
+        # get the rotation matrix and the origin array
+        mat = self._rotmat
+        ori = getattr(self, "origin")
+        while mat.shape[0] < obj.shape[0]:
+            mat = np.concatenate([mat, self._rotmat])
+            ori = pd.concat([ori, getattr(self, "origin")])
+        mat = R.from_matrix(mat)
+        ori = ori.values
 
-        return self._apply(obj, fun)
+        # get the alignment function
+        if inverted:
+
+            def fun(x: UnitDataFrame) -> UnitDataFrame:
+                x.loc[x.index] = mat.inv().apply(x) + ori
+                return x
+
+        else:
+
+            def fun(x: UnitDataFrame) -> UnitDataFrame:
+                x.loc[x.index] = mat.apply(x - ori)
+                return x
+
+        # apply the alignment
+        if isinstance(obj, UnitDataFrame):
+            out = fun(obj)
+        else:
+            out = obj.copy()
+            for attr in out.attributes:
+                setattr(out, attr, fun(getattr(out, attr)))
+
+        return out
 
     @property
     def versors(self):

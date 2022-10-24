@@ -323,7 +323,8 @@ class TDF:
             # get the label
             if has_labels:
                 lbls = struct.unpack("256B", self._fid.read(256))
-                labels[trk] = "".join((chr(i) for i in lbls)).split(chr(0))[0]
+                lbls = tuple(chr(i) for i in lbls)
+                labels[trk] = "".join(lbls).split(chr(0), 1)[0]
 
             # read data
             if by_frame:
@@ -334,22 +335,16 @@ class TDF:
 
             # read by track
             else:
-                n_seg = struct.unpack("i", self._fid.read(4))[0]
+                n = struct.unpack("i", self._fid.read(4))[0]
                 self._fid.seek(4, 1)
-                segments = struct.unpack(
-                    "%ii" % (2 * n_seg),
-                    self._fid.read(8 * n_seg),
-                )
-                segments = np.array(segments).reshape(n_seg, 2).T
-                cols = np.arange(size) + size * trk
-                for s in range(n_seg):
-                    for row in np.arange(segments[1, s]) + segments[0, s]:
-                        if row < n_frames:
-                            val = struct.unpack(
-                                "{}f".format(size),
-                                self._fid.read(4 * size),
-                            )
-                            tracks[row, cols] = val
+                segments = struct.unpack(f"{2 * n}i", self._fid.read(8 * n))
+                segments = np.array(segments).reshape(n, 2).T
+                cols = np.atleast_2d(np.arange(size) + size * trk)
+                for s in np.arange(n):
+                    for r in np.arange(segments[1, s]) + segments[0, s]:
+                        vals = self._fid.read(4 * size)
+                        if r < tracks.shape[0]:
+                            tracks[r, cols] = struct.unpack(f"{size}f", vals)
 
         # calculate the index (in msec)
         idx = np.round((np.arange(n_frames) / freq + time) * 1000).astype(int)
@@ -621,7 +616,7 @@ class TDF:
         """
         # get the file read
         self._fid.seek(info["Offset"], 0)
-        tracks, frames, freq, time = struct.unpack("iifi", self._fid.read(16))
+        tracks, freq, time, frames = struct.unpack("iifi", self._fid.read(16))
 
         # check if the file has to be read by frame or by track
         by_frame = info["Format"] in [2]

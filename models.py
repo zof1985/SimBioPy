@@ -131,31 +131,31 @@ class Model3D:
         """
         check whether 3D markers are included in the model.
         """
-        return any([i == Marker3D.__name__ for i in self.sensors])
+        return any(i == Marker3D.__name__ for i in self.sensors)
 
     def has_ForcePlatform3D(self):
         """
         check whether 3D force platform are included in the model.
         """
-        return any([i == ForcePlatform3D.__name__ for i in self.sensors])
+        return any(i == ForcePlatform3D.__name__ for i in self.sensors)
 
     def has_EmgSensor(self):
         """
         check whether EMG sensors are included in the model.
         """
-        return any([i == EmgSensor.__name__ for i in self.sensors])
+        return any(i == EmgSensor.__name__ for i in self.sensors)
 
     def has_Link3D(self):
         """
         check whether 3D Links are included in the model.
         """
-        return any([i == Link3D.__name__ for i in self.sensors])
+        return any(i == Link3D.__name__ for i in self.sensors)
 
     def has_Imu3D(self):
         """
         check whether 3D Links are included in the model.
         """
-        return any([i == Imu3D.__name__ for i in self.sensors])
+        return any(i == Imu3D.__name__ for i in self.sensors)
 
     def copy(self):
         """
@@ -165,38 +165,6 @@ class Model3D:
         for attr in self.sensors:
             obj.append(**getattr(self, attr))
         return obj
-
-    def drop(self, sensor, inplace=False):
-        """
-        remove the current sensor from the object.
-
-        Parameters
-        ----------
-        sensor: str
-            the name of the sensor to be removed.
-
-        inplace: bool
-            if True the current object is edited. Otherwise an edited copy
-            is returned
-
-        Returns
-        -------
-        None if inplace is True, a Model3D object otherwise.
-        """
-        assert isinstance(sensor, str), "sensor must be a str object."
-        assert isinstance(inplace, bool), "inplace must be a bool."
-        if inplace:
-            for i in self.sensors:
-                if i == sensor:
-                    delattr(self, i)
-                    break
-        else:
-            obj = Model3D()
-            for i in self.sensors:
-                if i != sensor:
-                    for key, value in getattr(self, sensor).items():
-                        obj.append(value, key)
-            return obj
 
     def describe(self, percentiles: list = []) -> pd.DataFrame:
         """
@@ -269,11 +237,11 @@ class Model3D:
             the instance resulting from the dataframe reading.
         """
         out = cls()
-        root = ["Type", "Sensor"]
+        root = ["Label", "Sensor"]
         types = np.unique(df[root].values.astype(str), axis=0)
-        for typ, sns in types:
-            sub = df.loc[df[root].isin([sns, typ]).all(1)]
-            out.append(obj=eval(typ).unstack(sub), name=sns)
+        for lbl, sns in types:
+            sub = df.loc[df[root].isin([sns, lbl]).all(1)]
+            out.append(**{lbl: eval(sns).unstack(sub)})
         return out
 
     @property
