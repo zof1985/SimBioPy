@@ -155,7 +155,7 @@ class UnitDataFrame(pd.DataFrame):
         cols = "|{}|".format("+".join(lbls))
         idx = self.index
         return UnitDataFrame(
-            coordinates=dt,
+            data=dt,
             columns=[cols],
             index=idx,
             unit=self.unit,
@@ -2024,9 +2024,9 @@ def three_points_angle(a: Point, b: Point, c: Point):
     """
 
     # check the data
-    assert a.matches(b, strict=True), "a does not match b"
-    assert a.matches(c, strict=True), "a does not match c"
-    assert b.matches(c, strict=True), "b does not match c"
+    assert a.matches(b), "a does not match b"
+    assert a.matches(c), "a does not match c"
+    assert b.matches(c), "b does not match c"
 
     # get the segments
     ab = (b - a).norm.values.flatten()
@@ -2036,7 +2036,7 @@ def three_points_angle(a: Point, b: Point, c: Point):
     # return the angle
     q = np.arccos((ac**2 - ab**2 - bc**2) / (-2 * ab * bc))
     return UnitDataFrame(
-        q,
+        np.arccos((ac**2 - ab**2 - bc**2) / (-2 * ab * bc)),
         columns=["Angle"],
         index=a.index,
         unit="rad",

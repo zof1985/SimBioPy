@@ -114,6 +114,22 @@ class Model3D:
         for i, v in objs.items():
             self._appender(obj=v, name=i)
 
+    def drop(self, obj: str):
+        """
+        remove the sensor with the provided label
+
+        Parameters
+        ----------
+        obj : str
+            sensor label
+        """
+        for sensor in self.sensors:
+            sns = getattr(self, sensor)
+            for label in sns.keys():
+                if label == obj:
+                    sns.pop(label)
+                    break
+
     def pivot(self) -> pd.DataFrame:
         """
         generate a wide dataframe object containing all the data.
