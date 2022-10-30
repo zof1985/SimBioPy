@@ -404,35 +404,27 @@ def get_files(path, extension="", check_subfolders=False):
     return out
 
 
-def to_excel(path, df, sheet="Sheet1", keep_index=True, new_file=False):
+def to_excel(path, keep_index=True, new_file=False, **data):
     """
     a shorthand function to save a pandas dataframe to an excel path
 
     Input:
 
         path (str)
-
             the path to the path where to store the path.
 
-        data (pandas.DataFrame)
-
-            a pandas.DataFrame.
-
-        sheet (str)
-
-            the sheet name.
-
         keep_index (boolean)
-
             if True, the dataframe index is preserved.
             Otherwise it is ignored.
 
         new_file (boolean)
-
             if True, a completely new path will be created.
 
-    Output:
+        data: keyworded dataframes
+            each key will be a sheet in the output file and each key must map
+            a dataframe
 
+    Output:
         The data stored to the indicated path.
     """
 
@@ -448,43 +440,44 @@ def to_excel(path, df, sheet="Sheet1", keep_index=True, new_file=False):
             pass
 
     # get the sheet
-    try:
-        sh = wb[sheet]
-        wb.remove(sh)
-    except Exception:
-        pass
-    sh = wb.create_sheet(sheet)
+    for sheet, df in data.items():
+        try:
+            sh = wb[sheet]
+            wb.remove(sh)
+        except Exception:
+            pass
+        sh = wb.create_sheet(sheet)
 
-    # write the headers
-    [R, C] = df.shape
-    if keep_index:
-        index = np.atleast_2d(df.index.tolist())
-        if index.shape[0] == 1:
-            index = index.T
-        data_cols = index.shape[1] + 1
-    else:
-        data_cols = 1
-    header = np.atleast_2d(df.columns.tolist())
-    if header.shape[0] == 1:
-        header = header.T
-    data_rows = header.shape[1] + 1
-    for i, col in enumerate(header):
-        for j, el in enumerate(col):
-            ch = data_cols + i
-            rh = 1 + j
-            sh.cell(rh, ch, el)
-    if keep_index:
-        for i, row in enumerate(index):
-            for j, el in enumerate(row):
-                ri = data_rows + i
-                ci = 1 + j
-                sh.cell(ri, ci, el)
+        # write the headers
+        [R, C] = df.shape
+        if keep_index:
+            index = np.atleast_2d(df.index.tolist())
+            if index.shape[0] == 1:
+                index = index.T
+            data_cols = index.shape[1] + 1
+        else:
+            data_cols = 1
+        header = np.atleast_2d(df.columns.tolist())
+        if header.shape[0] == 1:
+            header = header.T
+        data_rows = header.shape[1] + 1
+        for i, col in enumerate(header):
+            for j, el in enumerate(col):
+                ch = data_cols + i
+                rh = 1 + j
+                sh.cell(rh, ch, el)
+        if keep_index:
+            for i, row in enumerate(index):
+                for j, el in enumerate(row):
+                    ri = data_rows + i
+                    ci = 1 + j
+                    sh.cell(ri, ci, el)
 
-    # write the data
-    V = df.values
-    for r in range(R):
-        for c in range(C):
-            sh.cell(data_rows + r, data_cols + c, V[r, c])
+        # write the data
+        V = df.values
+        for r in range(R):
+            for c in range(C):
+                sh.cell(data_rows + r, data_cols + c, V[r, c])
 
     # save data
     wb.save(path)
