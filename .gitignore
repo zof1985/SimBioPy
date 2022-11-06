@@ -2,3 +2,6 @@
 *.code-workspace
 /.devcontainer
 /__pycache__
+/.venv
+*.code-workspace
+/.vscode
