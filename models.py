@@ -4,149 +4,38 @@
 #! IMPORTS
 
 
+import os
+import sys
+import warnings
 import numpy as np
-from pandas import MultiIndex, Index, DataFrame, Series
+import pandas as pd
+import matplotlib as mpl
+import matplotlib.pyplot as pl
+from matplotlib.gridspec import GridSpec
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+from mpl_toolkits import mplot3d
+import PyQt5.QtWidgets as qtw
+import PyQt5.QtCore as qtc
+import PyQt5.QtGui as qtg
+from geometry import *
+from sensors import *
+from utils import *
+
+
+#! MATPLOTLIB OPTIONS
+
+mpl.use("Qt5Agg")
+pl.rc("font", size=3)  # controls default text sizes
+pl.rc("axes", titlesize=3)  # fontsize of the axes title
+pl.rc("axes", labelsize=3)  # fontsize of the x and y labels
+pl.rc("xtick", labelsize=3)  # fontsize of the x tick labels
+pl.rc("ytick", labelsize=3)  # fontsize of the y tick labels
+pl.rc("legend", fontsize=3)  # legend fontsize
+pl.rc("figure", titlesize=3)  # fontsize of the figure title
+pl.rc("figure", autolayout=True)
 
 
 #! CLASSES
-
-
-class TimeSeries():
-        """
-        Generate a n-dimensional TimeSeries object.
-
-        Parameters
-        ----------
-        data : np.ndarray | list | DataFrame | Series | dict
-            the data of the timeseries.
-            If a DataFrame is provided, it is passed "as is" to the constructor.
-            By default, a copy of it is passed, unless the "copy" argument is
-            set to False.
-            If np.ndarray, or list, they must be a 1D or 2D arrays with
-            numeric-only data.
-
-        time : list | np.ndarray | Index | None, optional
-
-
-            by default None
-
-        axes : list | np.ndarray | Index | MultiIndex
-            a MultiIndex already containing the following levels:
-                - NAME
-                - UNIT
-                - AXIS
-            alternatively, a 1D list or ndarray can be provided and used as
-            axis level.
-
-        axes_unit : str | None, optional
-            the unit of measurement of the axes. It must be the same for each
-            axis.
-
-            by default None
-
-        name : str | None, optional
-            the name of the timeseries.
-
-            by default None
-
-        time_unit: str, optional
-
-
-            by default "s"
-
-        name : str, optional
-            _description_,
-
-            by default ""
-
-        copy : bool, optional
-            _description_,
-
-            by default True
-        """
-
-    # ****** VARIABLES ****** #
-
-    _data = DataFrame()
-
-    # ****** CONSTRUCTOR ****** #
-
-    def __init__(
-        self,
-        data:np.ndarray | list | DataFrame | Series | dict,
-        time: list | np.ndarray | Index | None = None,
-        axes: list | np.ndarray | Index | MultiIndex | None = None,
-        axis_unit: str = "",
-        time_unit: str = "s",
-        name: str = "",
-        copy: bool = True,
-    ) -> None:
-        if isinstance(data, DataFrame):
-            self._data = data
-        else:
-            col = self._make_columns(axes, unit, name)
-            idx = self._make_index(time, "s")
-            self._data DataFrame(data=data, index=idx, columns=col)
-
-
-    # ****** METHODS ****** #
-
-    def _make_columns(
-        self,
-        axes: list | np.ndarray | Index | MultiIndex,
-        unit: str | None = None,
-        name: str | None = None,
-    ) -> MultiIndex:
-        """
-        private method used to generate the _data columns
-
-        Parameters
-        ----------
-        axes : list | np.ndarray | Index | MultiIndex
-            a MultiIndex already containing the following levels:
-                - NAME
-                - UNIT
-                - AXIS
-            alternatively, a 1D list or ndarray can be provided and used as
-            axis level.
-
-        unit : str | None, optional
-            the unit of measurement of the axes. It must be the same for each
-            axis.
-
-            by default None
-
-        name : str | None, optional
-            the name of the timeseries.
-
-            by default None
-
-        Returns
-        -------
-        MultiIndex
-            the columns to be provided to the _data variable.
-
-        Raises
-        ------
-        ValueError
-            if axes is not a MultiIndex and it has more than 1 dimension.
-        """
-        if isinstance(axes, MultiIndex):
-            return axes
-        else:
-            if isinstance(axes, Index):
-                ax = axes.to_numpy()
-            elif isinstance(axes, list):
-                ax = np.array(axes)
-            if ax.ndim > 1:
-                raise ValueError("axes must be a 1D iterable object.")
-            return MultiIndex.from_product(
-                iterables=[[name],[unit],axes],
-                names=["NAME", "UNIT", "AXIS"],
-            )
-
-    def _make_index(self, time: list | np.ndarray | Index, unit: str = "s"):
-
 
 
 class Model3D:
