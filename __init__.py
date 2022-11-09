@@ -5,4 +5,4 @@ from .processing import *
 from .sensors import *
 from .models import *
 from .btsbioengineering import *
-from objects import *
+from .objects import *

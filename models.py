@@ -17,9 +17,9 @@ from mpl_toolkits import mplot3d
 import PyQt5.QtWidgets as qtw
 import PyQt5.QtCore as qtc
 import PyQt5.QtGui as qtg
-from geometry import *
-from sensors import *
-from utils import *
+from .geometry import *
+from .sensors import *
+from .utils import *
 
 
 #! MATPLOTLIB OPTIONS

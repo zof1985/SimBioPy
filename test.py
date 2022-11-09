@@ -4,8 +4,8 @@
 
 from numpy import random, linspace
 from pandas import concat
-from btsbioengineering import read_tdf
-from objects import BipolarEMG, TimeSeries
+from .btsbioengineering import read_tdf
+from .objects import BipolarEMG, TimeSeries
 
 
 #! MAIN

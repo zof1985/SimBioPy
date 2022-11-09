@@ -4,9 +4,9 @@
 #! IMPORTS
 
 
-from sensors import *
-from geometry import *
-from models import *
+from .sensors import *
+from .geometry import *
+from .models import *
 import os
 import struct
 import numpy as np

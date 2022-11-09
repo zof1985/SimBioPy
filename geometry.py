@@ -4,8 +4,8 @@
 #! IMPORTS
 
 
-from regression import LinearRegression
-from processing import interpolate_cs
+from .regression import LinearRegression
+from .processing import interpolate_cs
 from itertools import product
 from typing import Tuple
 from scipy.spatial.transform import Rotation as R
