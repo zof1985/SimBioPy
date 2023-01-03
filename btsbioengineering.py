@@ -387,6 +387,8 @@ class TDF:
                 self._fid.read(8 * n_links),
             )
             links = np.reshape(links, (len(links) // 2, 2))
+        else:
+            links = None
 
         # check if the file has to be read by frame or by track
         by_frame = info["Format"] in [3, 4]
@@ -416,11 +418,12 @@ class TDF:
 
         # generate the links
         lnk = {}
-        for link in links:
-            p0 = points[labels[link[0]]].coordinates
-            p1 = points[labels[link[1]]].coordinates
-            lbl = "{} -> {}".format(*[labels[i] for i in link])
-            lnk[lbl] = Link3D(p0, p1)
+        if links is not None:
+            for link in links:
+                p0 = points[labels[link[0]]].coordinates
+                p1 = points[labels[link[1]]].coordinates
+                lbl = "{} -> {}".format(*[labels[i] for i in link])
+                lnk[lbl] = Link3D(p0, p1)
 
         # get the output
         out = {"Marker3D": points}
