@@ -804,7 +804,7 @@ def butt_filt(signal, fc, fs, n=4, type="lowpass", phase_corrected=True):
         return ss.sosfilt(sos, signal)
 
 
-def psd(signal, fs=1):
+def psd(signal, fs=1.0):
     """
     compute the power spectrum of y using fft
 
