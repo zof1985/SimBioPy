@@ -5,9 +5,19 @@
 
 
 from typing import Union
-from scipy.linalg import pinv
 import numpy as np
 import pandas as pd
+
+
+__all__ = [
+    "LinearRegression",
+    "PolynomialRegression",
+    "PowerRegression",
+    "HyperbolicRegression",
+    "ExponentialRegression",
+    "EllipsisRegression",
+    "CircleRegression",
+]
 
 
 #! CLASSES
@@ -36,8 +46,7 @@ class LinearRegression:
         y: Union[np.ndarray, pd.DataFrame, list, int, float],
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
         fit_intercept: bool = True,
-    ) -> None:
-
+    ):
         # set the inputs
         self._set_inputs(y=y, x=x, fit_intercept=fit_intercept)
 
@@ -52,14 +61,14 @@ class LinearRegression:
         self,
         v: Union[np.ndarray, pd.DataFrame, list, int, float],
         label: str = "",
-    ) -> pd.DataFrame:
+    ):
         """
         internal method to format the entries in the constructor and call
         methods.
 
         Parameters
         ----------
-        v: np.ndarray | pd.DataFrame | list | int | float
+        v: np.ndarray | pd.DataFrame | list | int | float | None
             the data to be formatter
 
         label: str
@@ -72,7 +81,7 @@ class LinearRegression:
             the data formatted as DataFrame.
         """
 
-        def simplify_array(v: np.ndarray, l: str) -> pd.DataFrame:
+        def simplify_array(v: np.ndarray, l: str):
             if v.ndim == 1:
                 d = np.atleast_2d(v).T
             elif v.ndim == 2:
@@ -95,7 +104,7 @@ class LinearRegression:
     def _add_intercept(
         self,
         x: pd.DataFrame,
-    ) -> None:
+    ):
         """
         add an intercept to x.
         """
@@ -106,7 +115,7 @@ class LinearRegression:
         y: Union[np.ndarray, pd.DataFrame, list, int, float],
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
         fit_intercept: bool = True,
-    ) -> None:
+    ):
         """
         set the input parameters
         """
@@ -120,7 +129,7 @@ class LinearRegression:
         txt = "'x' and 'y' number of rows must be identical."
         assert self.x.shape[0] == self.y.shape[0], txt
 
-    def _calculate_betas(self) -> None:
+    def _calculate_betas(self):
         """
         calculate the beta coefficients.
         """
@@ -131,35 +140,34 @@ class LinearRegression:
             self._add_intercept(betas)
 
         # get the coefficients and intercept
+        pinv = np.linalg.pinv
         self.betas = (pinv((betas.T @ betas).values) @ betas.T) @ self.y
         labels = self.betas.shape[0]
         labels = [i + (0 if self.fit_intercept else 1) for i in range(labels)]
         self.betas.index = pd.Index([f"beta{i}" for i in labels])
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         """
         representation of the object.
         """
-        return self.betas.__repr__()
+        return str(self.betas.__repr__())
 
-    def __str__(self) -> str:
+    def __str__(self):
         """
         representation of the object.
         """
-        return self.betas.__str__()
+        return str(self.betas.__str__())
 
     def __call__(
         self,
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
-    ) -> pd.DataFrame:
+    ):
         """
         predict the fitted Y value according to the provided x.
-
         Parameters
         ----------
         x: np.ndarray | pd.DataFrame
             the input data used as predictor
-
         Returns
         -------
         y: pd.DataFrame
@@ -171,10 +179,9 @@ class LinearRegression:
         return v.values @ self.betas
 
     @property
-    def r_squared(self) -> float:
+    def r_squared(self):
         """
         return the calculated R-squared for the given model.
-
         Returns
         -------
         r2: float
@@ -212,27 +219,29 @@ class PolynomialRegression(LinearRegression):
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
         n: int = 1,
         fit_intercept: bool = True,
-    ) -> None:
-
+    ):
         # set the polynomial order
         assert isinstance(n, int), ValueError(n)
         assert n > 0, "'n' must be > 0"
         self.n = n
         super().__init__(y=y, x=x, fit_intercept=fit_intercept)
 
-    def _expand_to_n(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _expand_to_n(
+        self,
+        df: pd.DataFrame,
+    ):
         """
         expand the df values up to the n-th order.
         """
         betas = []
         for i in range(self.n):
             b_new = df.copy()
-            cols = [j + f"{i + 1}" for j in b_new.columns]
+            cols = [str(j) + f"{i + 1}" for j in b_new.columns]
             b_new.columns = pd.Index(cols)
             betas += [b_new ** (i + 1)]
         return pd.concat(betas, axis=1)
 
-    def _calculate_betas(self) -> None:
+    def _calculate_betas(self):
         """
         calculate the beta coefficients.
         """
@@ -244,6 +253,7 @@ class PolynomialRegression(LinearRegression):
             self._add_intercept(betas)
 
         # get the coefficients and intercept
+        pinv = np.linalg.pinv
         self.betas = (pinv((betas.T @ betas).values) @ betas.T) @ self.y
         labels = self.betas.shape[0]
         labels = [i + (0 if self.fit_intercept else 1) for i in range(labels)]
@@ -252,7 +262,7 @@ class PolynomialRegression(LinearRegression):
     def __call__(
         self,
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
-    ) -> pd.DataFrame:
+    ):
         """
         predict the fitted Y value according to the provided x.
 
@@ -260,7 +270,6 @@ class PolynomialRegression(LinearRegression):
         ----------
         x: np.ndarray | pd.DataFrame
             the input data used as predictor
-
         Returns
         -------
         y: pd.DataFrame
@@ -276,7 +285,7 @@ class PowerRegression(LinearRegression):
     """
     Obtain the regression coefficients according to the power model:
 
-                y = b_0 * x_1 ^ b_1 * ... * x_n ^ b_n
+                y = a + b_0 * x_1 ^ b_1 * ... * x_n ^ b_n
 
     Parameters
     ----------
@@ -291,7 +300,7 @@ class PowerRegression(LinearRegression):
         self,
         y: Union[np.ndarray, pd.DataFrame, list, int, float],
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
-    ) -> None:
+    ):
         super().__init__(y=y, x=x, fit_intercept=True)
 
     def _set_inputs(
@@ -299,7 +308,7 @@ class PowerRegression(LinearRegression):
         y: Union[np.ndarray, pd.DataFrame, list, int, float],
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
         fit_intercept: bool = True,
-    ) -> None:
+    ):
         """
         set the input parameters
         """
@@ -309,7 +318,7 @@ class PowerRegression(LinearRegression):
         assert np.all(self.y.values > 0), "'y' must be positive only."
         assert np.all(self.x.values > 0), "'x' must be positive only."
 
-    def _calculate_betas(self) -> None:
+    def _calculate_betas(self):
         """
         calculate the beta coefficients.
         """
@@ -319,6 +328,7 @@ class PowerRegression(LinearRegression):
 
         # get the coefficients and intercept
         logy = self.y.applymap(np.log)
+        pinv = np.linalg.pinv
         self.betas = (pinv((betas.T @ betas).values) @ betas.T) @ logy
         self.betas.iloc[0] = np.e ** self.betas.iloc[0]
         labels = [i for i in range(self.betas.shape[0])]
@@ -327,7 +337,7 @@ class PowerRegression(LinearRegression):
     def __call__(
         self,
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
-    ) -> pd.DataFrame:
+    ):
         """
         predict the fitted Y value according to the provided x.
         """
@@ -344,12 +354,14 @@ class HyperbolicRegression(PowerRegression):
     """
     Obtain the regression coefficients according to the (Rectangular) Least
     Squares Hyperbolic function:
+
                             y = a / x + b
+
     Parameters
     ----------
+
     y:  (samples, dimensions) numpy array or pandas.DataFrame
         the array containing the dependent variable.
-
     x:  (samples, features) numpy array or pandas.DataFrame
         the array containing the indipendent variables.
     """
@@ -358,15 +370,16 @@ class HyperbolicRegression(PowerRegression):
         self,
         y: Union[np.ndarray, pd.DataFrame, list, int, float],
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
-    ) -> None:
+    ):
         super().__init__(y=y, x=x)
 
-    def _calculate_betas(self) -> None:
+    def _calculate_betas(self):
         """
         calculate the beta coefficients.
         """
         betas = self.x ** (-1)
         self._add_intercept(betas)
+        pinv = np.linalg.pinv
         self.betas = (pinv((betas.T @ betas).values) @ betas.T) @ self.y
         labels = [i for i in range(self.betas.shape[0])]
         self.betas.index = pd.Index([f"beta{i}" for i in labels])
@@ -374,7 +387,7 @@ class HyperbolicRegression(PowerRegression):
     def __call__(
         self,
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
-    ) -> pd.DataFrame:
+    ):
         """
         predict the fitted Y value according to the provided x.
         """
@@ -406,16 +419,17 @@ class ExponentialRegression(LinearRegression):
         y: Union[np.ndarray, pd.DataFrame, list, int, float],
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
         b: float = np.e,
-    ) -> None:
+    ):
         self.base = b
         super().__init__(y=y, x=x)
 
-    def _calculate_betas(self) -> None:
+    def _calculate_betas(self):
         """
         calculate the beta coefficients.
         """
         betas = self.base**self.x
         self._add_intercept(betas)
+        pinv = np.linalg.pinv
         self.betas = (pinv((betas.T @ betas).values) @ betas.T) @ self.y
         labels = [i for i in range(self.betas.shape[0])]
         self.betas.index = pd.Index([f"beta{i}" for i in labels])
@@ -423,7 +437,7 @@ class ExponentialRegression(LinearRegression):
     def __call__(
         self,
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
-    ) -> pd.DataFrame:
+    ):
         """
         predict the fitted Y value according to the provided x.
         """
@@ -436,7 +450,8 @@ class _Axis(LinearRegression):
     """
     generate the axis object defining one single axis of a 2D geometric figure.
 
-    Parameters:
+    Parameters
+    ----------
     y:  (samples, dimensions) numpy array or pandas.DataFrame
         the array containing the dependent variable.
 
@@ -444,40 +459,40 @@ class _Axis(LinearRegression):
         the array containing the indipendent variables.
     """
 
-    _vertex = (None, None)
+    _vertex: tuple[tuple[float, float], tuple[float, float]]
 
     def __init__(
         self,
         y: Union[np.ndarray, pd.DataFrame, list, int, float],
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
-    ) -> None:
+    ):
         super().__init__(y=y, x=x, fit_intercept=True)
         txt = "Axis must be defined by 2 elements only."
         assert self.y.shape[0] == 2, txt
         assert self.x.shape[0] == 2, txt
 
         # set the vertex
-        x = self.x.values.flatten()
-        y = self.y.values.flatten()
+        x = self.x.values.flatten().astype(float)
+        y = self.y.values.flatten().astype(float)
         self._vertex = ((x[0], y[0]), (x[1], y[1]))
 
     @property
-    def angle(self) -> float:
+    def angle(self):
         """
         return the angle (in radians) of the axis.
         """
-        return np.arctan(self.betas.loc["beta1"].values[0])
+        return float(np.arctan(self.betas.loc["beta1"].values[0]))
 
     @property
-    def length(self) -> float:
+    def length(self):
         """
         get the distance between the two vertex.
         """
         a, b = self._vertex
-        return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+        return float(((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5)
 
     @property
-    def vertex(self) -> tuple:
+    def vertex(self):
         """
         return the vertex of the axis
         """
@@ -495,7 +510,7 @@ class EllipsisRegression(LinearRegression):
 
     References
     ----------
-    Halır R, Flusser J. Numerically stable direct least squares fitting of
+    Halir R, Flusser J. Numerically stable direct least squares fitting of
         ellipses. InProc. 6th International Conference in Central Europe on
         Computer Graphics and Visualization. WSCG 1998 (Vol. 98, pp. 125-132).
         Citeseer. https://citeseerx.ist.psu.edu/viewdoc/download;jsessionid=DF7A4B034A45C75AFCFF861DA1D7B5CD?doi=10.1.1.1.7559&rep=rep1&type=pdf
@@ -504,7 +519,6 @@ class EllipsisRegression(LinearRegression):
     ----------
     y:  (samples, dimensions) numpy array or pandas.DataFrame
         the array containing the dependent variable.
-
     x:  (samples, features) numpy array or pandas.DataFrame
         the array containing the indipendent variables.
     """
@@ -513,29 +527,26 @@ class EllipsisRegression(LinearRegression):
         self,
         y: Union[np.ndarray, pd.DataFrame, list, int, float],
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
-    ) -> None:
+    ):
         super().__init__(y=y, x=x)
         assert self.x.shape[1] == 1, "x can be unidimensional only"
         assert self.y.shape[1] == 1, "y can be unidimensional only"
 
     def __call__(
         self,
-        x: Union[np.ndarray, pd.DataFrame, list, int, float] = None,
-        y: Union[np.ndarray, pd.DataFrame, list, int, float] = None,
-    ) -> pd.DataFrame:
+        x: Union[np.ndarray, pd.DataFrame, list, int, float, None] = None,
+        y: Union[np.ndarray, pd.DataFrame, list, int, float, None] = None,
+    ):
         """
         predict the x given y or predict y given x.
-
         Parameters
         ----------
         x OR y: (samples, 1) numpy array or pandas.DataFrame
             the array containing the dependent variable.
-
         Returns
         -------
         y OR x: (samples, 2) numpy array or pandas.DataFrame
             the array containing the dependent variable.
-
         Note
         ----
         only x or y can be provided. None is returned if the provided value
@@ -548,14 +559,16 @@ class EllipsisRegression(LinearRegression):
             v = self._simplify(x, "X")
             o = np.atleast_2d([self._get_roots(x=i) for i in v.values])
             cols = ["Y0", "Y1"]
-        else:
+        elif y is not None:
             v = self._simplify(y, "Y")
             o = np.atleast_2d([self._get_roots(y=i) for i in v.values])
             cols = ["X0", "X1"]
+        else:
+            raise ValueError("x or y must be not None.")
         assert v.shape[1] == 1, "Only 1D arrays can be provided."
         return pd.DataFrame(o, columns=cols, index=v.index).astype(float)
 
-    def _calculate_betas(self) -> None:
+    def _calculate_betas(self):
         """
         calculate the regression coefficients.
         """
@@ -613,8 +626,8 @@ class EllipsisRegression(LinearRegression):
         i1 = y0 - x0 * m1
 
         # get the crossings between the two axes and the ellipsis
-        p0_0, p0_1 = self._get_crossings(m=m0, i=i0)
-        p1_0, p1_1 = self._get_crossings(m=m1, i=i1)
+        p0_0, p0_1 = self.get_crossings(m=m0, i=i0)
+        p1_0, p1_1 = self.get_crossings(m=m1, i=i1)
 
         # generate the two axes
         ax0 = _Axis(x=[p0_0[0], p0_1[0]], y=[p0_0[1], p0_1[1]])
@@ -628,11 +641,11 @@ class EllipsisRegression(LinearRegression):
         self.axis_major = ax0
         self.axis_minor = ax1
 
-    def _get_crossings(
+    def get_crossings(
         self,
         m: Union[int, float],
         i: Union[int, float],
-    ) -> tuple:
+    ):
         """
         get the crossings between the provided line and the ellipsis
 
@@ -656,17 +669,22 @@ class EllipsisRegression(LinearRegression):
         c_ = c * i**2 + e * i + f
         d_ = b_**2 - 4 * a_ * c_
         if d_ < 0:
-            return None, None
+            return (None, None), (None, None)
         e_ = 2 * a_
         if a_ == 0:
-            raise ValueError("(a + b * m + c * m**2) = 0.")
+            return (None, None), (None, None)
         f_ = -b_ / e_
         g_ = (d_**0.5) / e_
         x0 = f_ - g_
         x1 = f_ + g_
         return (x0, x0 * m + i), (x1, x1 * m + i)
 
-    def _solve(self, a: float, b: float, c: float) -> tuple:
+    def _solve(
+        self,
+        a: float,
+        b: float,
+        c: float,
+    ):
         """
         obtain the solutions of a second order polynomial having form:
                 a * x**2 + b * x + c = 0
@@ -684,23 +702,28 @@ class EllipsisRegression(LinearRegression):
         """
         d = b**2 - 4 * a * c
         if d < 0:
-            return None, None
+            raise ValueError("b**2 - 4 * a * c < 0")
         k = (2 * a) ** (-1)
         i = -b * k
         j = k * d**0.5
-        return i + j, i - j
+        return float(i + j), float(i - j)
 
-    def _get_roots(self, x: float = None, y: float = None) -> tuple:
+    def _get_roots(
+        self,
+        x: Union[float, int, None] = None,
+        y: Union[float, int, None] = None,
+    ):
         """
         obtain the roots of a second order polynomial having form:
+
                 a * x**2 + b * x + c = 0
 
         Parameters
         ----------
-        x: float
+        x: float | int | None
             the given x value.
 
-        y: float
+        y: float | int | None
             the given y value.
 
         Returns
@@ -727,7 +750,7 @@ class EllipsisRegression(LinearRegression):
         self,
         x: Union[int, float],
         y: Union[int, float],
-    ) -> bool:
+    ):
         """
         check whether the point (x, y) is inside the ellipsis.
 
@@ -745,10 +768,10 @@ class EllipsisRegression(LinearRegression):
             True if the provided point is contained by the ellipsis.
         """
         y0, y1 = self(x=x).values.flatten()
-        return (y0 is not None) & (y > min(y0, y1)) & (y <= max(y0, y1))
+        return bool((y0 is not None) & (y > min(y0, y1)) & (y <= max(y0, y1)))
 
     @property
-    def center(self) -> tuple:
+    def center(self):
         """
         get the center of the ellipsis as described here:
         https://mathworld.wolfram.com/Ellipse.html
@@ -760,12 +783,12 @@ class EllipsisRegression(LinearRegression):
         """
         a, b, c, d, e = self.betas.values.flatten()[:-1]
         den = b**2 - 4 * a * c
-        if den < 0:
-            raise ValueError("(b**2 - 4 * a * c) < 0.")
-        return (2 * c * d - b * e) / den, (2 * a * e - b * d) / den
+        x = float((2 * c * d - b * e) / den)
+        y = float((2 * a * e - b * d) / den)
+        return x, y
 
     @property
-    def area(self) -> float:
+    def area(self):
         """
         the area of the ellipsis.
 
@@ -774,16 +797,14 @@ class EllipsisRegression(LinearRegression):
         a: float
             the area of the ellipsis.
         """
-        return np.pi * len(self.axis_major) * len(self.axis_minor)
+        return float(np.pi * self.axis_major.length * self.axis_minor.length)
 
     @property
-    def perimeter(self) -> float:
+    def perimeter(self):
         """
         the (approximated) perimeter of the ellipsis as calculated
         by the "infinite series approach".
-
                 P = pi * (a + b) * sum_{n=0...N} (h ** n / (4 ** (n + 1)))
-
         where:
             h = (a - b) ** 2 / (a ** 2 + b ** 2)
             a = axis major
@@ -816,10 +837,10 @@ class EllipsisRegression(LinearRegression):
             q += h**n / 4**n
             p = c * q
 
-        return p
+        return float(p)
 
     @property
-    def eccentricity(self) -> float:
+    def eccentricity(self):
         """
         return the eccentricity parameter of the ellipsis.
         """
@@ -827,10 +848,10 @@ class EllipsisRegression(LinearRegression):
         a = self.axis_major.length / 2
         if a == 0:
             raise ValueError("coefficient a = 0")
-        return (1 - b**2 / a**2) ** 0.5
+        return float(1 - b**2 / a**2) ** 0.5
 
     @property
-    def foci(self) -> tuple:
+    def foci(self):
         """
         return the coordinates of the foci of the ellipses.
 
@@ -844,10 +865,10 @@ class EllipsisRegression(LinearRegression):
         p = self.axis_major.angle
         x, y = a * self.eccentricity * np.array([np.cos(p), np.sin(p)])
         x0, y0 = self.center
-        return (x0 - x, y0 - y), (x0 + x, y0 + y)
+        return (float(x0 - x), float(y0 - y)), (float(x0 + x), float(y0 + y))
 
     @property
-    def domain(self) -> tuple:
+    def domain(self):
         """
         return the domain of the ellipse.
 
@@ -865,10 +886,10 @@ class EllipsisRegression(LinearRegression):
 
         # solve the equation
         x0, x1 = np.sort(self._solve(a, b, c))
-        return x0, x1
+        return float(x0), float(x1)
 
     @property
-    def codomain(self) -> tuple:
+    def codomain(self):
         """
         return the codomain of the ellipse.
 
@@ -885,7 +906,7 @@ class EllipsisRegression(LinearRegression):
 
         # solve the equation
         y0, y1 = np.sort(self._solve(a, b, c))
-        return y0, y1
+        return float(y0), float(y1)
 
 
 class CircleRegression(LinearRegression):
@@ -909,42 +930,46 @@ class CircleRegression(LinearRegression):
         self,
         y: Union[np.ndarray, pd.DataFrame, list, int, float],
         x: Union[np.ndarray, pd.DataFrame, list, int, float],
-    ) -> None:
+    ):
         super().__init__(y=y, x=x)
         assert self.x.shape[1] == 1, "x can be unidimensional only"
         assert self.y.shape[1] == 1, "y can be unidimensional only"
 
-    def _calculate_betas(self) -> None:
+    def _calculate_betas(self):
         """
         calculate the regression coefficients.
         """
         x = self.x.values.flatten()
         y = self.y.values.flatten()
         i = np.tile(1, len(y))
-        a = np.vstack(np.atleast_2d([x, y, i])).T
+        a = np.vstack(np.atleast_2d(x, y, i)).T
         b = np.atleast_2d(x**2 + y**2).T
         ix = [f"beta{i}" for i in range(a.shape[1])]
         cl = ["CART. COEFS"]
+        pinv = np.linalg.pinv
         self.betas = pd.DataFrame(pinv(a.T @ a) @ a.T @ b, index=ix, columns=cl)
 
-    def _get_roots(self, x: float = None, y: float = None) -> tuple:
+    def _get_roots(
+        self,
+        x: Union[float, int, None] = None,
+        y: Union[float, int, None] = None,
+    ):
         """
         obtain the roots of a second order polynomial having form:
                 a * x**2 + b * x + c = 0
 
         Parameters
         ----------
-        x: float
+        x: Union[float, int, None] = None,
             the given x value.
 
-        y: float
+        y: Union[float, int, None] = None,
             the given y value.
 
         Returns
         -------
         x0, x1: float | None
-            the roots of the polynomial. None is returned if the solution
-            is impossible.
+            the roots of the polynomial.
         """
         # get the coefficients
         x0, y0 = self.center
@@ -959,16 +984,16 @@ class CircleRegression(LinearRegression):
         # get the roots
         d = b**2 - 4 * a * c
         if d < 0:
-            return None, None
+            raise ValueError("b**2 - 4 * a * c < 0")
         if a == 0:
             raise ValueError("coefficient a = 0")
-        return (-b - d**0.5) / (2 * a), (-b + d**0.5) / (2 * a)
+        return float((-b - d**0.5) / (2 * a)), float((-b + d**0.5) / (2 * a))
 
     def __call__(
         self,
-        x: Union[np.ndarray, pd.DataFrame, list, int, float] = None,
-        y: Union[np.ndarray, pd.DataFrame, list, int, float] = None,
-    ) -> pd.DataFrame:
+        x: Union[np.ndarray, pd.DataFrame, list, int, float, None] = None,
+        y: Union[np.ndarray, pd.DataFrame, list, int, float, None] = None,
+    ):
         """
         predict the x given y or predict y given x.
 
@@ -994,10 +1019,12 @@ class CircleRegression(LinearRegression):
             v = self._simplify(x, "X")
             o = np.atleast_2d([self._get_roots(x=i) for i in v.values])
             cols = ["Y0", "Y1"]
-        else:
+        elif y is not None:
             v = self._simplify(y, "Y")
             o = np.atleast_2d([self._get_roots(y=i) for i in v.values])
             cols = ["X0", "X1"]
+        else:
+            raise ValueError("x or y must be not None")
         assert v.shape[1] == 1, "Only 1D arrays can be provided."
         return pd.DataFrame(o, columns=cols, index=v.index).astype(float)
 
@@ -1005,7 +1032,7 @@ class CircleRegression(LinearRegression):
         self,
         x: Union[int, float],
         y: Union[int, float],
-    ) -> bool:
+    ):
         """
         check whether the point (x, y) is inside the ellipsis.
 
@@ -1023,10 +1050,10 @@ class CircleRegression(LinearRegression):
             True if the provided point is contained by the ellipsis.
         """
         y0, y1 = self(x=x).values.flatten()
-        return (y0 is not None) & (y > min(y0, y1)) & (y <= max(y0, y1))
+        return bool((y0 is not None) & (y > min(y0, y1)) & (y <= max(y0, y1)))
 
     @property
-    def radius(self) -> float:
+    def radius(self):
         """
         get the radius of the circle.
 
@@ -1036,10 +1063,10 @@ class CircleRegression(LinearRegression):
             the radius of the circle.
         """
         a, b, c = self.betas.values.flatten()
-        return ((4 * c + a**2 + b**2) ** 0.5) * 0.5
+        return float((4 * c + a**2 + b**2) ** 0.5) * 0.5
 
     @property
-    def center(self) -> tuple:
+    def center(self):
         """
         get the center of the circle.
 
@@ -1049,10 +1076,10 @@ class CircleRegression(LinearRegression):
             the coordinates of the centre of the cicle.
         """
         a, b = self.betas.values.flatten()[:-1]
-        return a * 0.5, b * 0.5
+        return float(a * 0.5), float(b * 0.5)
 
     @property
-    def area(self) -> float:
+    def area(self):
         """
         the area of the circle.
 
@@ -1061,10 +1088,10 @@ class CircleRegression(LinearRegression):
         a: float
             the area of the circle.
         """
-        return np.pi * self.radius**2
+        return float(np.pi * self.radius**2)
 
     @property
-    def perimeter(self) -> float:
+    def perimeter(self):
         """
         the perimeter of the circle.
 
@@ -1073,10 +1100,10 @@ class CircleRegression(LinearRegression):
         p: float
             the perimeter of the circle.
         """
-        return 2 * self.radius * np.pi
+        return float(2 * self.radius * np.pi)
 
     @property
-    def domain(self) -> tuple:
+    def domain(self):
         """
         return the domain of the circle.
 
@@ -1087,10 +1114,10 @@ class CircleRegression(LinearRegression):
         """
         x = self.center[0]
         r = self.radius
-        return x - r, x + r
+        return float(x - r), float(x + r)
 
     @property
-    def codomain(self) -> tuple:
+    def codomain(self):
         """
         return the codomain of the circle.
 
@@ -1101,4 +1128,4 @@ class CircleRegression(LinearRegression):
         """
         y = self.center[1]
         r = self.radius
-        return y - r, y + r
+        return float(y - r), float(y + r)
